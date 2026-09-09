@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import requests
 
 from pipeline.crawler.web_crawler import WebCrawler
@@ -66,6 +64,7 @@ def test_redirect_to_private_address_is_blocked(monkeypatch):
     redirect.status_code = 302
     redirect.headers["Location"] = "http://127.0.0.1:8080/internal"
     redirect.url = "https://public.example/"
+    redirect._content = b""
 
     calls = []
 
@@ -90,6 +89,7 @@ def test_public_redirect_is_followed_manually(monkeypatch):
     first.status_code = 302
     first.headers["Location"] = "/next"
     first.url = "https://public.example/"
+    first._content = b""
 
     second = requests.Response()
     second.status_code = 200
@@ -113,6 +113,7 @@ def test_public_redirect_is_followed_manually(monkeypatch):
 
 def test_oversized_response_is_not_materialized(monkeypatch):
     crawler = _crawler(monkeypatch)
+    crawler.web["seed_urls"] = ["https://public.example/"]
     monkeypatch.setattr(
         "pipeline.crawler.web_crawler.WebCrawler._host_is_public",
         staticmethod(lambda host: True),
