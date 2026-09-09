@@ -103,3 +103,42 @@ For a first run, prefer `run_pipeline.py` through the canonical bootstrap workfl
 Training can use an explicit preset, or Model Lab can choose a conservative profile based on the detected hardware. Auto-sizing changes the model preset, sequence length, microbatch geometry, evaluation budget, checkpoint cadence, and total step budget together rather than relying on a parameter-only memory estimate.
 
 Enable it in `config/pipeline_config.full.yaml` for a larger run, or keep the starter defaults for the first run:
+
+```yaml
+train:
+  auto_size: true
+  model_preset: "85M"   # fallback/manual value when auto_size is false
+  allow_cpu_training: false
+```
+
+For a prepared shard set, inspect the recommendation before starting a long run:
+
+```powershell
+python .\scripts\recommend_model.py --shard-dir .\output\shards
+```
+
+The recommender reports the hardware tier and selected profile. It does not invent a wall-clock estimate unless observed throughput is supplied.
+
+## Bounded verification profile
+
+`config/pipeline_config.smoke.yaml` is retained as a dedicated maintainer/verification profile. It is intentionally separate from the canonical starter profile so documentation, tests, and newcomer instructions do not have two competing definitions of "first run".
+
+The verification profile is also a real, bounded pipeline run. It is useful for validating the end-to-end artifact chain in automation or when explicitly testing the smoke configuration, but it is not required for normal first-run use.
+
+## Command center
+
+The FastAPI command center is localhost-only by default. It exposes dataset lifecycle, ingestion, stage control, credential management, crawler telemetry, and system information through the `/api/*` surface. The desktop launcher can start the backend and UI together; `run_command_center.py --no-browser` starts the backend without opening a browser.
+
+## Security and generated data
+
+Credentials belong in the runtime credential store or environment variables, never in Git. Dataset outputs, checkpoints, caches, scratch data, logs, and native build products are runtime artifacts and are intentionally excluded from the public source tree.
+
+The crawler is bounded and security-conscious: it applies URL validation, request timeouts, retries, politeness delays, robots handling where configured, content-size limits, and local/private-network refusal rules.
+
+## Verification boundary
+
+Automated CI covers Python compilation and the repository test suite. Environment-dependent gates remain explicit: CUDA availability, native llama.cpp binaries, network access, and human-visible Windows/Tkinter acceptance depend on the target machine. The documented desktop target is 1760x990 with a usable minimum of 1280x720. This distinction is intentional.
+
+## License
+
+See `LICENSE` for the project license.
