@@ -1,0 +1,6 @@
+dataset_groups:
+  - id: "smoke"
+    name: "Bounded local smoke corpus"
+    sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
+    web:
+      seed_urls: ["https://docs.python.org/3/tutorial/"]

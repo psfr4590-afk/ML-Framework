@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ def main() -> int:
     parser.add_argument("--dataset-group", default=None)
     parser.add_argument("--dataset-id", type=int, default=None)
     parser.add_argument("--doctor", action="store_true")
+    parser.add_argument("--hardware-report", action="store_true", help="include detected hardware and training profile in doctor output")
     parser.add_argument("--list-groups", action="store_true")
     parser.add_argument("--list-stages", action="store_true")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -41,6 +43,12 @@ def main() -> int:
         for check in checks:
             marker = "PASS" if check["ok"] else ("WARN" if not check["required"] else "FAIL")
             print(f"[{marker}] {check['name']}: {check['detail']}")
+        if args.hardware_report:
+            from pipeline.model_sizer import profile_hardware, recommend_training_profile
+            hardware = profile_hardware()
+            profile = recommend_training_profile(hardware)
+            print("Hardware Report")
+            print(json.dumps({"hardware": hardware.to_dict(), "recommendation": profile.to_dict()}, indent=2, sort_keys=True))
         return 0 if ok else 2
 
     if args.list_stages:

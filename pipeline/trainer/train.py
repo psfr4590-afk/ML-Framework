@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 
 from pipeline.integrity import sha256_file
+from pipeline.model_sizer import estimate_total_tokens, profile_hardware, recommend_training_profile
 from pipeline.shardwriter.shard_writer import ShardDataLoader
 from pipeline.trainer.model import LlamaModel, ModelConfig
 
@@ -97,8 +98,42 @@ class Trainer:
             log.addHandler(handler)
 
     def run(self):
-        t = self.t_cfg
+        t = dict(self.t_cfg)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device.type == "cpu" and not bool(t.get("allow_cpu_training", False)):
+            raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining")
+
+        if bool(t.get("auto_size", False)):
+            hardware = profile_hardware()
+            shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
+            try:
+                total_tokens = estimate_total_tokens(shard_dir)
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                total_tokens = None
+            shard_cfg = self.cfg.get("shard", {})
+            max_seq_len = shard_cfg.get("sequence_length")
+            profile = recommend_training_profile(
+                hardware,
+                total_tokens=total_tokens,
+                configured_steps=int(t.get("total_steps", 100_000)),
+                target_training_hours=float(t["target_training_hours"]) if t.get("target_training_hours") is not None else None,
+                observed_tokens_per_sec=float(t["observed_tokens_per_sec"]) if t.get("observed_tokens_per_sec") is not None else None,
+                max_seq_len=int(max_seq_len) if max_seq_len is not None else None,
+            )
+            t.update({
+                "model_preset": profile.model_preset,
+                "seq_len": profile.seq_len,
+                "batch_size": profile.batch_size,
+                "grad_accum_steps": profile.grad_accum_steps,
+                "eval_batches": profile.eval_batches,
+                "eval_every_steps": profile.eval_every_steps,
+                "checkpoint_every_steps": profile.checkpoint_every_steps,
+                "total_steps": profile.recommended_steps or int(t.get("total_steps", 100_000)),
+                "_hardware_profile": hardware.to_dict(),
+                "_training_profile": profile.to_dict(),
+            })
+            log.info("Auto-sized training profile | hardware=%s | profile=%s", hardware.to_dict(), profile.to_dict())
+
         preset = t.get("model_preset", "117M")
         model_cfg = ModelConfig.from_preset(preset)
         model_cfg.vocab_size = int(t.get("vocab_size", 32000))
@@ -129,6 +164,13 @@ class Trainer:
         seq_len = model_cfg.seq_len
         dtype = np.uint32 if str(t.get("shard_dtype", "uint16")) == "uint32" else np.uint16
         shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
+
+        if max_seq_len := self.cfg.get("shard", {}).get("sequence_length"):
+            if seq_len > int(max_seq_len):
+                raise RuntimeError(
+                    f"Training seq_len={seq_len} exceeds shard sequence_length={int(max_seq_len)}; "
+                    "rebuild shards or enable a compatible auto-size profile"
+                )
 
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype)
         val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype)

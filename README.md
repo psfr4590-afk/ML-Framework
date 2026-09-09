@@ -18,7 +18,7 @@ The repository includes:
 - exact and semantic near-duplicate handling
 - deterministic tokenizer and binary shard generation
 - isolated dataset sessions for independent experiments
-- hardware/CUDA readiness checks
+- hardware/CUDA readiness checks and conservative hardware-aware training profiles
 - local training and checkpoint management
 - GGUF export for local inference
 - a localhost FastAPI command center and desktop control surface
@@ -43,6 +43,7 @@ From the repository root on Windows:
 ```powershell
 pip install -r .\requirements.txt
 python .\run_pipeline.py --doctor
+python .\run_pipeline.py --doctor --hardware-report
 python -m pytest -q
 python .\launch.py
 ```
@@ -54,6 +55,35 @@ python .\scripts\verify_release.py
 ```
 
 The release verifier explicitly distinguishes automated checks from target-machine checks. A skipped hardware check is not reported as a fake pass.
+
+## Hardware-aware training
+
+Training can use an explicit preset, or Model Lab can choose a conservative profile based on the detected hardware. Auto-sizing changes the model preset, sequence length, microbatch geometry, evaluation budget, checkpoint cadence, and total step budget together rather than relying on a parameter-only memory estimate.
+
+Enable it in `config/pipeline_config.yaml`:
+
+```yaml
+train:
+  auto_size: true
+  model_preset: "85M"   # fallback/manual value when auto_size is false
+  allow_cpu_training: false
+```
+
+For a prepared shard set, inspect the recommendation before starting a long run:
+
+```powershell
+python .\scripts\recommend_model.py --shard-dir .\output\shards
+```
+
+The recommender reports the hardware tier and selected profile. It does not invent a wall-clock estimate unless observed throughput is supplied.
+
+## Bounded smoke test
+
+The smoke configuration is intentionally safe to run as a verification experiment. It uses a single web seed, disables other remote source families, limits crawling to two pages, trains for two steps, and allows CPU execution for validation.
+
+```powershell
+python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
+```
 
 ## Dataset sessions
 

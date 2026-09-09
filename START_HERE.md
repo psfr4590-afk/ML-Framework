@@ -17,10 +17,20 @@ Model Lab navigates the real pipeline and dataset sessions. It does not implemen
 
 ```powershell
 python .\run_pipeline.py --doctor
+python .\run_pipeline.py --doctor --hardware-report
 ```
 
-The doctor is non-destructive. It reports missing Python packages, CUDA availability,
-and llama.cpp export tooling before a crawl or training run starts.
+The doctor is non-destructive. It reports required runtime failures separately from optional capabilities such as CUDA and native llama.cpp tooling. The hardware report shows the conservative training profile Model Lab would select for the current host.
+
+## Bounded smoke run
+
+For a small end-to-end verification experiment:
+
+```powershell
+python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
+```
+
+The smoke configuration uses its own dataset-group file containing only the smoke source, so no `--dataset-group` selector is required. It limits source families, crawl depth, page count, vocabulary, sequence length, and training steps. CPU training is explicitly permitted for this validation profile.
 
 ## Backend-only mode
 
@@ -28,7 +38,7 @@ and llama.cpp export tooling before a crawl or training run starts.
 python .\run_command_center.py --no-browser
 ```
 
-The command center binds to localhost by default.
+Without `--no-browser`, the backend opens the localhost command center in the default browser after its health endpoint is ready. The command center binds to localhost by default.
 
 ## Production export requirement
 
@@ -48,6 +58,7 @@ From the extracted project root:
 python -m pip install -r requirements.txt
 bash scripts/bootstrap_llama_cpp.sh
 python run_pipeline.py --doctor
+python run_pipeline.py --doctor --hardware-report
 python -m pytest -q
 python scripts/verify_release.py
 ```
