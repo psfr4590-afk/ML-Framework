@@ -123,13 +123,14 @@ def main() -> int:
 
     if not args.bootstrap_native:
         print("STATIC VERIFICATION PASSED: syntax, lint, tests, and required environment checks are green.")
-        print("Native artifact verification was not run. A production release requires --bootstrap-native.")
+        print("Native export prerequisites were not checked. Native artifact verification was not run. A production release requires --bootstrap-native.")
         return 0
 
     if run([sys.executable, "scripts/reconcile_environment.py", "--project-root", str(ROOT), "--ensure-llamacpp"]):
         print("RELEASE VERIFICATION FAILED: llama.cpp-bootstrap")
         print("Platform:", platform.platform())
         return 2
+    print("native export prerequisites are green")
     if _native_smoke():
         print("RELEASE VERIFICATION FAILED: native export/inference")
         print("Platform:", platform.platform())
