@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+
 import requests
 
 from pipeline.crawler.web_crawler import WebCrawler
@@ -65,6 +67,7 @@ def test_redirect_to_private_address_is_blocked(monkeypatch):
     redirect.headers["Location"] = "http://127.0.0.1:8080/internal"
     redirect.url = "https://public.example/"
     redirect._content = b""
+    redirect.raw = io.BytesIO()
 
     calls = []
 
@@ -90,6 +93,7 @@ def test_public_redirect_is_followed_manually(monkeypatch):
     first.headers["Location"] = "/next"
     first.url = "https://public.example/"
     first._content = b""
+    first.raw = io.BytesIO()
 
     second = requests.Response()
     second.status_code = 200
@@ -124,6 +128,7 @@ def test_oversized_response_is_not_materialized(monkeypatch):
     response.url = "https://public.example/"
     response.headers["Content-Type"] = "text/html"
     response.iter_content = lambda chunk_size: iter([b"a" * 8, b"b" * 8])
+    response.raw = io.BytesIO()
 
     class FakeSession:
         def get(self, url, **kwargs):
