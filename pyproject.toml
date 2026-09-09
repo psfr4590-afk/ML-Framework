@@ -7,7 +7,10 @@ name = "model-lab-framework"
 version = "1.3.0"
 description = "Local-first end-to-end machine learning data and pretraining pipeline"
 readme = "README.md"
-requires-python = ">=3.11"
+# lxml 5.x does not provide the Windows CPython 3.14 wheel needed by this
+# project's dependency set. Keep the supported range explicit so pip fails
+# cleanly instead of attempting a native libxml2 build on Python 3.14+.
+requires-python = ">=3.11,<3.14"
 license = {file = "LICENSE"}
 
 # Runtime dependencies intentionally mirror requirements.txt, except for
