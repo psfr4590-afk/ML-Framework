@@ -66,12 +66,20 @@ def _available_ram_gb() -> float | None:
     try:
         if platform.system() == "Windows":
             import ctypes
+
             class MemoryStatus(ctypes.Structure):
-                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
             status = MemoryStatus()
             status.dwLength = ctypes.sizeof(MemoryStatus)
             if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
@@ -92,6 +100,7 @@ def profile_hardware() -> HardwareProfile:
     cuda_available = False
     try:
         import torch
+
         cuda_available = bool(torch.cuda.is_available())
         if cuda_available:
             gpu_count = int(torch.cuda.device_count())
@@ -118,10 +127,14 @@ def estimate_total_tokens(shard_dir: str | Path) -> int:
     manifest = root / "shards.manifest.json"
     if manifest.is_file():
         import json
+
         payload = json.loads(manifest.read_text(encoding="utf-8"))
         dtype = str(payload.get("dtype", "uint16"))
         itemsize = 4 if dtype == "uint32" else 2
-        return sum(int(item.get("size", 0)) // itemsize for item in payload.get("files", []))
+        files = payload.get("files", [])
+        if not isinstance(files, list):
+            raise ValueError(f"Invalid shard manifest files field: {manifest}")
+        return sum(int(item.get("size", 0)) // itemsize for item in files)
     files = sorted(root.glob("shard_*_*.bin"))
     if not files:
         raise FileNotFoundError(f"No shard files found in {root}")
@@ -134,6 +147,7 @@ def recommend_training_profile(
     configured_steps: int = 100_000,
     target_training_hours: float | None = None,
     observed_tokens_per_sec: float | None = None,
+    max_seq_len: int | None = None,
 ) -> TrainingProfile:
     """Choose a conservative preset and training geometry for the host."""
     profiles = {
@@ -145,18 +159,40 @@ def recommend_training_profile(
         "gpu_20gb_plus": TrainingProfile("gpu-20gb-plus", "360M", 1024, 1, 16, 8, 500, 1000, "fp16", "20+ GB VRAM; 360M remains substantially below workstation-class models"),
     }
     base = profiles[hardware.tier]
+    seq_len = min(base.seq_len, int(max_seq_len)) if max_seq_len is not None else base.seq_len
+    if seq_len <= 0:
+        raise ValueError("max_seq_len must be > 0 when configured")
+    reason = base.reason
+    if seq_len != base.seq_len:
+        reason += f"; capped context to {seq_len} to match the available shard sequence length"
+
     steps = max(1, int(configured_steps))
+    tokens_per_step = base.batch_size * base.grad_accum_steps * seq_len
     if total_tokens is not None and total_tokens > 0:
-        tokens_per_step = base.batch_size * base.grad_accum_steps * base.seq_len
         corpus_steps = max(1, math.ceil(total_tokens / tokens_per_step))
         steps = min(steps, corpus_steps)
+
     hours = None
     if target_training_hours is not None and target_training_hours > 0 and observed_tokens_per_sec and observed_tokens_per_sec > 0:
-        steps_for_target = int(target_training_hours * 3600 * observed_tokens_per_sec / (base.batch_size * base.grad_accum_steps * base.seq_len))
+        steps_for_target = int(target_training_hours * 3600 * observed_tokens_per_sec / tokens_per_step)
         if steps_for_target > 0:
             steps = min(steps, steps_for_target)
-        hours = (steps * base.batch_size * base.grad_accum_steps * base.seq_len) / observed_tokens_per_sec / 3600
-    return TrainingProfile(**{**base.to_dict(), "recommended_steps": steps, "estimated_hours": hours})
+        hours = (steps * tokens_per_step) / observed_tokens_per_sec / 3600
+
+    return TrainingProfile(
+        name=base.name,
+        model_preset=base.model_preset,
+        seq_len=seq_len,
+        batch_size=base.batch_size,
+        grad_accum_steps=base.grad_accum_steps,
+        eval_batches=base.eval_batches,
+        eval_every_steps=base.eval_every_steps,
+        checkpoint_every_steps=base.checkpoint_every_steps,
+        precision=base.precision,
+        reason=reason,
+        recommended_steps=steps,
+        estimated_hours=hours,
+    )
 
 
 __all__ = ["HardwareProfile", "TrainingProfile", "profile_hardware", "estimate_total_tokens", "recommend_training_profile"]
