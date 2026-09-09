@@ -7,8 +7,10 @@ source-quality gating, and emits canonical :class:`pipeline.types.Document` reco
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import re
+import socket
 import time
 from collections import deque
 from urllib.parse import urljoin, urlparse
@@ -40,6 +42,7 @@ class WebCrawler(BaseCrawler):
         self.allow = [re.compile(p) for p in self.web.get("url_allowlist_patterns", []) if p]
         self.block = [re.compile(p) for p in self.web.get("url_blocklist_patterns", []) if p]
         self.user_agent = str(cfg.get("user_agent", "ModelLab/1.3 (+local research dataset builder)"))
+        self.max_redirects = max(0, int(self.web.get("max_redirects", 5)))
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": self.user_agent, "Accept": "text/html,application/xhtml+xml"})
         self._robots: dict[str, RobotFileParser] = {}
@@ -47,9 +50,34 @@ class WebCrawler(BaseCrawler):
         self._seen_urls: set[str] = set()
         self._domain_pages: dict[str, int] = {}
 
+    @staticmethod
+    def _host_is_public(hostname: str | None) -> bool:
+        """Return True only when every resolved address is globally routable.
+
+        Crawling user-controlled URLs must not become an SSRF primitive.  Resolve
+        hostnames before connecting and fail closed if resolution is unavailable.
+        """
+        if not hostname:
+            return False
+        host = hostname.rstrip(".")
+        try:
+            literal = ipaddress.ip_address(host)
+            addresses = [literal]
+        except ValueError:
+            try:
+                addresses = [
+                    ipaddress.ip_address(info[4][0])
+                    for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+                ]
+            except (OSError, ValueError):
+                return False
+        return bool(addresses) and all(address.is_global for address in addresses)
+
     def _allowed(self, url: str) -> bool:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return False
+        if not self._host_is_public(parsed.hostname):
             return False
         if self.block and any(p.search(url) for p in self.block):
             return False
@@ -82,25 +110,50 @@ class WebCrawler(BaseCrawler):
         self._last_request[domain] = time.monotonic()
 
     def _fetch(self, url: str):
-        domain = urlparse(url).netloc.lower()
-        self._polite_wait(domain)
+        current_url = url
         last = None
-        for attempt in range(self.retries + 1):
-            try:
-                response = self.session.get(url, timeout=self.timeout, allow_redirects=True)
-                if response.status_code == 429:
-                    retry_after = response.headers.get("Retry-After")
-                    wait = float(retry_after) if retry_after and retry_after.isdigit() else self.backoff * (attempt + 1)
-                    time.sleep(min(wait, 60.0))
-                    continue
-                response.raise_for_status()
-                self.stats["fetched"] += 1
-                return response
-            except requests.RequestException as exc:
-                last = exc
-                self.stats["errors"] += 1
-                if attempt < self.retries:
-                    time.sleep(self.backoff * (attempt + 1))
+        for redirect in range(self.max_redirects + 1):
+            parsed = urlparse(current_url)
+            if not self._allowed(current_url) or not self._robots_allowed(current_url):
+                self.stats["skipped"] += 1
+                return None
+            domain = parsed.netloc.lower()
+            self._polite_wait(domain)
+            for attempt in range(self.retries + 1):
+                try:
+                    response = self.session.get(
+                        current_url,
+                        timeout=self.timeout,
+                        allow_redirects=False,
+                    )
+                    if response.is_redirect or response.is_permanent_redirect:
+                        location = response.headers.get("Location")
+                        response.close()
+                        if not location or redirect >= self.max_redirects:
+                            self.stats["skipped"] += 1
+                            return None
+                        current_url = urljoin(current_url, location).split("#", 1)[0]
+                        if not self._allowed(current_url):
+                            self.stats["skipped"] += 1
+                            return None
+                        break
+                    if response.status_code == 429:
+                        retry_after = response.headers.get("Retry-After")
+                        wait = float(retry_after) if retry_after and retry_after.isdigit() else self.backoff * (attempt + 1)
+                        response.close()
+                        time.sleep(min(wait, 60.0))
+                        continue
+                    response.raise_for_status()
+                    self.stats["fetched"] += 1
+                    return response
+                except requests.RequestException as exc:
+                    last = exc
+                    self.stats["errors"] += 1
+                    if attempt < self.retries:
+                        time.sleep(self.backoff * (attempt + 1))
+            else:
+                break
+            continue
         if last:
             log.warning("fetch failed %s: %s", url, last)
         return None
@@ -156,28 +209,52 @@ class WebCrawler(BaseCrawler):
             if response is None:
                 continue
             final_url = response.url.split("#", 1)[0]
+            if not self._allowed(final_url):
+                response.close()
+                self.stats["skipped"] += 1
+                continue
             ctype = response.headers.get("Content-Type", "").lower()
             if "html" not in ctype and "xhtml" not in ctype:
+                response.close()
                 self.stats["skipped"] += 1
                 continue
-            self._domain_pages[domain] = self._domain_pages.get(domain, 0) + 1
             max_bytes = int(self.web.get("max_content_bytes", 5_000_000))
-            if len(response.content) > max_bytes:
+            content_length = response.headers.get("Content-Length")
+            if content_length and content_length.isdigit() and int(content_length) > max_bytes:
+                response.close()
                 self.stats["skipped"] += 1
                 continue
-            title, text, links = self._extract(final_url, response.text)
-            if not text:
-                self.stats["skipped"] += 1
-                continue
-            doc = self._document(final_url, title, text, depth)
-            yield doc
-            if not self.follow_links or depth >= self.max_depth:
-                continue
-            for link in links:
-                link = link.split("#", 1)[0]
-                if not self._allowed(link):
-                    continue
-                if self.stay_on_domain and urlparse(link).netloc.lower() != urlparse(origin).netloc.lower():
-                    continue
-                if link not in self._seen_urls:
-                    queue.append((link, depth + 1, origin))
+            try:
+                chunks = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        self.stats["skipped"] += 1
+                        break
+                    chunks.append(chunk)
+                else:
+                    body = b"".join(chunks)
+                    self._domain_pages[domain] = self._domain_pages.get(domain, 0) + 1
+                    response.encoding = response.encoding or "utf-8"
+                    html = body.decode(response.encoding, errors="replace")
+                    title, text, links = self._extract(final_url, html)
+                    if not text:
+                        self.stats["skipped"] += 1
+                        continue
+                    doc = self._document(final_url, title, text, depth)
+                    yield doc
+                    if not self.follow_links or depth >= self.max_depth:
+                        continue
+                    for link in links:
+                        link = link.split("#", 1)[0]
+                        if not self._allowed(link):
+                            continue
+                        if self.stay_on_domain and urlparse(link).netloc.lower() != urlparse(origin).netloc.lower():
+                            continue
+                        if link not in self._seen_urls:
+                            queue.append((link, depth + 1, origin))
+            finally:
+                response.close()
