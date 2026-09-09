@@ -110,12 +110,15 @@ class Trainer:
                 total_tokens = estimate_total_tokens(shard_dir)
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
                 total_tokens = None
+            shard_cfg = self.cfg.get("shard", {})
+            max_seq_len = shard_cfg.get("sequence_length")
             profile = recommend_training_profile(
                 hardware,
                 total_tokens=total_tokens,
                 configured_steps=int(t.get("total_steps", 100_000)),
                 target_training_hours=float(t["target_training_hours"]) if t.get("target_training_hours") is not None else None,
                 observed_tokens_per_sec=float(t["observed_tokens_per_sec"]) if t.get("observed_tokens_per_sec") is not None else None,
+                max_seq_len=int(max_seq_len) if max_seq_len is not None else None,
             )
             t.update({
                 "model_preset": profile.model_preset,
@@ -161,6 +164,13 @@ class Trainer:
         seq_len = model_cfg.seq_len
         dtype = np.uint32 if str(t.get("shard_dtype", "uint16")) == "uint32" else np.uint16
         shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
+
+        if max_seq_len := self.cfg.get("shard", {}).get("sequence_length"):
+            if seq_len > int(max_seq_len):
+                raise RuntimeError(
+                    f"Training seq_len={seq_len} exceeds shard sequence_length={int(max_seq_len)}; "
+                    "rebuild shards or enable a compatible auto-size profile"
+                )
 
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype)
         val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype)
