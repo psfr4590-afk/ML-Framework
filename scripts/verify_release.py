@@ -97,12 +97,12 @@ def main() -> int:
     parser.add_argument(
         "--skip-tests",
         action="store_true",
-        help="not allowed for production verification; retained only to produce a clear error",
+        help="not allowed for a production verification; retained only to produce a clear error",
     )
     args = parser.parse_args()
 
     if args.skip_tests:
-        print("RELEASE VERIFICATION FAILED: --skip-tests is not allowed for production verification.")
+        print("RELEASE VERIFICATION FAILED: --skip-tests is not allowed for a production verification.")
         return 2
 
     failures: list[str] = []
