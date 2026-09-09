@@ -29,8 +29,8 @@ def test_default_runner_and_docs_share_one_starter_profile():
 
 
 def test_canonical_starter_is_bounded_and_verification_profile_is_secondary():
-    starter = _load_config("config/pipeline_config.yaml")
-    verification = _load_config("config/pipeline_config.smoke.yaml")
+    starter = _load_config("pipeline_config.yaml")
+    verification = _load_config("pipeline_config.smoke.yaml")
 
     assert starter["pipeline"]["total_steps"] <= 10
     assert starter["train"]["total_steps"] <= 10
