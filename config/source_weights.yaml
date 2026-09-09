@@ -1,0 +1,4 @@
+weights:
+  defaults: {web: 1.0, github: 1.15, arxiv: 1.25, huggingface: 1.1, google: 0.9}
+  boosts: {citation_log_scale: 0.15, test_keywords: 0.05, api_terms: 0.05}
+  penalties: {privacy_policy: 0.15, duplicate: 0.0}

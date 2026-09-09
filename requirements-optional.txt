@@ -1,0 +1,4 @@
+sentence-transformers>=3.0
+faiss-cpu>=1.8
+langdetect>=1.0.9
+trafilatura>=1.8

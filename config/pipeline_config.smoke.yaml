@@ -1,0 +1,13 @@
+pipeline:
+  name: "pretrain-v1-smoke"
+  model_preset: "85M"
+  model_name: "pretrain-smoke"
+  total_steps: 2
+  batch_size: 1
+  grad_accum_steps: 1
+  seed: 42
+  resume: false
+stages: {crawl: true, clean: true, semantic_dedup: true, weight: true, tokenize: true, shard: true, train: true, export: false}
+paths: {data_dir: "datasets", output_dir: "output", scratch_dir: "scratch"}
+export: {format: "gguf", quant: "Q4_K_M"}
+runtime: {max_workers: 2, request_timeout: 15, user_agent: "Model-Lab-Smoke/1.3"}

@@ -1,0 +1,8 @@
+cleaner:
+  min_chars: 200
+  max_chars: 200000
+  normalize_unicode: true
+  strip_html: true
+  collapse_whitespace: true
+  remove_boilerplate: true
+  preserve_code_blocks: true

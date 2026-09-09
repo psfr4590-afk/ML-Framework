@@ -1,0 +1,29 @@
+pipeline:
+  name: "pretrain-v1"
+  model_preset: "117M"
+  model_name: "pretrain-model"
+  total_steps: 100000
+  batch_size: 1
+  grad_accum_steps: 16
+  seed: 42
+  resume: true
+stages:
+  crawl: true
+  clean: true
+  semantic_dedup: true
+  weight: true
+  tokenize: true
+  shard: true
+  train: true
+  export: true
+paths:
+  data_dir: "datasets"
+  output_dir: "output"
+  scratch_dir: "scratch"
+export:
+  format: "gguf"
+  quant: "Q4_K_M"
+runtime:
+  max_workers: 4
+  request_timeout: 30
+  user_agent: "Model-Lab/1.3"

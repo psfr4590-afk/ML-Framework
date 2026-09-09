@@ -1,4 +1,4 @@
-# Seed URLs — one per line, comments with #
+# Seed URLs — one per line
 https://arxiv.org/list/cs.AI/recent
 https://arxiv.org/list/cs.LG/recent
 https://arxiv.org/list/cs.CL/recent
