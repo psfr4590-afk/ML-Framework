@@ -1,7 +1,7 @@
 """Non-destructive environment checks for Model Lab.
 
 The doctor intentionally reports capabilities instead of pretending that optional
-native/GPU components are required everywhere. It never mutates project state.
+native/GPU components are required everywhere. It leaves no runtime artifacts.
 """
 from __future__ import annotations
 
@@ -21,14 +21,10 @@ def _python_ok() -> bool:
 
 
 def _writable(path: Path) -> bool:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".model_lab_write_probe"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink(missing_ok=True)
-        return True
-    except OSError:
-        return False
+    path = path.resolve()
+    if not path.exists() or not path.is_dir():
+        return os.access(path.parent, os.W_OK)
+    return os.access(path, os.W_OK)
 
 
 def _torch_state() -> tuple[bool, str]:
