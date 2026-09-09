@@ -25,6 +25,43 @@ The repository includes:
 - contract, regression, structure, and machine-environment tests
 - release verification tooling
 
+## Repository map
+
+The root is intentionally kept small. Runtime code, configuration, scripts, tests, and UI live in their functional directories. Engineering history, audits, release material, and verification records live under `docs/` rather than competing with the project entry points.
+
+```text
+ML-Framework/
+├── README.md              # Start here
+├── LICENSE
+├── SECURITY.md
+├── CONTRIBUTING.md
+├── pyproject.toml         # Package metadata
+├── bootstrap.py           # Canonical environment setup
+├── run_pipeline.py        # Pipeline entry point
+├── run_command_center.py  # Command center entry point
+├── command_center/        # Local API/control backend
+├── config/                # Starter, smoke, full, and dataset configs
+├── pipeline/              # Crawl → export implementation
+├── ui/                    # Desktop control surface
+├── scripts/               # Native/bootstrap/release tooling
+├── tests/                 # Automated verification
+└── docs/                  # Architecture, development, release, verification
+```
+
+## Documentation
+
+- [Architecture](docs/architecture/ARCHITECTURE.md)
+- [Start Here](docs/development/START_HERE.md)
+- [Project State](docs/development/PROJECT_STATE.md)
+- [Source of Truth](docs/development/SYNC_SOURCE_OF_TRUTH.md)
+- [Release Checklist](docs/release/RELEASE_CHECKLIST.md)
+- [Release Readiness](docs/release/RELEASE_READINESS_PLAN.md)
+- [Release Verification](docs/release/RELEASE_VERIFICATION_REPORT.md)
+- [Build Manifest](docs/release/BUILD_MANIFEST.json)
+- [Audit Report](docs/verification/AUDIT_REPORT.md)
+- [Verification](docs/verification/VERIFICATION.md)
+- [Verification Checklist](docs/verification/VERIFICATION_CHECKLIST.md)
+
 ## Seeded dataset groups
 
 Four dataset groups are preconfigured:
