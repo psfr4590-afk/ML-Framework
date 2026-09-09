@@ -14,6 +14,18 @@ def _load_bootstrap():
     return module
 
 
+def _assert_pip_network_options(command, bootstrap):
+    options = list(bootstrap.PIP_NETWORK_OPTIONS)
+    assert command[4 : 4 + len(options)] == options
+
+
+def _assert_requirements_argument(command, requirements, bootstrap):
+    _assert_pip_network_options(command, bootstrap)
+    install_args = command[4:]
+    assert "-r" in install_args
+    assert install_args[install_args.index("-r") + 1] == str(requirements)
+
+
 def test_bootstrap_resolves_root_from_script_location():
     bootstrap = _load_bootstrap()
     assert bootstrap.project_root() == ROOT
@@ -59,11 +71,10 @@ def test_bootstrap_install_defaults_to_cpu_torch(monkeypatch):
     assert len(calls) == 2
     core_command, core_kwargs = calls[0]
     torch_command, torch_kwargs = calls[1]
-    assert core_command[:5] == [bootstrap.sys.executable, "-m", "pip", "install", "-r"]
-    assert core_command[5] == str(bootstrap.REQUIREMENTS)
-    assert core_kwargs["cwd"] == ROOT
-    assert torch_command[5] == str(bootstrap.TORCH_REQUIREMENTS)
+    _assert_requirements_argument(core_command, bootstrap.REQUIREMENTS, bootstrap)
+    _assert_requirements_argument(torch_command, bootstrap.TORCH_REQUIREMENTS, bootstrap)
     assert torch_command[-2:] == ["--index-url", bootstrap.CPU_TORCH_INDEX]
+    assert core_kwargs["cwd"] == ROOT
     assert torch_kwargs["cwd"] == ROOT
 
 
@@ -83,5 +94,5 @@ def test_bootstrap_can_use_default_torch_index(monkeypatch):
 
     assert len(calls) == 2
     torch_command, _ = calls[1]
-    assert torch_command[5] == str(bootstrap.TORCH_REQUIREMENTS)
+    _assert_requirements_argument(torch_command, bootstrap.TORCH_REQUIREMENTS, bootstrap)
     assert "--index-url" not in torch_command
