@@ -99,7 +99,6 @@ train:
   eval_batches: 1
   checkpoint_every_steps: 1
   keep_checkpoints: 1
-  generate_every_steps: 100
   shard_dir: "output/shards"
 
 export:
