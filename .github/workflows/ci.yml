@@ -21,6 +21,8 @@ jobs:
         run: pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
       - name: Install project dependencies
         run: pip install -r requirements.txt
+      - name: Install package metadata
+        run: pip install . --no-deps
       - name: Lint
         run: ruff check --select F command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
       - name: Compile
