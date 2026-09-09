@@ -36,7 +36,9 @@ crawl:
   sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
   web:
     seed_urls_file: "config/seed_urls.txt"
-    seed_urls: ["https://docs.python.org/3/tutorial/"]
+    seed_urls:
+      - "https://docs.python.org/3/tutorial/"
+      - "https://docs.python.org/3/tutorial/controlflow.html"
     follow_links: false
     max_depth: 0
     stay_on_domain: true
@@ -52,7 +54,6 @@ embed_dedup:
   similarity_threshold: 0.92
   chunk_size: 256
   index_type: "flat"
-  ivf_nlist: 4
 
 weight:
   config_file: "config/source_weights.yaml"
