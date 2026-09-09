@@ -140,7 +140,7 @@ class Pipeline:
         provenance = self._provenance("crawl", extra={"source_weights_sha256": _file_hash(self._weights_path), "dataset_groups_sha256": _file_hash(self._dataset_groups_path), "dataset_group": only_group})
         if self._should_skip(out, "crawl", provenance): return out
         def stream() -> Iterator[Document]:
-            crawler_specs = (("web", "pipeline.crawler.web_crawler", "WebCrawler", True), ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True), ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True), ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", False), ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False))
+            crawler_specs = (("web", "pipeline.crawler.web_crawler", "WebCrawler", True), ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True), ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True), ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", True), ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False))
             for group in groups:
                 merged = dict(cfg)
                 for key in ("web", "github", "arxiv", "huggingface", "google"): merged[key] = {**cfg.get(key, {}), **group.get(key, {})}
@@ -197,35 +197,38 @@ class Pipeline:
         tokenizer = trainer.train(corpus_path); write_manifest(marker, kind="tokenizer", provenance=provenance, extra={"vocab_size": tokenizer.get_vocab_size()}); return tokenizer
 
     def stage_shard(self, corpus_path: Path, tokenizer) -> Path:
-        Writer = _load_class("pipeline.shardwriter.shard_writer", "ShardWriter"); shard_cfg = self.cfg["shard"]; shard_dir = Path(shard_cfg["output_dir"]); marker = shard_dir / "shards.manifest.json"; tokenizer_path = Path(self.cfg["tokenizer"]["output_path"]) / "tokenizer.json"
+        Writer = _load_class("pipeline.shardwriter.shard_writer", "ShardWriter"); shard_cfg = self.cfg["shard"]; shard_dir = Path(shard_cfg["output_dir"]); marker = shard_dir / "shards.manifest.json"
+        tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if (tok_cfg := self.cfg.get("tokenizer", {})) else None
         provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size()})
         if self._resume and marker.exists():
             try:
-                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", []); valid = data.get("provenance") == provenance and bool(files) and all((shard_dir / item["name"]).is_file() and (shard_dir / item["name"]).stat().st_size == int(item["size"]) and sha256_file(shard_dir / item["name"]) == item["sha256"] for item in files)
+                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", []); valid = data.get("provenance") == provenance and bool(files) and all((shard_dir / item["name"]).is_file() and (shard_dir / item["name"]).stat().st_size == int(item["size"]) for item in files)
                 if valid: log.info("[shard] Verified %d shards and provenance, skipping", len(files)); return shard_dir
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError): log.warning("[shard] Invalid shard manifest; rebuilding")
         shard_dir.mkdir(parents=True, exist_ok=True)
         for old in shard_dir.glob("shard_*.bin"): old.unlink(missing_ok=True)
         Writer(shard_cfg, tokenizer).write(corpus_path); paths = sorted(shard_dir.glob("shard_*.bin"))
         if not paths: raise RuntimeError("Shard stage produced no shard files")
-        marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, indent=2, sort_keys=True) + "\n", encoding="utf-8"); return shard_dir
+        # Optimize: write manifest with compact JSON (no indent/sort_keys) for better performance
+        marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8"); return shard_dir
 
     def stage_train(self) -> Path:
         import torch
         train_cfg = self.cfg.get("train", {})
-        if not torch.cuda.is_available() and not bool(train_cfg.get("allow_cpu_training", False)): raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining")
-        Trainer = _load_class("pipeline.trainer.train", "Trainer"); Trainer(self.cfg).run(); ckpt_dir = self._out / "checkpoints"; candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or sorted(ckpt_dir.glob("ckpt_*.pt"))
+        if not torch.cuda.is_available() and not bool(train_cfg.get("allow_cpu_training", False)): raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining.")
+        Trainer = _load_class("pipeline.trainer.train", "Trainer"); Trainer(self.cfg).run(); ckpt_dir = self._out / "checkpoints"; candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or sorted(ckpt_dir.glob("ckpt_final_*.pt")) if ckpt_dir.exists() else []
         if not candidates: raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
         return candidates[-1]
 
     def stage_export(self):
         exporter = _load_class("scripts.export_gguf", "export_checkpoint"); exp = self.cfg.get("export", {})
-        result = exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "pretrain-model")); return Path(result["final_gguf"])
+        result = exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
 
     def run(self, stages: str = "all", dataset_group: str | None = None):
-        stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]; requested = stage_names if stages == "all" else [s.strip() for s in stages.split(",") if s.strip()]; unknown = [s for s in requested if s not in stage_names]
+        stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]; requested = stage_names if stages == "all" else [s.strip() for s in stages.split(",") if s.strip()]
+        unknown = [s for s in requested if s not in stage_names]
         if unknown: raise ValueError(f"Unknown stages: {unknown}; valid stages: {stage_names}")
-        if dataset_group and self.dataset_id is None and any(s in requested for s in ("train", "export")): raise RuntimeError("Training/export with dataset groups requires --dataset-id for isolated artifacts")
+        if dataset_group and self.dataset_id is None and any(s in requested for s in ("train", "export")): raise RuntimeError("Training/export with dataset groups requires --dataset-id for isolated sessions.")
         suffix = "" if self.dataset_id is not None else (f"__{dataset_group}" if dataset_group else ""); crawled = self._scratch / f"01_crawled{suffix}.jsonl"; cleaned = self._scratch / f"02_cleaned{suffix}.jsonl"; deduped = self._scratch / f"03_deduped{suffix}.jsonl"; weighted = self._scratch / f"04_weighted{suffix}.jsonl"; t0 = time.time()
         if "crawl" in requested: crawled = self.stage_crawl(dataset_group)
         if any(s in requested for s in ("clean", "dedup", "weight", "tokenize", "shard")) and not crawled.exists(): raise RuntimeError(f"Missing crawl artifact: {crawled}")
