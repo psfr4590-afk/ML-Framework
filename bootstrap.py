@@ -2,7 +2,8 @@
 """Canonical Model Lab bootstrapper.
 
 Resolves the project from this file, validates the environment, and optionally
-installs the declared core dependencies. It never depends on the caller's cwd.
+installs the declared core dependencies or reconciles the local llama.cpp toolchain.
+It never depends on the caller's cwd.
 """
 from __future__ import annotations
 
@@ -63,11 +64,23 @@ def install() -> int:
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
 
+def ensure_llamacpp() -> int:
+    if not RECONCILER.is_file():
+        print(f"Missing reconciler: {RECONCILER}", file=sys.stderr)
+        return 2
+    command = [sys.executable, str(RECONCILER), "--ensure-llamacpp"]
+    print("$", " ".join(command))
+    return subprocess.run(command, cwd=ROOT, check=False).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Model Lab bootstrap")
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--install", action="store_true")
+    parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()
+    if args.ensure_llamacpp:
+        return ensure_llamacpp()
     if args.install:
         return install()
     return doctor()
