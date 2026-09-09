@@ -1,14 +1,15 @@
-# Master Model Lab pipeline configuration.
+# Canonical safe starter configuration.
+# Use config/pipeline_config.full.yaml for the full production-scale profile.
 pipeline:
-  name: "pretrain-v1"
-  model_name: "pretrain-model"
+  name: "pretrain-v1-starter"
+  model_name: "pretrain-starter"
   output_dir: "output"
   scratch_dir: "scratch"
-  resume: true
-  total_steps: 100000
+  total_steps: 2
   batch_size: 1
-  grad_accum_steps: 16
+  grad_accum_steps: 1
   seed: 42
+  resume: false
 
 stages:
   crawl: true
@@ -18,63 +19,41 @@ stages:
   tokenize: true
   shard: true
   train: true
-  export: true
+  export: false
 
 crawl:
-  max_workers: 4
+  max_workers: 1
   request_timeout: 15
-  retry_attempts: 3
-  retry_backoff: 2.0
+  retry_attempts: 1
+  retry_backoff: 0.5
   respect_robots_txt: true
   politeness_delay: 1.0
-  max_pages_per_domain: 500
-  max_content_bytes: 5000000
-  max_redirects: 3
+  max_pages_per_domain: 2
+  max_content_bytes: 1000000
+  max_redirects: 2
   fail_on_malformed_jsonl: true
-  dataset_groups_file: "config/dataset_groups.yaml"
+  dataset_groups_file: "config/dataset_groups.smoke.yaml"
   source_weights_file: "config/source_weights.yaml"
-  sources:
-    web: true
-    github: true
-    arxiv: true
-    huggingface: true
-    google: false
-  github:
-    include_wikis: true
-    include_issues: true
-    max_issues_per_repo: 50
-    token_env: "GITHUB_TOKEN"
-  arxiv:
-    fetch_full_text: false
-    fetch_abstract_only: true
-    enrich_citations: true
+  sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
   web:
     seed_urls_file: "config/seed_urls.txt"
-    follow_links: true
-    max_depth: 3
-    stay_on_domain: false
-    use_sitemap_discovery: true
+    seed_urls: ["https://docs.python.org/3/tutorial/"]
+    follow_links: false
+    max_depth: 0
+    stay_on_domain: true
+    use_sitemap_discovery: false
     english_only: true
-  huggingface:
-    token_env: "HF_TOKEN"
-  google:
-    api_key_env: "GOOGLE_API_KEY"
-    cx_env: "GOOGLE_CX"
-    results_per_query: 10
-    max_pages_per_query: 10
-    seed_urls: []
-    max_seed_urls: 500
 
 clean:
   config_file: "config/cleaner_config.yaml"
 
 embed_dedup:
   model: "all-MiniLM-L6-v2"
-  batch_size: 256
+  batch_size: 8
   similarity_threshold: 0.92
-  chunk_size: 512
+  chunk_size: 256
   index_type: "flat"
-  ivf_nlist: 100
+  ivf_nlist: 4
 
 weight:
   config_file: "config/source_weights.yaml"
@@ -82,54 +61,54 @@ weight:
 
 tokenizer:
   type: "bpe"
-  vocab_size: 32000
-  min_frequency: 2
+  vocab_size: 512
+  min_frequency: 1
   special_tokens: ["<|pad|>", "<|unk|>", "<|bos|>", "<|eos|>", "<|sep|>", "<|mask|>"]
   train_on_sample: true
-  sample_size: 500000
+  sample_size: 1000
   output_path: "output/tokenizer"
 
 shard:
-  sequence_length: 1024
+  sequence_length: 128
   dtype: "uint16"
-  shard_size_tokens: 10000000
+  shard_size_tokens: 2048
   output_dir: "output/shards"
-  val_fraction: 0.005
+  val_fraction: 0.2
   shuffle_docs: true
   seed: 42
 
 train:
-  resume: true
-  allow_cpu_training: false
-  auto_size: false
+  resume: false
+  allow_cpu_training: true
+  auto_size: true
   target_training_hours: null
   observed_tokens_per_sec: null
   model_preset: "85M"
-  vocab_size: 32000
-  seq_len: 1024
+  vocab_size: 512
+  seq_len: 128
   dropout: 0.0
   lr_max: 3.0e-4
   lr_min: 3.0e-5
   weight_decay: 0.1
   grad_clip: 1.0
   batch_size: 1
-  grad_accum_steps: 16
-  total_steps: 100000
-  warmup_steps: 2000
-  eval_every_steps: 500
-  eval_batches: 20
-  checkpoint_every_steps: 1000
-  keep_checkpoints: 3
-  generate_every_steps: 2000
+  grad_accum_steps: 1
+  total_steps: 2
+  warmup_steps: 1
+  eval_every_steps: 1
+  eval_batches: 1
+  checkpoint_every_steps: 1
+  keep_checkpoints: 1
+  generate_every_steps: 100
   shard_dir: "output/shards"
 
 export:
   format: "gguf"
   llamacpp_dir: "third_party/llama.cpp"
   quant: "Q4_K_M"
-  model_name: "pretrain-model"
+  model_name: "pretrain-starter"
 
 command_center:
   host: "127.0.0.1"
   port: 8000
-  auto_seed_datasets: true
+  auto_seed_datasets: false
