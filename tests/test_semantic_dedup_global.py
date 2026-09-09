@@ -28,8 +28,8 @@ def test_embedding_stream_updates_representative_vector_when_weight_wins(monkeyp
 
     vectors = {
         "a": np.array([1.0, 0.0, 0.0], dtype=np.float32),
-        "b": np.array([0.7, 0.71414284, 0.0], dtype=np.float32),
-        "c": np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        "b": np.array([0.8, 0.6, 0.0], dtype=np.float32),
+        "c": np.array([0.30901699, 0.95105652, 0.0], dtype=np.float32),
     }
     d = SemanticDeduplicator({"similarity_threshold": 0.8})
     monkeypatch.setattr(d, "_load_model", lambda: None)
@@ -41,6 +41,6 @@ def test_embedding_stream_updates_representative_vector_when_weight_wins(monkeyp
         doc(3, "c", 1.5),
     ]), buffer_size=1))
 
-    # b replaces a as the representative; c is not similar enough to b and
-    # therefore remains. The representative vector must move with the winner.
-    assert [x.doc_id for x in out] == ["2", "3"]
+    # b replaces a as the representative. c is similar to b but not to the
+    # original a, so c must be dropped only if the replacement vector is kept.
+    assert [x.doc_id for x in out] == ["2"]
