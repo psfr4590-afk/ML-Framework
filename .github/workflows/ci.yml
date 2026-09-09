@@ -15,10 +15,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      # CI does not need CUDA runtime packages. Install a CPU torch wheel first,
-      # then let the project requirements resolve the remaining dependencies.
+      # Match the canonical bootstrap path: core dependencies and host-specific
+      # PyTorch are resolved from separate requirement files.
       - name: Install CPU PyTorch
-        run: pip install "torch>=2.5,<3" --index-url https://download.pytorch.org/whl/cpu
+        run: pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
       - name: Install project dependencies
         run: pip install -r requirements.txt
       - name: Lint
