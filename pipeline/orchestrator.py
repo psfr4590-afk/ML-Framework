@@ -42,7 +42,6 @@ def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
         handler._model_lab_file = str(log_file)
-        handler._model_lab_file = str(log_file)
         root.addHandler(handler)
 
 
@@ -85,6 +84,7 @@ class Pipeline:
         if not requested.is_absolute():
             requested = PROJECT_ROOT / requested
         self._cfg_path = requested.resolve()
+        self._project_root = PROJECT_ROOT
         if not self._cfg_path.is_file():
             raise FileNotFoundError(f"Pipeline config not found: {self._cfg_path}")
 
@@ -113,6 +113,7 @@ class Pipeline:
         self.cfg.setdefault("tokenizer", {})["output_path"] = str(self._out / "tokenizer")
         self.cfg.setdefault("shard", {})["output_dir"] = str(self._out / "shards")
         self.cfg.setdefault("train", {})["shard_dir"] = str(self._out / "shards")
+        self.cfg.setdefault("export", {})["llamacpp_dir"] = str(self._project_root / self.cfg.get("export", {}).get("llamacpp_dir", "llama.cpp"))
 
         _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         self._resume = bool(self.cfg["pipeline"].get("resume", True))
@@ -131,7 +132,7 @@ class Pipeline:
         return False
 
     def _load_dataset_groups(self) -> list[dict]:
-        path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("dataset_groups_file", "config/dataset_groups.yaml")
+        path = self._project_root / self.cfg.get("crawl", {}).get("dataset_groups_file", "config/dataset_groups.yaml")
         if not path.exists():
             return [{"id": "default", "name": "default", "sources": self.cfg.get("crawl", {}).get("sources", {})}]
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -162,41 +163,27 @@ class Pipeline:
             groups = [g for g in groups if g.get("id") == only_group]
             if not groups:
                 raise ValueError(f"Unknown dataset group id: {only_group}")
-
         out = self._scratch / "01_crawled.jsonl"
         if self.dataset_id is None and only_group:
             out = self._scratch / f"01_crawled__{only_group}.jsonl"
         if self._should_skip(out, "crawl"):
             return out
-
         def stream() -> Iterator[Document]:
-            crawler_specs = (
-                ("web", "pipeline.crawler.web_crawler", "WebCrawler", True),
-                ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True),
-                ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True),
-                ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", False),
-                ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False),
-            )
+            crawler_specs = (("web", "pipeline.crawler.web_crawler", "WebCrawler", True),("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True),("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True),("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", False),("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False))
             for group in groups:
                 merged = dict(cfg)
                 for key in ("web", "github", "arxiv", "huggingface", "google"):
                     merged[key] = {**cfg.get(key, {}), **group.get(key, {})}
                 merged["sources"] = group.get("sources", cfg.get("sources", {}))
                 gid = group.get("id", "default")
-                log.info("Crawling dataset group '%s'", gid)
                 for source, module, klass, default_enabled in crawler_specs:
-                    enabled = bool(merged.get("sources", {}).get(source, default_enabled))
-                    if not enabled:
+                    if not bool(merged.get("sources", {}).get(source, default_enabled)):
                         continue
-                    try:
-                        cls = _load_class(module, klass)
-                    except (ImportError, AttributeError) as exc:
-                        raise RuntimeError(f"Crawler '{source}' is enabled but unavailable: {exc}") from exc
+                    cls = _load_class(module, klass)
                     crawler = cls(merged, self._weights, self._signals)
                     for doc in crawler.crawl():
                         doc.meta["dataset_group"] = gid
                         yield doc
-
         count = _jsonl_write(stream(), out, kind="crawl")
         if count == 0:
             raise RuntimeError(f"Crawl produced no documents: {out}")
@@ -210,7 +197,6 @@ class Pipeline:
             raise RuntimeError(f"Clean input failed integrity validation: {in_path}")
         Cleaner = _load_class("pipeline.cleaner.cleaner", "Cleaner")
         cleaner = Cleaner(str(PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")))
-
         def cleaned() -> Iterator[Document]:
             for doc in _jsonl_read(in_path):
                 result = cleaner.clean(doc.text, doc_id=doc.doc_id)
@@ -222,7 +208,6 @@ class Pipeline:
                 doc.word_count = len(doc.text.split())
                 doc.char_count = len(doc.text)
                 yield doc
-
         _jsonl_write(cleaned(), out, kind="clean")
         return out
 
@@ -235,22 +220,15 @@ class Pipeline:
         Deduplicator = _load_class("pipeline.embedder.semantic_dedup", "SemanticDeduplicator")
         deduper = Deduplicator(self.cfg.get("embed_dedup", {}))
         buffer_size = int(self.cfg.get("embed_dedup", {}).get("buffer_size", 10000))
-
         def stream() -> Iterator[Document]:
-            buf: list[Document] = []
-            seen: set[str] = set()
+            buf: list[Document] = []; seen: set[str] = set()
             for doc in _jsonl_read(in_path):
                 key = hashlib.sha256(" ".join(doc.text.lower().split()).encode("utf-8", errors="replace")).hexdigest()
-                if key in seen:
-                    continue
-                seen.add(key)
-                buf.append(doc)
+                if key in seen: continue
+                seen.add(key); buf.append(doc)
                 if len(buf) >= buffer_size:
-                    yield from deduper.run(buf)
-                    buf.clear()
-            if buf:
-                yield from deduper.run(buf)
-
+                    yield from deduper.run(buf); buf.clear()
+            if buf: yield from deduper.run(buf)
         _jsonl_write(stream(), out, kind="dedup")
         return out
 
@@ -280,37 +258,20 @@ class Pipeline:
 
     def stage_shard(self, corpus_path: Path, tokenizer) -> Path:
         Writer = _load_class("pipeline.shardwriter.shard_writer", "ShardWriter")
-        shard_dir = Path(self.cfg["shard"]["output_dir"])
-        marker = shard_dir / "shards.manifest.json"
+        shard_dir = Path(self.cfg["shard"]["output_dir"]); marker = shard_dir / "shards.manifest.json"
         if self._resume and marker.exists():
             try:
-                data = json.loads(marker.read_text(encoding="utf-8"))
-                files = data.get("files", [])
-                if files and all(
-                    (shard_dir / item["name"]).is_file()
-                    and (shard_dir / item["name"]).stat().st_size == int(item["size"])
-                    and sha256_file(shard_dir / item["name"]) == item["sha256"]
-                    for item in files
-                ):
-                    log.info("[shard] Verified %d shards, skipping", len(files))
-                    return shard_dir
+                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", [])
+                if files and all((shard_dir / item["name"]).is_file() and (shard_dir / item["name"]).stat().st_size == int(item["size"]) and sha256_file(shard_dir / item["name"]) == item["sha256"] for item in files):
+                    log.info("[shard] Verified %d shards, skipping", len(files)); return shard_dir
             except (OSError, ValueError, TypeError, KeyError):
                 log.warning("[shard] Invalid shard manifest; rebuilding")
         shard_dir.mkdir(parents=True, exist_ok=True)
-        for old in shard_dir.glob("shard_*.bin"):
-            old.unlink(missing_ok=True)
+        for old in shard_dir.glob("shard_*.bin"): old.unlink(missing_ok=True)
         Writer(self.cfg["shard"], tokenizer).write(corpus_path)
         paths = sorted(shard_dir.glob("shard_*.bin"))
-        if not paths:
-            raise RuntimeError("Shard stage produced no shard files")
-        marker.write_text(json.dumps({
-            "schema": 3,
-            "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths],
-            "source": str(corpus_path.resolve()),
-            "source_sha256": sha256_file(corpus_path),
-            "tokenizer_vocab_size": tokenizer.get_vocab_size(),
-            "sequence_length": int(self.cfg["shard"].get("sequence_length", 1024)),
-        }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if not paths: raise RuntimeError("Shard stage produced no shard files")
+        marker.write_text(json.dumps({"schema": 3,"files":[{"name":p.name,"size":p.stat().st_size,"sha256":sha256_file(p)} for p in paths],"source":str(corpus_path.resolve()),"source_sha256":sha256_file(corpus_path),"tokenizer_vocab_size":tokenizer.get_vocab_size(),"sequence_length":int(self.cfg["shard"].get("sequence_length",1024))},indent=2,sort_keys=True)+"\n",encoding="utf-8")
         return shard_dir
 
     def stage_train(self) -> Path:
@@ -322,66 +283,38 @@ class Pipeline:
         Trainer(self.cfg).run()
         ckpt_dir = self._out / "checkpoints"
         candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or sorted(ckpt_dir.glob("ckpt_*.pt"))
-        if not candidates:
-            raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
+        if not candidates: raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
         return candidates[-1]
 
     def stage_export(self):
         exporter = _load_class("scripts.export_gguf", "export_checkpoint")
         exp = self.cfg.get("export", {})
-        result = exporter(
-            output_dir=self._out,
-            llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"),
-            quant=str(exp.get("quant", "Q4_K_M")).upper(),
-            model_name=exp.get("model_name", "pretrain-model"),
-        )
+        result = exporter(output_dir=self._out,llamacpp_dir=self._project_root / exp.get("llamacpp_dir", "llama.cpp"),quant=str(exp.get("quant", "Q4_K_M")).upper(),model_name=exp.get("model_name", "pretrain-model"))
         return Path(result["final_gguf"])
 
     def run(self, stages: str = "all", dataset_group: str | None = None):
         stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
         requested = stage_names if stages == "all" else [s.strip() for s in stages.split(",") if s.strip()]
         unknown = [s for s in requested if s not in stage_names]
-        if unknown:
-            raise ValueError(f"Unknown stages: {unknown}; valid stages: {stage_names}")
+        if unknown: raise ValueError(f"Unknown stages: {unknown}; valid stages: {stage_names}")
         if dataset_group and self.dataset_id is None and any(s in requested for s in ("train", "export")):
             raise RuntimeError("Training/export with dataset groups requires --dataset-id for isolated artifacts")
-
         suffix = "" if self.dataset_id is not None else (f"__{dataset_group}" if dataset_group else "")
-        crawled = self._scratch / f"01_crawled{suffix}.jsonl"
-        cleaned = self._scratch / f"02_cleaned{suffix}.jsonl"
-        deduped = self._scratch / f"03_deduped{suffix}.jsonl"
-        weighted = self._scratch / f"04_weighted{suffix}.jsonl"
+        crawled = self._scratch / f"01_crawled{suffix}.jsonl"; cleaned = self._scratch / f"02_cleaned{suffix}.jsonl"; deduped = self._scratch / f"03_deduped{suffix}.jsonl"; weighted = self._scratch / f"04_weighted{suffix}.jsonl"
         t0 = time.time()
-
-        if "crawl" in requested:
-            crawled = self.stage_crawl(dataset_group)
-        if any(s in requested for s in ("clean", "dedup", "weight", "tokenize", "shard")) and not crawled.exists():
-            raise RuntimeError(f"Missing crawl artifact: {crawled}")
-        if "clean" in requested:
-            cleaned = self.stage_clean(crawled, cleaned)
-        if "dedup" in requested:
-            dedup_source = cleaned if cleaned.exists() else crawled
-            deduped = self.stage_embed_dedup(dedup_source, deduped)
-        if "weight" in requested:
-            weight_source = deduped if deduped.exists() else (cleaned if cleaned.exists() else crawled)
-            weighted = self.stage_weight(weight_source, weighted)
-
+        if "crawl" in requested: crawled = self.stage_crawl(dataset_group)
+        if any(s in requested for s in ("clean","dedup","weight","tokenize","shard")) and not crawled.exists(): raise RuntimeError(f"Missing crawl artifact: {crawled}")
+        if "clean" in requested: cleaned = self.stage_clean(crawled, cleaned)
+        if "dedup" in requested: deduped = self.stage_embed_dedup(cleaned if cleaned.exists() else crawled, deduped)
+        if "weight" in requested: weighted = self.stage_weight(deduped if deduped.exists() else (cleaned if cleaned.exists() else crawled), weighted)
         tokenizer = None
-        if "tokenize" in requested:
-            tok_source = weighted if weighted.exists() else (deduped if deduped.exists() else cleaned)
-            tokenizer = self.stage_tokenize(tok_source)
+        if "tokenize" in requested: tokenizer = self.stage_tokenize(weighted if weighted.exists() else (deduped if deduped.exists() else cleaned))
         if "shard" in requested:
             if tokenizer is None:
-                Trainer = _load_class("pipeline.tokenizer.train_tokenizer", "BPETokenizerTrainer")
-                tokenizer = Trainer(self.cfg["tokenizer"]).load()
-            shard_source = weighted if weighted.exists() else (deduped if deduped.exists() else cleaned)
-            self.stage_shard(shard_source, tokenizer)
-        if "train" in requested:
-            self.stage_train()
-        if "export" in requested:
-            self.stage_export()
-
+                Trainer = _load_class("pipeline.tokenizer.train_tokenizer", "BPETokenizerTrainer"); tokenizer = Trainer(self.cfg["tokenizer"]).load()
+            self.stage_shard(weighted if weighted.exists() else (deduped if deduped.exists() else cleaned), tokenizer)
+        if "train" in requested: self.stage_train()
+        if "export" in requested: self.stage_export()
         log.info("Pipeline complete in %.1fs", time.time() - t0)
-
 
 __all__ = ["Pipeline"]
