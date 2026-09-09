@@ -82,7 +82,7 @@ The recommender reports the hardware tier and selected profile. It does not inve
 The smoke configuration is intentionally safe to run as a verification experiment. It uses a single web seed, disables other remote source families, limits crawling to two pages, trains for two steps, and allows CPU execution for validation.
 
 ```powershell
-python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --dataset-group smoke --no-resume
+python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
 ```
 
 ## Dataset sessions
