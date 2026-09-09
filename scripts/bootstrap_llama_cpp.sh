@@ -21,7 +21,7 @@ actual="$(git rev-parse HEAD)"
 [[ "$actual" == "$COMMIT"* ]] || { echo "llama.cpp pin mismatch: expected $COMMIT got $actual" >&2; exit 1; }
 test -f convert_hf_to_gguf.py || { echo "Missing convert_hf_to_gguf.py" >&2; exit 1; }
 
-BUILD_ARGS=(-DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_APP=OFF -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_EXAMPLES=ON)
+BUILD_ARGS=(-DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_APP=ON -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_EXAMPLES=ON)
 
 # Android/Termux uses a smaller native profile.
 if [[ "$(uname -o 2>/dev/null || true)" == "Android" || -n "${TERMUX_VERSION:-}" ]]; then
