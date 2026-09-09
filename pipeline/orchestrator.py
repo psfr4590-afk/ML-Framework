@@ -20,6 +20,7 @@ import yaml
 from pipeline.config_validation import validate_config
 from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, write_manifest
 from pipeline.types import Document
+from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLookup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger("orchestrator")
@@ -40,6 +41,7 @@ def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
     if not any(getattr(h, "_model_lab_file", None) == str(log_file) for h in root.handlers):
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
+        handler._model_lab_file = str(log_file)
         handler._model_lab_file = str(log_file)
         root.addHandler(handler)
 
@@ -74,7 +76,6 @@ def _jsonl_read(path: Path) -> Iterator[Document]:
 
 
 def _load_class(module: str, name: str):
-    """Load an optional stage provider only when that provider is enabled."""
     return getattr(importlib.import_module(module), name)
 
 
@@ -115,6 +116,10 @@ class Pipeline:
 
         _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         self._resume = bool(self.cfg["pipeline"].get("resume", True))
+
+        weights_file = PROJECT_ROOT / self.cfg.get("crawl", {}).get("source_weights_file", "config/source_weights.yaml")
+        self._weights = SourceWeightLookup(str(weights_file))
+        self._signals = DomainSignalTracker(self._weights.signal_gate_config())
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
     def _should_skip(self, path: Path, stage: str) -> bool:
@@ -187,7 +192,7 @@ class Pipeline:
                         cls = _load_class(module, klass)
                     except (ImportError, AttributeError) as exc:
                         raise RuntimeError(f"Crawler '{source}' is enabled but unavailable: {exc}") from exc
-                    crawler = cls(merged, None, None) if source != "web" else cls(merged, None, None)
+                    crawler = cls(merged, self._weights, self._signals)
                     for doc in crawler.crawl():
                         doc.meta["dataset_group"] = gid
                         yield doc
@@ -257,8 +262,7 @@ class Pipeline:
             raise RuntimeError(f"Weight input failed integrity validation: {in_path}")
         Weighter = _load_class("pipeline.weighter.weighter", "DomainWeighter")
         weights_path = PROJECT_ROOT / self.cfg.get("weight", {}).get("config_file", "config/source_weights.yaml")
-        strategy = self.cfg.get("weight", {}).get("strategy", "upsample")
-        weighter = Weighter(str(weights_path), strategy=strategy)
+        weighter = Weighter(str(weights_path), strategy=self.cfg.get("weight", {}).get("strategy", "upsample"))
         _jsonl_write(weighter.apply(_jsonl_read(in_path)), out, kind="weight")
         return out
 
