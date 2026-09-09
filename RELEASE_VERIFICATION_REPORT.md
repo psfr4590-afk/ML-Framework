@@ -1,4 +1,6 @@
-# Release Verification Report
+# Historical Release Verification Report
+
+> **Historical record.** This report documents the repository state and environment verification performed on **2026-08-26**. Its test counts and environment findings are not the current release status. For current status, use the GitHub Actions CI result and the current release-gate documentation.
 
 Date: 2026-08-26
 
@@ -13,7 +15,7 @@ Date: 2026-08-26
 
 ## Native/environment verification
 
-The current build environment does **not** contain the required `tokenizers` package or the pinned llama.cpp checkout, and has no CUDA runtime. Therefore the strict release gate correctly remains **BLOCKED** here. This is intentional. The project does not claim a native GGUF conversion it did not execute.
+The build environment at the time of this report did **not** contain the required `tokenizers` package or the pinned llama.cpp checkout, and had no CUDA runtime. Therefore the strict release gate correctly remained **BLOCKED** in that environment. This was intentional. The project did not claim a native GGUF conversion it had not executed.
 
 Windows:
 
@@ -33,6 +35,10 @@ python run_pipeline.py --doctor
 python scripts/verify_release.py
 ```
 
-The llama.cpp integration is pinned to upstream release `b10516` / commit `b95502b`. The bootstrap script verifies the resolved Git commit before building.
+The llama.cpp integration was pinned to upstream release `b10516` / commit `b95502b`. The bootstrap script verifies the resolved Git commit before building.
 
-A final release requires a real reduced end-to-end run through tokenization, sharding, training, GGUF conversion, quantization, and llama.cpp inference.
+A final release required a real reduced end-to-end run through tokenization, sharding, training, GGUF conversion, quantization, and llama.cpp inference.
+
+## Why this file remains
+
+This document is retained as an audit trail of the August 26 verification effort. It should not be edited to reflect later test counts. New verification results belong in a new dated report or in the repository's current CI/release documentation.
