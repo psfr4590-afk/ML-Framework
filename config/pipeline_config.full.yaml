@@ -69,7 +69,12 @@ clean:
   config_file: "config/cleaner_config.yaml"
 
 embed_dedup:
+  # Embedding mode is explicit. Keep model access intentional rather than
+  # silently downloading a Hugging Face model during a long pipeline run.
+  mode: "embedding"
   model: "all-MiniLM-L6-v2"
+  model_path: null
+  allow_model_download: false
   batch_size: 256
   similarity_threshold: 0.92
   chunk_size: 512
