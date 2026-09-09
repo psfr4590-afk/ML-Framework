@@ -11,6 +11,14 @@ Strategy:
 Memory: all-MiniLM-L6-v2 is 384-dim float32 = ~1.5KB/doc.
         1M docs ≈ 1.5GB; fine for your 8GB RAM.
         If you hit limits, switch index_type to ivf in config.
+
+Offline behavior:
+  - mode=auto (default) never downloads a model. It uses embeddings only when
+    the configured model is already available locally; otherwise it falls back
+    to dependency-light token-gram similarity.
+  - mode=fallback always uses the dependency-light implementation.
+  - mode=embedding requires sentence-transformers and a locally available model
+    unless allow_model_download=true is explicitly configured.
 """
 
 from __future__ import annotations
@@ -30,7 +38,7 @@ try:
     ST_AVAILABLE = True
 except ImportError:
     ST_AVAILABLE = False
-    log.warning("sentence-transformers not installed; semantic dedup disabled")
+    log.warning("sentence-transformers not installed; semantic dedup will use fallback")
 
 try:
     import faiss
@@ -60,6 +68,9 @@ class SemanticDeduplicator:
         self._chunk     = cfg.get("chunk_size", 512)
         self._idx_type  = cfg.get("index_type", "flat")
         self._nlist     = cfg.get("ivf_nlist", 100)
+        self._mode      = str(cfg.get("mode", "auto")).lower()
+        self._allow_model_download = bool(cfg.get("allow_model_download", False))
+        self._model_path = cfg.get("model_path")
         self._model     = None
         self._index     = None
         self._dim       = 0
@@ -93,17 +104,75 @@ class SemanticDeduplicator:
         self.stats["total"] += len(docs)
         self.stats["kept"] += len(kept)
         self.stats["dropped"] += len(docs) - len(kept)
-        log.warning("Semantic dedup fallback active: sentence-transformers unavailable")
+        log.warning("Semantic dedup fallback active: embeddings unavailable")
         return kept
 
+    def _fallback_stream(self, docs: Iterator[Document], buffer_size: int) -> Iterator[Document]:
+        """Consume an iterator in bounded batches without materializing the input."""
+        reps: list[Document] = []
+        buffer: list[Document] = []
+        total = 0
+
+        def process(batch: list[Document]) -> None:
+            nonlocal total
+            for doc in batch:
+                total += 1
+                duplicate = False
+                for index, prior in enumerate(reps):
+                    if self._fallback_similarity(doc.text, prior.text) >= self._threshold:
+                        duplicate = True
+                        if doc.final_weight > prior.final_weight:
+                            reps[index] = doc
+                        break
+                if not duplicate:
+                    reps.append(doc)
+
+        for doc in docs:
+            buffer.append(doc)
+            if len(buffer) >= buffer_size:
+                process(buffer)
+                buffer.clear()
+        if buffer:
+            process(buffer)
+
+        self.stats["total"] += total
+        self.stats["kept"] += len(reps)
+        self.stats["dropped"] += total - len(reps)
+        log.warning("Semantic dedup fallback active: embeddings unavailable")
+        log.info("Semantic dedup stream: %d → %d (-%d)", total, len(reps), total - len(reps))
+        yield from reps
+
     def _load_model(self):
+        if self._mode == "fallback":
+            raise RuntimeError("semantic dedup configured for fallback mode")
         if not ST_AVAILABLE:
             raise RuntimeError("sentence-transformers not installed")
         if self._model is None:
-            log.info(f"Loading sentence-transformer: {self._model_name}")
-            self._model = SentenceTransformer(self._model_name)
+            model_ref = self._model_path or self._model_name
+            log.info("Loading sentence-transformer: %s", model_ref)
+            kwargs = {}
+            if not self._allow_model_download:
+                kwargs["local_files_only"] = True
+            self._model = SentenceTransformer(model_ref, **kwargs)
             self._dim   = self._model.get_sentence_embedding_dimension()
-            log.info(f"Embedding dim: {self._dim}")
+            log.info("Embedding dim: %s", self._dim)
+
+    def _ensure_embedding_or_fallback(self) -> bool:
+        if self._mode == "fallback":
+            return False
+        try:
+            self._load_model()
+            return True
+        except (OSError, RuntimeError, ValueError) as exc:
+            if self._mode == "embedding":
+                raise RuntimeError(
+                    "Semantic dedup embedding mode requires a locally available "
+                    f"model ({self._model_path or self._model_name}). "
+                    "Install sentence-transformers and cache/provide the model, "
+                    "or set allow_model_download=true explicitly."
+                ) from exc
+            log.warning("Semantic embedding unavailable; using offline fallback: %s", exc)
+            return False
 
     def _embed(self, texts: list[str]) -> np.ndarray:
         chunks = [t[:self._chunk] for t in texts]
@@ -137,13 +206,11 @@ class SemanticDeduplicator:
         if not docs:
             return docs
 
-        if not ST_AVAILABLE:
+        if not self._ensure_embedding_or_fallback():
             return self._fallback_run(docs)
 
-        self._load_model()
         self.stats["total"] += len(docs)
-
-        log.info(f"Embedding {len(docs)} docs ...")
+        log.info("Embedding %d docs ...", len(docs))
         matrix = self._embed([d.text for d in docs])
 
         log.info("Building FAISS index ...")
@@ -169,53 +236,18 @@ class SemanticDeduplicator:
                 if float(sim) >= self._threshold:
                     if docs[i].final_weight >= docs[j].final_weight:
                         is_dup[j] = True
-                        log.debug(f"DUP drop [{j}] {docs[j].url[:60]} sim={sim:.3f} vs [{i}] {docs[i].url[:60]}")
+                        log.debug("DUP drop [%d] %s sim=%.3f vs [%d] %s", j, docs[j].url[:60], sim, i, docs[i].url[:60])
                     else:
                         is_dup[i] = True
-                        log.debug(f"DUP drop [{i}] {docs[i].url[:60]} sim={sim:.3f} vs [{j}] {docs[j].url[:60]}")
+                        log.debug("DUP drop [%d] %s sim=%.3f vs [%d] %s", i, docs[i].url[:60], sim, j, docs[j].url[:60])
                     break
 
         kept = [d for d, dup in zip(docs, is_dup) if not dup]
         dropped = len(docs) - len(kept)
         self.stats["kept"] += len(kept)
         self.stats["dropped"] += dropped
-        log.info(f"Semantic dedup: {len(docs)} → {len(kept)} (-{dropped})")
+        log.info("Semantic dedup: %d → %d (-%d)", len(docs), len(kept), dropped)
         return kept
-
-    def _stream_fallback(self, docs: Iterator[Document], buffer_size: int) -> Iterator[Document]:
-        """Consume an iterator in bounded batches without materializing the input."""
-        reps: list[Document] = []
-        buffer: list[Document] = []
-        total = 0
-
-        def process(batch: list[Document]) -> None:
-            nonlocal total
-            for doc in batch:
-                total += 1
-                duplicate = False
-                for index, prior in enumerate(reps):
-                    if self._fallback_similarity(doc.text, prior.text) >= self._threshold:
-                        duplicate = True
-                        if doc.final_weight > prior.final_weight:
-                            reps[index] = doc
-                        break
-                if not duplicate:
-                    reps.append(doc)
-
-        for doc in docs:
-            buffer.append(doc)
-            if len(buffer) >= buffer_size:
-                process(buffer)
-                buffer.clear()
-        if buffer:
-            process(buffer)
-
-        self.stats["total"] += total
-        self.stats["kept"] += len(reps)
-        self.stats["dropped"] += total - len(reps)
-        log.warning("Semantic dedup fallback active: sentence-transformers unavailable")
-        log.info("Semantic dedup stream: %d → %d (-%d)", total, len(reps), total - len(reps))
-        yield from reps
 
     def stream(self, docs: Iterator[Document], buffer_size: int = 10000) -> Iterator[Document]:
         """Globally deduplicate an input stream using bounded input batches.
@@ -228,11 +260,10 @@ class SemanticDeduplicator:
         if buffer_size < 1:
             raise ValueError("buffer_size must be >= 1")
 
-        if not ST_AVAILABLE:
-            yield from self._stream_fallback(docs, buffer_size)
+        if not self._ensure_embedding_or_fallback():
+            yield from self._fallback_stream(docs, buffer_size)
             return
 
-        self._load_model()
         reps: list[Document] = []
         rep_vecs: list[np.ndarray] = []
         winners: list[Document] = []
@@ -288,4 +319,4 @@ class SemanticDeduplicator:
     def print_stats(self):
         s = self.stats
         t = max(s["total"], 1)
-        log.info(f"SemanticDedup | total={s['total']} kept={s['kept']} dropped={s['dropped']} ({s['dropped']/t*100:.1f}%)")
+        log.info("SemanticDedup | total=%s kept=%s dropped=%s (%.1f%%)", s["total"], s["kept"], s["dropped"], s["dropped"] / t * 100)
