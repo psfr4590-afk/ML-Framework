@@ -4,7 +4,7 @@
 
 ## First run
 
-There is exactly one canonical first-run path. From the extracted project root, install with the bootstrapper, run the non-destructive doctor, then run the default starter profile.
+There is exactly one canonical first-run path. From the extracted project root, install with the bootstrapper, run the environment preflight, then run the default starter profile.
 
 ### Windows PowerShell
 
@@ -26,7 +26,7 @@ python3 run_pipeline.py --no-resume
 
 The default `config/pipeline_config.yaml` is the canonical starter profile. It is deliberately bounded and CPU-safe, and it exercises the real pipeline and artifact chain without starting a long production training job. A newcomer does not need to choose a profile for the first run.
 
-If the starter run succeeds, inspect the host before expensive work:
+If the starter run succeeds, inspect the project and host before expensive work:
 
 ```powershell
 python .\run_pipeline.py --doctor --hardware-report
@@ -38,7 +38,21 @@ or:
 python3 run_pipeline.py --doctor --hardware-report
 ```
 
-The doctor is non-destructive. It reports required runtime failures separately from optional capabilities such as CUDA and native llama.cpp tooling. The hardware report shows the conservative training profile Model Lab would select for the current host.
+`bootstrap.py --doctor` and `run_pipeline.py --doctor` have different jobs. The bootstrap doctor checks installation and host prerequisites. The pipeline doctor checks project/runtime readiness. Neither doctor runs pipeline stages. The hardware report adds conservative training guidance for the current host.
+
+Useful read-only inspection commands are also available:
+
+```powershell
+python .\run_pipeline.py --list-stages
+python .\run_pipeline.py --list-groups
+```
+
+or:
+
+```bash
+python3 run_pipeline.py --list-stages
+python3 run_pipeline.py --list-groups
+```
 
 ## Windows launch
 
@@ -48,7 +62,7 @@ After the first-run path is healthy:
 python .\launch.py
 ```
 
-The launcher starts the existing localhost FastAPI command center when needed and opens the desktop control surface. The UI is designed for a 1760×990 display.
+`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend. The UI is designed for a 1760×990 display.
 
 Model Lab navigates the real pipeline and dataset sessions. It does not implement a second copy of the crawler, cleaner, deduplicator, tokenizer, sharder, trainer, or exporter.
 
