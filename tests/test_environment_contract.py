@@ -49,7 +49,7 @@ def test_reconciler_dispatches_to_bash_on_non_windows(monkeypatch, tmp_path):
     )
 
     assert reconciler.main(["--project-root", str(tmp_path), "--ensure-llamacpp"]) == 7
-    assert calls == [(["bash", str(script)], tmp_path, False)]
+    assert calls == [( ["bash", str(script)], tmp_path, False)]
 
 
 def test_termux_safe_machine_tests_do_not_import_tkinter_at_collection_time():
@@ -83,7 +83,7 @@ def test_native_bootstrap_has_platform_specific_build_profiles():
     assert "b10516" in source
     assert "b95502b" in source
 
-    android_start = source.index("if [[")
+    android_start = source.index("# Android/Termux")
     android_end = source.index("else", android_start)
     android_profile = source[android_start:android_end]
     desktop_profile = source[android_end:]
