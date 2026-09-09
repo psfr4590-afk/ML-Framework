@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -22,6 +23,26 @@ from pipeline.trainer.model import LlamaModel, ModelConfig
 log = logging.getLogger("trainer")
 
 
+def _stable_hash(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _shard_manifest_hash(shard_dir: Path) -> Optional[str]:
+    manifest = shard_dir / "shards.manifest.json"
+    if not manifest.is_file():
+        return None
+    return sha256_file(manifest)
+
+
+def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path) -> dict:
+    return {
+        "train_config_sha256": _stable_hash(cfg),
+        "model_config_sha256": _stable_hash(model_cfg.to_dict()),
+        "shard_manifest_sha256": _shard_manifest_hash(shard_dir),
+    }
+
+
 def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_steps: int) -> float:
     if step < warmup_steps:
         return lr_max * step / max(warmup_steps, 1)
@@ -32,18 +53,21 @@ def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_
 
 
 def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler,
-                    step: int, val_loss: float, cfg: dict, out_dir: Path, tag: str = ""):
+                    step: int, val_loss: float, cfg: dict, out_dir: Path, tag: str = "",
+                    provenance: Optional[dict] = None):
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"ckpt_{tag}_{step:07d}.pt" if tag else f"ckpt_{step:07d}.pt"
     path = out_dir / name
     payload = {"step": step, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
                "scaler": scaler.state_dict(), "val_loss": val_loss,
-               "model_cfg": model.cfg.to_dict(), "train_cfg": cfg}
+               "model_cfg": model.cfg.to_dict(), "train_cfg": cfg,
+               "provenance": provenance or {}}
     tmp = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, tmp)
     os.replace(tmp, path)
-    manifest = {"schema": 1, "path": str(path), "size": path.stat().st_size,
-                "sha256": sha256_file(path), "step": step, "val_loss": val_loss}
+    manifest = {"schema": 2, "path": str(path), "size": path.stat().st_size,
+                "sha256": sha256_file(path), "step": step, "val_loss": val_loss,
+                "provenance": provenance or {}}
     mp = path.with_name(path.name + ".manifest.json")
     mtmp = mp.with_suffix(mp.suffix + ".tmp")
     mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -53,7 +77,8 @@ def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler,
 
 def load_checkpoint(path: Path, model: LlamaModel,
                     optimizer: Optional[torch.optim.Optimizer] = None,
-                    scaler=None, device: torch.device | None = None) -> int:
+                    scaler=None, device: torch.device | None = None,
+                    expected_provenance: Optional[dict] = None) -> int:
     if not path.exists() or path.stat().st_size < 1024:
         raise RuntimeError(f"Checkpoint missing or truncated: {path}")
     mp = path.with_name(path.name + ".manifest.json")
@@ -62,6 +87,14 @@ def load_checkpoint(path: Path, model: LlamaModel,
     meta = json.loads(mp.read_text(encoding="utf-8"))
     if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
         raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
+    if expected_provenance is not None:
+        actual = meta.get("provenance") or {}
+        if actual != expected_provenance:
+            raise RuntimeError(
+                f"Checkpoint provenance mismatch: {path}. "
+                "The checkpoint was produced from a different training configuration, model configuration, "
+                "or shard manifest; refusing automatic resume."
+            )
     try:
         ckpt = torch.load(path, map_location=device or "cpu", weights_only=False)
     except TypeError:
@@ -77,9 +110,14 @@ def load_checkpoint(path: Path, model: LlamaModel,
 
 
 def latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
-    ckpts = [p for p in sorted(ckpt_dir.glob("ckpt_*.pt"))
-             if p.with_name(p.name + ".manifest.json").is_file()]
-    return ckpts[-1] if ckpts else None
+    numbered = []
+    for path in ckpt_dir.glob("ckpt_*.pt"):
+        if path.with_name(path.name + ".manifest.json").is_file():
+            stem = path.stem
+            if stem.startswith("ckpt_") and stem[5:].isdigit():
+                numbered.append((int(stem[5:]), path))
+    numbered.sort(key=lambda item: item[0])
+    return numbered[-1][1] if numbered else None
 
 
 class Trainer:
@@ -175,12 +213,13 @@ class Trainer:
 
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype)
         val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype)
+        provenance = _provenance(t, model_cfg, shard_dir)
 
         start_step, best_val = 0, float("inf")
         if bool(t.get("resume", True)):
             ckpt = latest_checkpoint(self.ckpt_dir)
             if ckpt:
-                start_step = load_checkpoint(ckpt, model, optimizer, scaler, device)
+                start_step = load_checkpoint(ckpt, model, optimizer, scaler, device, expected_provenance=provenance)
                 try:
                     payload = torch.load(ckpt, map_location="cpu", weights_only=False)
                 except TypeError:
@@ -232,14 +271,14 @@ class Trainer:
                     model.train()
                     if val_loss < best_val:
                         best_val = val_loss
-                        save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="best")
+                        save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="best", provenance=provenance)
 
                 if step % ckpt_every == 0:
-                    save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir)
+                    save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir, provenance=provenance)
                     self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
 
             val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
-            save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final")
+            save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final", provenance=provenance)
             return model, step
         finally:
             metrics.close()
