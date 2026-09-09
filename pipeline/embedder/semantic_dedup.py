@@ -182,39 +182,68 @@ class SemanticDeduplicator:
         log.info(f"Semantic dedup: {len(docs)} → {len(kept)} (-{dropped})")
         return kept
 
+    def _stream_fallback(self, docs: Iterator[Document], buffer_size: int) -> Iterator[Document]:
+        """Consume an iterator in bounded batches without materializing the input."""
+        reps: list[Document] = []
+        buffer: list[Document] = []
+        total = 0
+
+        def process(batch: list[Document]) -> None:
+            nonlocal total
+            for doc in batch:
+                total += 1
+                duplicate = False
+                for index, prior in enumerate(reps):
+                    if self._fallback_similarity(doc.text, prior.text) >= self._threshold:
+                        duplicate = True
+                        if doc.final_weight > prior.final_weight:
+                            reps[index] = doc
+                        break
+                if not duplicate:
+                    reps.append(doc)
+
+        for doc in docs:
+            buffer.append(doc)
+            if len(buffer) >= buffer_size:
+                process(buffer)
+                buffer.clear()
+        if buffer:
+            process(buffer)
+
+        self.stats["total"] += total
+        self.stats["kept"] += len(reps)
+        self.stats["dropped"] += total - len(reps)
+        log.warning("Semantic dedup fallback active: sentence-transformers unavailable")
+        log.info("Semantic dedup stream: %d → %d (-%d)", total, len(reps), total - len(reps))
+        yield from reps
+
     def stream(self, docs: Iterator[Document], buffer_size: int = 10000) -> Iterator[Document]:
-        """Globally deduplicate a stream across batch boundaries."""
+        """Globally deduplicate an input stream using bounded input batches.
+
+        The iterator is consumed incrementally, so the complete input corpus is
+        never materialized. Output is intentionally delayed until the input is
+        exhausted because a later, higher-weight duplicate can replace an earlier
+        representative. Only representatives and their embeddings are retained.
+        """
         if buffer_size < 1:
             raise ValueError("buffer_size must be >= 1")
-        all_docs: list[Document] = list(docs)
-        if not all_docs:
-            return
 
-        exact: dict[str, Document] = {}
-        for doc in all_docs:
-            key = re.sub(r"\s+", " ", doc.text).strip().lower()
-            digest = __import__("hashlib").sha256(key.encode("utf-8", errors="replace")).hexdigest()
-            prior = exact.get(digest)
-            if prior is None or doc.final_weight > prior.final_weight:
-                exact[digest] = doc
-        candidates = list(exact.values())
-
-        self.stats["total"] += len(all_docs)
         if not ST_AVAILABLE:
-            winners = self._fallback_run(candidates)
-            self.stats["kept"] -= len(winners)
-            self.stats["dropped"] -= len(candidates) - len(winners)
-            self.stats["dropped"] += len(all_docs) - len(winners)
-            yield from winners
+            yield from self._stream_fallback(docs, buffer_size)
             return
 
         self._load_model()
         reps: list[Document] = []
         rep_vecs: list[np.ndarray] = []
         winners: list[Document] = []
+        total = 0
+        buffer: list[Document] = []
 
-        for start in range(0, len(candidates), buffer_size):
-            batch = candidates[start:start + buffer_size]
+        def process(batch: list[Document]) -> None:
+            nonlocal total
+            if not batch:
+                return
+            total += len(batch)
             matrix = self._embed([d.text for d in batch])
             for doc, vec in zip(batch, matrix):
                 match = None
@@ -239,11 +268,21 @@ class SemanticDeduplicator:
                 elif doc.final_weight > reps[match].final_weight:
                     old = reps[match]
                     reps[match] = doc
+                    rep_vecs[match] = vec
                     winners[winners.index(old)] = doc
 
+        for doc in docs:
+            buffer.append(doc)
+            if len(buffer) >= buffer_size:
+                process(buffer)
+                buffer.clear()
+        if buffer:
+            process(buffer)
+
+        self.stats["total"] += total
         self.stats["kept"] += len(winners)
-        self.stats["dropped"] += len(all_docs) - len(winners)
-        log.info("Semantic dedup stream: %d → %d (-%d)", len(all_docs), len(winners), len(all_docs) - len(winners))
+        self.stats["dropped"] += total - len(winners)
+        log.info("Semantic dedup stream: %d → %d (-%d)", total, len(winners), total - len(winners))
         yield from winners
 
     def print_stats(self):
