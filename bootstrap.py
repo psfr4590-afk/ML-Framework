@@ -20,12 +20,23 @@ RECONCILER = ROOT / "scripts" / "reconcile_environment.py"
 REQUIREMENTS = ROOT / "requirements.txt"
 TORCH_REQUIREMENTS = ROOT / "requirements-torch.txt"
 MIN_PYTHON = (3, 11)
+MAX_PYTHON_EXCLUSIVE = (3, 14)
 REQUIRED = ("yaml", "requests", "bs4", "lxml", "numpy", "tokenizers", "torch")
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 
 
 def project_root() -> Path:
     return ROOT
+
+
+def _python_supported() -> bool:
+    version = sys.version_info[:2]
+    return MIN_PYTHON <= version < MAX_PYTHON_EXCLUSIVE
+
+
+def _python_requirement_message() -> str:
+    version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    return f"Python 3.11-3.13 required; found Python {version}. Python 3.14+ is not supported because the pinned dependency set includes lxml 5.x without a compatible Windows CPython 3.14 wheel."
 
 
 def _importable(name: str) -> bool:
@@ -44,8 +55,8 @@ def doctor() -> int:
         failures.append("scripts/reconcile_environment.py missing")
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
     print(f"Platform: {platform.platform()}")
-    if sys.version_info < MIN_PYTHON:
-        failures.append("Python 3.11+ required")
+    if not _python_supported():
+        failures.append(_python_requirement_message())
     for name in REQUIRED:
         state = "OK" if _importable(name) else "MISSING"
         print(f"{name}: {state}")
@@ -67,6 +78,9 @@ def _pip_install(requirements: Path, *extra: str) -> int:
 
 
 def install(torch_channel: str = "cpu") -> int:
+    if not _python_supported():
+        print(f"Bootstrap install aborted: {_python_requirement_message()}", file=sys.stderr)
+        return 2
     result = _pip_install(REQUIREMENTS)
     if result != 0:
         return result
