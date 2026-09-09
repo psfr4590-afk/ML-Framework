@@ -49,11 +49,16 @@ clean:
   config_file: "config/cleaner_config.yaml"
 
 embed_dedup:
+  # Keep smoke verification offline after dependency installation.
+  mode: "auto"
   model: "all-MiniLM-L6-v2"
+  model_path: null
+  allow_model_download: false
   batch_size: 8
   similarity_threshold: 0.92
   chunk_size: 256
   index_type: "flat"
+  ivf_nlist: 4
 
 weight:
   config_file: "config/source_weights.yaml"
