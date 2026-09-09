@@ -21,7 +21,10 @@ def test_command_center_seeds_and_serves():
         ]
         page = client.get('/')
         assert page.status_code == 200
-        assert 'M²S MODEL TRAINING PIPELINE' in page.text
+        assert page.encoding == 'utf-8'
+        assert 'Model Lab' in page.text
+        assert 'Local Command Center' in page.text
+        assert 'M²S Model Training Pipeline' in page.content.decode('utf-8')
 
 
 def test_command_center_rejects_remote_api_client():
