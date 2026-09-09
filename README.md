@@ -38,14 +38,14 @@ General web seeds live in `config/seed_urls.txt`.
 
 ## Quick start
 
-The repository has one canonical first-run path. Start from the project root and use the bootstrapper for installation and environment checks:
+There is exactly one canonical first-run path. From the project root, install with the bootstrapper, verify the environment, then run the default starter profile. Do not make a first-run decision about profiles or training scale. Humanity has suffered enough configuration menus.
 
 ### Windows PowerShell
 
 ```powershell
 python .\bootstrap.py --install
 python .\bootstrap.py --doctor
-python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
+python .\run_pipeline.py --no-resume
 ```
 
 ### Linux / macOS / Termux
@@ -53,14 +53,14 @@ python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resum
 ```bash
 python3 bootstrap.py --install
 python3 bootstrap.py --doctor
-python3 run_pipeline.py --config config/pipeline_config.smoke.yaml --no-resume
+python3 run_pipeline.py --no-resume
 ```
 
-The smoke run is the recommended first useful run. It is bounded, CPU-safe, and designed to prove that the pipeline can produce and chain real artifacts without committing a newcomer to a long training job.
+`config/pipeline_config.yaml` is the single canonical starter profile used when no `--config` argument is supplied. It is deliberately bounded, CPU-safe, and exercises the real pipeline and artifact chain without starting a long production training job.
 
-The repository default configuration is also intentionally safe: `config/pipeline_config.yaml` is the bounded starter profile used when no `--config` argument is supplied. The previous full-scale profile is preserved as `config/pipeline_config.full.yaml` and must be selected explicitly for large runs.
+The larger profile is preserved as `config/pipeline_config.full.yaml` and must be selected explicitly for large runs.
 
-After the starter/smoke run succeeds, inspect the host before doing expensive work:
+After the starter run succeeds, inspect the host before doing expensive work:
 
 ```powershell
 python .\run_pipeline.py --doctor --hardware-report
@@ -103,11 +103,11 @@ python .\scripts\recommend_model.py --shard-dir .\output\shards
 
 The recommender reports the hardware tier and selected profile. It does not invent a wall-clock estimate unless observed throughput is supplied.
 
-## Bounded smoke test
+## Bounded verification profile
 
-`config/pipeline_config.smoke.yaml` is the canonical newcomer validation profile. It uses a dedicated dataset-group file, bounded source limits, a small vocabulary and sequence length, and a tiny training budget with CPU training explicitly permitted.
+`config/pipeline_config.smoke.yaml` is retained as a dedicated maintainer/verification profile. It is intentionally separate from the canonical starter profile so documentation, tests, and newcomer instructions do not have two competing definitions of "first run".
 
-The smoke profile is a real pipeline run, not merely a unit-test shortcut. It is intended to answer one question quickly: **can this checkout build a useful chain of artifacts on this machine?**
+The verification profile is also a real, bounded pipeline run. It is useful for validating the end-to-end artifact chain in automation or when explicitly testing the smoke configuration, but it is not required for normal first-run use.
 
 ## Command center
 
