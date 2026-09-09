@@ -5,6 +5,7 @@ portable CI and Termux can collect the test suite safely.
 """
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -15,6 +16,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 WINDOWS_ONLY = pytest.mark.skipif(platform.system() != "Windows", reason="requires target Windows machine")
+CI_UNSUPPORTED_DISPLAY = pytest.mark.skipif(
+    os.environ.get("CI", "").lower() == "true",
+    reason="GitHub-hosted Windows runners use a virtual 1024x768 display",
+)
 
 @WINDOWS_ONLY
 def test_python_is_supported_target_version():
@@ -26,6 +31,7 @@ def test_tkinter_available():
     root = tk.Tk(); root.withdraw(); root.destroy()
 
 @WINDOWS_ONLY
+@CI_UNSUPPORTED_DISPLAY
 def test_target_resolution_is_1760x990_or_larger():
     tk = pytest.importorskip("tkinter")
     root = tk.Tk(); root.withdraw()
