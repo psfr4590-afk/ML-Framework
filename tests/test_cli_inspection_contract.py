@@ -54,3 +54,40 @@ def test_invalid_stages_do_not_construct_pipeline(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Unknown stages" in output
     assert "not-a-stage" in output
+
+
+def test_version_is_stable_and_does_not_start_pipeline(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run_pipeline.py", "--version"])
+
+    try:
+        run_pipeline.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("--version should terminate through argparse")
+
+    assert capsys.readouterr().out.strip() == "Model Lab 1.3.0"
+
+
+def test_hardware_report_requires_doctor(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run_pipeline.py", "--hardware-report"])
+
+    assert run_pipeline.main() == 1
+    assert "requires --doctor" in capsys.readouterr().out
+
+
+def test_help_exposes_canonical_examples(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["run_pipeline.py", "--help"])
+
+    try:
+        run_pipeline.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("--help should terminate through argparse")
+
+    output = capsys.readouterr().out
+    assert "Model Lab 1.3.0" in output
+    assert "--no-resume" in output
+    assert "python run_pipeline.py --doctor" in output
+    assert "mlab --help" in output
