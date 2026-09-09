@@ -14,6 +14,8 @@ from pathlib import Path
 
 LLAMACPP_TAG = "b10516"
 LLAMACPP_COMMIT = "b95502b"
+MIN_PYTHON = (3, 11)
+MAX_PYTHON_EXCLUSIVE = (3, 14)
 
 
 def _check(name: str, ok: bool, detail: str, required: bool = True) -> dict:
@@ -21,7 +23,12 @@ def _check(name: str, ok: bool, detail: str, required: bool = True) -> dict:
 
 
 def _python_ok() -> bool:
-    return sys.version_info >= (3, 11)
+    return MIN_PYTHON <= sys.version_info[:2] < MAX_PYTHON_EXCLUSIVE
+
+
+def _python_detail() -> str:
+    version = sys.version.split()[0]
+    return f"{version} (requires Python 3.11-3.13)"
 
 
 def _writable(path: Path) -> bool:
@@ -90,7 +97,7 @@ def run_doctor(root: str | Path) -> tuple[bool, list[dict]]:
     root = Path(root).resolve()
     checks: list[dict] = []
     checks.append(_check("project root", (root / "run_pipeline.py").is_file() and (root / "pipeline").is_dir(), str(root)))
-    checks.append(_check("Python", _python_ok(), f"{sys.version.split()[0]} (requires >=3.11)"))
+    checks.append(_check("Python", _python_ok(), _python_detail()))
     checks.append(_check("pipeline config", (root / "config" / "pipeline_config.yaml").is_file(), "config/pipeline_config.yaml"))
     checks.append(_check("pipeline config validation", *_config_state(root)))
     checks.append(_check("seed URLs", (root / "config" / "seed_urls.txt").is_file(), "config/seed_urls.txt"))
