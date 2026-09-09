@@ -37,6 +37,18 @@ def _load_cli_dataset_groups(config_path: Path) -> list[dict]:
     return list(payload.get("dataset_groups", []))
 
 
+def _parse_requested_stages(value: str) -> list[str] | None:
+    """Validate a stage selection before constructing the runtime pipeline."""
+    requested = value.strip().lower()
+    if requested == "all":
+        return STAGES.copy()
+    stages = [item.strip() for item in requested.split(",") if item.strip()]
+    unknown = [stage for stage in stages if stage not in STAGES]
+    if unknown or not stages:
+        return None
+    return stages
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pretraining data and model pipeline")
     parser.add_argument("--config", default="config/pipeline_config.yaml")
@@ -115,24 +127,23 @@ def main() -> int:
             print(f"  {group.get('id', ''):<32} {group.get('name', '')}")
         return 0
 
+    stages = _parse_requested_stages(args.stages)
+    if stages is None:
+        requested = args.stages.strip().lower()
+        unknown = [item.strip() for item in requested.split(",") if item.strip() and item.strip() not in STAGES]
+        detail = unknown if unknown else [requested or "<empty>"]
+        print(f"Unknown stages: {detail}. Valid: {STAGES}")
+        return 1
+
     from pipeline.orchestrator import Pipeline
     pipeline = Pipeline(str(config), dataset_id=args.dataset_id)
     if args.no_resume:
         pipeline._resume = False
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
-    requested = args.stages.strip().lower()
     try:
-        if requested == "all":
-            pipeline.run("all", dataset_group=args.dataset_group)
-        else:
-            stages = [item.strip() for item in requested.split(",") if item.strip()]
-            unknown = [stage for stage in stages if stage not in STAGES]
-            if unknown:
-                print(f"Unknown stages: {unknown}. Valid: {STAGES}")
-                return 1
-            for stage in stages:
-                pipeline.run(stage, dataset_group=args.dataset_group)
+        for stage in stages:
+            pipeline.run(stage, dataset_group=args.dataset_group)
     except KeyboardInterrupt:
         print("\nInterrupted. Atomic artifacts remain intact; rerun with resume enabled.")
         return 130
