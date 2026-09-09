@@ -1,5 +1,5 @@
 # Model Lab core runtime dependencies.
-# Python 3.11+ is supported. PyTorch is installed separately by bootstrap.py
+# Python 3.11-3.13 is supported. PyTorch is installed separately by bootstrap.py
 # so the installer can choose a host-appropriate wheel without pulling a
 # potentially enormous CUDA bundle onto a low-resource machine.
 pyyaml>=6.0,<7
