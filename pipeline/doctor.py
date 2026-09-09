@@ -56,12 +56,25 @@ def _llamacpp_state(root: Path) -> tuple[bool, str]:
     return True, f"llama.cpp present; converter and quantizer found ({quant[0]})"
 
 
+def _config_state(root: Path) -> tuple[bool, str]:
+    config_path = root / "config" / "pipeline_config.yaml"
+    try:
+        import yaml
+        from pipeline.config_validation import validate_config
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        validate_config(cfg)
+        return True, "config/pipeline_config.yaml passed schema validation"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
 def run_doctor(root: str | Path) -> tuple[bool, list[dict]]:
     root = Path(root).resolve()
     checks: list[dict] = []
     checks.append(_check("project root", (root / "run_pipeline.py").is_file() and (root / "pipeline").is_dir(), str(root)))
     checks.append(_check("Python", _python_ok(), f"{sys.version.split()[0]} (requires >=3.11)"))
     checks.append(_check("pipeline config", (root / "config" / "pipeline_config.yaml").is_file(), "config/pipeline_config.yaml"))
+    checks.append(_check("pipeline config validation", *_config_state(root)))
     checks.append(_check("seed URLs", (root / "config" / "seed_urls.txt").is_file(), "config/seed_urls.txt"))
 
     try:
