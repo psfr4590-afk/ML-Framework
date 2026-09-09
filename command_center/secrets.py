@@ -1,54 +1,43 @@
 from __future__ import annotations
 import base64,json,os
-from datetime import datetime,timezone
 from pathlib import Path
 from threading import RLock
+from cryptography.fernet import Fernet
 from .config import ROOT
-LOCK=RLock(); STORE_PATH=ROOT/'.runtime'/'credentials.json'
-def _enc(s):
- from cryptography.fernet import Fernet
- key=os.environ.get('PIPELINE_CREDENTIAL_KEY')
- if not key: raise RuntimeError('PIPELINE_CREDENTIAL_KEY is required')
- return base64.b64encode(Fernet(key.encode()).encrypt(s.encode())).decode()
-def _dec(s):
- from cryptography.fernet import Fernet
- key=os.environ.get('PIPELINE_CREDENTIAL_KEY')
- if not key: raise RuntimeError('PIPELINE_CREDENTIAL_KEY is required')
- return Fernet(key.encode()).decrypt(base64.b64decode(s)).decode()
-def _now(): return datetime.now(timezone.utc).isoformat()
+LOCK=RLock(); STORE_PATH=ROOT/".runtime"/"credentials.json"
+def _key():
+ k=os.environ.get("PIPELINE_CREDENTIAL_KEY","")
+ if not k: raise RuntimeError("PIPELINE_CREDENTIAL_KEY is required on non-Windows hosts")
+ return Fernet(k.encode())
 class CredentialStore:
- def __init__(self,path=STORE_PATH): self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
+ def __init__(self,path:Path=STORE_PATH): self.path=path; self.path.parent.mkdir(parents=True,exist_ok=True)
  def _load(self):
-  if not self.path.exists(): return {'version':1,'credentials':{}}
-  d=json.loads(self.path.read_text(encoding='utf-8')); d.setdefault('credentials',{}); return d
+  if not self.path.exists(): return {"version":1,"credentials":{}}
+  return json.loads(self.path.read_text(encoding="utf-8"))
  def _save(self,d):
-  tmp=self.path.with_suffix('.tmp'); tmp.write_text(json.dumps(d,indent=2),encoding='utf-8'); os.replace(tmp,self.path)
-  try: os.chmod(self.path,0o600)
-  except OSError: pass
+  self.path.parent.mkdir(parents=True,exist_ok=True); tmp=self.path.with_suffix(".tmp"); tmp.write_text(json.dumps(d,indent=2),encoding="utf-8"); os.replace(tmp,self.path)
+ def set(self,name,secret,provider="custom",kind="token",env_var="",description="",identity=""):
+  with LOCK:
+   d=self._load(); f=_key(); d["credentials"][name]={"secret":base64.b64encode(f.encrypt(secret.encode())).decode(),"provider":provider,"type":kind,"env_var":env_var,"description":description,"identity":identity}; self._save(d)
+   return {"name":name,"provider":provider,"type":kind,"env_var":env_var,"description":description,"identity":identity,"stored":True}
+ def reveal(self,name):
+  d=self._load()
+  if name not in d.get("credentials",{}): raise KeyError(name)
+  return _key().decrypt(base64.b64decode(d["credentials"][name]["secret"])).decode()
  def list(self):
-  with LOCK:
-   out=[]
-   for n,x in sorted(self._load()['credentials'].items()):
-    out.append({'name':n,'provider':x.get('provider','custom'),'type':x.get('type','token'),'env_var':x.get('env_var',''),'description':x.get('description',''),'identity':x.get('identity',''),'updated_at':x.get('updated_at'),'stored':True,'environment_set':bool(x.get('env_var') and os.environ.get(x['env_var']))})
-   return out
- def set(self,name,secret,provider='custom',kind='token',env_var='',description='',identity=''):
-  if not name or not secret: raise ValueError('credential name and secret are required')
-  with LOCK:
-   d=self._load(); old=d['credentials'].get(name,{})
-   d['credentials'][name]={'provider':provider,'type':kind,'env_var':env_var,'description':description,'identity':identity,'secret':_enc(secret),'created_at':old.get('created_at',_now()),'updated_at':_now()}
-   self._save(d); return next(x for x in self.list() if x['name']==name)
+  d=self._load(); out=[]
+  for n,i in sorted(d.get("credentials",{}).items()): out.append({"name":n,"provider":i.get("provider","custom"),"type":i.get("type","token"),"env_var":i.get("env_var",""),"description":i.get("description",""),"identity":i.get("identity",""),"stored":True,"environment_set":bool(i.get("env_var") and os.environ.get(i.get("env_var")))})
+  return out
+ def environment(self):
+  env={}
+  for n,i in self._load().get("credentials",{}).items():
+   if i.get("env_var"): env[i["env_var"]]=self.reveal(n)
+  return env
  def delete(self,name):
   with LOCK:
    d=self._load()
-   if name not in d['credentials']: return False
-   del d['credentials'][name]; self._save(d); return True
- def reveal(self,name):
-  with LOCK:
-   x=self._load()['credentials'].get(name)
-   if not x: raise KeyError(name)
-   return _dec(x['secret'])
- def environment(self):
-  with LOCK: return {x['env_var']:_dec(x['secret']) for x in self._load()['credentials'].values() if x.get('env_var')}
+   if name not in d.get("credentials",{}): return False
+   del d["credentials"][name]; self._save(d); return True
  def test(self,name):
-  s=self.reveal(name); x=next(v for v in self.list() if v['name']==name); return {'ok':bool(s),'name':name,'provider':x['provider'],'env_var':x['env_var'],'length':len(s)}
+  value=self.reveal(name); return {"ok":bool(value),"name":name}
 credentials=CredentialStore()
