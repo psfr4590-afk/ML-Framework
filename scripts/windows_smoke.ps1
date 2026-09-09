@@ -67,7 +67,8 @@ if (Test-Path -LiteralPath $VenvPython) {
     Invoke-Step "py" @("-3.12", "-m", "venv", $Venv)
 }
 
-Invoke-Step $VenvPython @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
+# Do not self-upgrade pip here. The bootstrap owns dependency installation, and
+# downloading the newest packaging tools makes a smoke test fail on slow networks.
 Invoke-Step $VenvPython @($Bootstrap, "--install")
 Invoke-Step $VenvPython @($Bootstrap, "--doctor")
 Invoke-Step $VenvPython @($Pipeline, "--config", $SmokeConfig, "--no-resume")
