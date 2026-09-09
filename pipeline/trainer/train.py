@@ -35,22 +35,14 @@ def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler,
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"ckpt_{tag}_{step:07d}.pt" if tag else f"ckpt_{step:07d}.pt"
     path = out_dir / name
-    payload = {
-        "step": step,
-        "model": model.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "scaler": scaler.state_dict(),
-        "val_loss": val_loss,
-        "model_cfg": model.cfg.to_dict(),
-        "train_cfg": cfg,
-    }
+    payload = {"step": step, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
+               "scaler": scaler.state_dict(), "val_loss": val_loss,
+               "model_cfg": model.cfg.to_dict(), "train_cfg": cfg}
     tmp = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, tmp)
     os.replace(tmp, path)
-    manifest = {
-        "schema": 1, "path": str(path), "size": path.stat().st_size,
-        "sha256": sha256_file(path), "step": step, "val_loss": val_loss,
-    }
+    manifest = {"schema": 1, "path": str(path), "size": path.stat().st_size,
+                "sha256": sha256_file(path), "step": step, "val_loss": val_loss}
     mp = path.with_name(path.name + ".manifest.json")
     mtmp = mp.with_suffix(mp.suffix + ".tmp")
     mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -84,7 +76,8 @@ def load_checkpoint(path: Path, model: LlamaModel,
 
 
 def latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
-    ckpts = [p for p in sorted(ckpt_dir.glob("ckpt_*.pt")) if p.with_name(p.name + ".manifest.json").is_file()]
+    ckpts = [p for p in sorted(ckpt_dir.glob("ckpt_*.pt"))
+             if p.with_name(p.name + ".manifest.json").is_file()]
     return ckpts[-1] if ckpts else None
 
 
@@ -121,8 +114,7 @@ class Trainer:
         optimizer = torch.optim.AdamW(
             [{"params": decay, "weight_decay": float(t.get("weight_decay", 0.1))},
              {"params": no_decay, "weight_decay": 0.0}],
-            lr=float(t.get("lr_max", 3e-4)), betas=(0.9, 0.95), fused=False,
-        )
+            lr=float(t.get("lr_max", 3e-4)), betas=(0.9, 0.95), fused=False)
         scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
         self.amp_dtype = torch.float16
 
@@ -141,17 +133,18 @@ class Trainer:
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype)
         val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype)
 
-        start_step = 0
-        best_val = float("inf")
+        start_step, best_val = 0, float("inf")
         if bool(t.get("resume", True)):
             ckpt = latest_checkpoint(self.ckpt_dir)
             if ckpt:
                 start_step = load_checkpoint(ckpt, model, optimizer, scaler, device)
-                payload = torch.load(ckpt, map_location="cpu", weights_only=False) if "weights_only" in torch.load.__code__.co_varnames else torch.load(ckpt, map_location="cpu")
+                try:
+                    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+                except TypeError:
+                    payload = torch.load(ckpt, map_location="cpu")
                 best_val = float(payload.get("val_loss", best_val))
 
         metrics_path = self.out_dir / "logs" / "metrics.jsonl"
-        metrics_path.parent.mkdir(parents=True, exist_ok=True)
         metrics = open(metrics_path, "a", encoding="utf-8")
         model.train()
         optimizer.zero_grad(set_to_none=True)
@@ -160,7 +153,8 @@ class Trainer:
 
         try:
             while step < total_steps:
-                lr = cosine_lr(step, warmup_steps, float(t.get("lr_max", 3e-4)), float(t.get("lr_min", 3e-5)), total_steps)
+                lr = cosine_lr(step, warmup_steps, float(t.get("lr_max", 3e-4)),
+                               float(t.get("lr_min", 3e-5)), total_steps)
                 for group in optimizer.param_groups:
                     group["lr"] = lr
                 accum_loss = 0.0
@@ -182,12 +176,15 @@ class Trainer:
                 if step % 10 == 0:
                     elapsed = max(time.time() - start_time, 1e-6)
                     tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed
-                    metrics.write(json.dumps({"step": step, "train_loss": accum_loss, "lr": lr, "grad_norm": float(grad_norm), "tokens_per_sec": tok_s}) + "\n")
+                    metrics.write(json.dumps({"step": step, "train_loss": accum_loss,
+                                              "lr": lr, "grad_norm": float(grad_norm),
+                                              "tokens_per_sec": tok_s}) + "\n")
                     metrics.flush()
 
                 if step % eval_every == 0:
                     val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
-                    metrics.write(json.dumps({"step": step, "val_loss": val_loss, "val_ppl": math.exp(min(val_loss, 20))}) + "\n")
+                    metrics.write(json.dumps({"step": step, "val_loss": val_loss,
+                                              "val_ppl": math.exp(min(val_loss, 20))}) + "\n")
                     metrics.flush()
                     model.train()
                     if val_loss < best_val:
