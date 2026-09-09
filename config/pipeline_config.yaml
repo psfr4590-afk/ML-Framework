@@ -1,7 +1,6 @@
 # Master Model Lab pipeline configuration.
 pipeline:
   name: "pretrain-v1"
-  model_preset: "117M"
   model_name: "pretrain-model"
   output_dir: "output"
   scratch_dir: "scratch"
@@ -102,6 +101,9 @@ shard:
 train:
   resume: true
   allow_cpu_training: false
+  auto_size: false
+  target_training_hours: null
+  observed_tokens_per_sec: null
   model_preset: "85M"
   vocab_size: 32000
   seq_len: 1024
