@@ -4,4 +4,4 @@ Model Lab verification is divided into automated contract tests, Python compilat
 
 Run `python -m pytest -q` for the automated suite. On the target Windows machine, also run `python -m pytest -q .\tests\model_lab\test_machine_environment.py`.
 
-The release procedure is documented in `VERIFICATION_CHECKLIST.md` and `scripts/run_release_verification.ps1`.
+The release procedure is documented in `docs/verification/VERIFICATION_CHECKLIST.md` and `scripts/run_release_verification.ps1`.
