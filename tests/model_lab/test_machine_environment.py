@@ -57,7 +57,8 @@ def test_cuda_pytorch_status_is_recorded_not_assumed():
 
 @WINDOWS_ONLY
 def test_command_center_entrypoint_can_start_and_report_health():
-    import time, urllib.request
+    import time
+    import urllib.request
     proc = subprocess.Popen([sys.executable, str(ROOT / "run_command_center.py"), "--no-browser"], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     try:
         deadline = time.time() + 20
@@ -75,5 +76,7 @@ def test_command_center_entrypoint_can_start_and_report_health():
         except subprocess.TimeoutExpired: proc.kill()
 
 @WINDOWS_ONLY
-def test_root_launcher_starts_without_browser_flag_regression():
-    assert "from ui.app import main" in (ROOT / "launch.py").read_text(encoding="utf-8")
+def test_root_launcher_targets_desktop_ui():
+    launcher = (ROOT / "launch.py").read_text(encoding="utf-8")
+    assert "UI_ENTRYPOINT = ROOT / \"ui\" / \"app.py\"" in launcher
+    assert "run_command_center.py" not in launcher
