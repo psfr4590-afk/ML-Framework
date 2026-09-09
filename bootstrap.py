@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+RECONCILER = ROOT / "scripts" / "reconcile_environment.py"
 MIN_PYTHON = (3, 11)
 REQUIRED = ("yaml", "requests", "bs4", "lxml", "numpy", "tokenizers", "torch")
 
@@ -34,6 +35,9 @@ def _importable(name: str) -> bool:
 def doctor() -> int:
     failures: list[str] = []
     print(f"Project root: {ROOT}")
+    print(f"Reconciler: {'OK' if RECONCILER.is_file() else 'MISSING'} ({RECONCILER})")
+    if not RECONCILER.is_file():
+        failures.append("scripts/reconcile_environment.py missing")
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
     print(f"Platform: {platform.platform()}")
     if sys.version_info < MIN_PYTHON:
