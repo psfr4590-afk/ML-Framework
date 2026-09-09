@@ -1,22 +1,55 @@
 #!/usr/bin/env python3
+"""Deterministic production release gate for Model Lab."""
 from __future__ import annotations
-import argparse, platform, subprocess, sys
+
+import argparse
+import platform
+import subprocess
+import sys
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-def run(cmd:list[str])->int:
-    print("$", " ".join(map(str,cmd)))
-    return subprocess.run(cmd,cwd=ROOT,text=True,check=False).returncode
-def main()->int:
-    p=argparse.ArgumentParser(description="Model Lab production release gate")
-    p.add_argument("--bootstrap-native",action="store_true")
-    p.add_argument("--skip-tests",action="store_true")
-    a=p.parse_args()
-    if a.skip_tests: print("RELEASE GATE FAILED: --skip-tests is not allowed."); return 2
-    failures=[]
-    if run([sys.executable,"-m","compileall","-q","."]): failures.append("compileall")
-    if run([sys.executable,"-m","pytest","-q"]): failures.append("pytest")
-    if run([sys.executable,"run_pipeline.py","--doctor"]): failures.append("doctor")
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run(cmd: list[str]) -> int:
+    print("$", " ".join(map(str, cmd)))
+    return subprocess.run(cmd, cwd=ROOT, text=True, check=False).returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the Model Lab production release gate.")
+    parser.add_argument("--bootstrap-native", action="store_true")
+    parser.add_argument(
+        "--skip-tests",
+        action="store_true",
+        help="not allowed for a release gate; retained only to produce a clear error",
+    )
+    args = parser.parse_args()
+
+    if args.skip_tests:
+        print("RELEASE GATE FAILED: --skip-tests is not allowed for a production verification.")
+        return 2
+
+    failures: list[str] = []
+    if run([sys.executable, "-m", "compileall", "-q", "."]):
+        failures.append("compileall")
+    if run([sys.executable, "-m", "pytest", "-q"]):
+        failures.append("pytest")
+    if args.bootstrap_native:
+        script = ROOT / "scripts" / "reconcile_environment.py"
+        if run([sys.executable, str(script), "--project-root", str(ROOT), "--ensure-llamacpp"]):
+            failures.append("llama.cpp-bootstrap")
+    if run([sys.executable, "run_pipeline.py", "--doctor"]):
+        failures.append("doctor-required")
+
     if failures:
-        print("RELEASE GATE FAILED:",", ".join(failures)); print("Platform:",platform.platform()); return 2
-    print("RELEASE GATE PASSED"); return 0
-if __name__=="__main__": raise SystemExit(main())
+        print("RELEASE GATE FAILED:", ", ".join(failures))
+        print("Platform:", platform.platform())
+        return 2
+
+    print("RELEASE GATE PASSED: syntax, tests, environment, and native export prerequisites are green.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
