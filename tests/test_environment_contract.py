@@ -73,16 +73,24 @@ def test_semantic_acceleration_is_optional_for_termux():
     assert "faiss-cpu" in optional
 
 
-def test_native_bootstrap_has_android_profile():
+def test_native_bootstrap_has_platform_specific_build_profiles():
     source = (ROOT / "scripts/bootstrap_llama_cpp.sh").read_text(encoding="utf-8")
     assert "TERMUX_VERSION" in source
     assert "GGML_NATIVE=OFF" in source
     assert "GGML_OPENMP=OFF" in source
     assert "llama-quantize" in source
-    assert "llama-cli" not in source
     assert 'BUILD_DIR="build-model-lab"' in source
     assert "b10516" in source
     assert "b95502b" in source
+
+    android_start = source.index("if [[")
+    android_end = source.index("else", android_start)
+    android_profile = source[android_start:android_end]
+    desktop_profile = source[android_end:]
+    assert "--target llama-quantize" in android_profile
+    assert "llama-cli" not in android_profile
+    assert "--target llama-quantize llama-cli" in desktop_profile
+    assert "llama-cli" in desktop_profile
 
 
 def test_release_gate_cannot_skip_tests():
