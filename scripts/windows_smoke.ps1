@@ -15,7 +15,7 @@ function Invoke-Step {
     Write-Host "`n> $Exe $($Arguments -join ' ')" -ForegroundColor Cyan
     & $Exe @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE: $Exe $($Arguments -join ' ')"
+        throw "Command failed with exit code ${LASTEXITCODE}: $Exe $($Arguments -join ' ')"
     }
 }
 
