@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import load_groups
-from .runner import start_stage, stop
+from .runner import start_stage
 from .secrets import credentials
 from .store import store
 
