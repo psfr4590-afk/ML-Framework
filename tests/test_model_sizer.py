@@ -28,6 +28,23 @@ def test_large_gpu_can_select_360m_preset():
     assert profile.seq_len == 1024
 
 
+def test_profile_context_can_be_capped_to_shard_geometry():
+    hw = HardwareProfile("test", 4, 8.0, 0, 0.0, None, False)
+    profile = recommend_training_profile(hw, total_tokens=10_000, max_seq_len=128)
+    assert profile.seq_len == 128
+    assert "capped context" in profile.reason
+
+
+def test_profile_rejects_non_positive_context_cap():
+    hw = HardwareProfile("test", 4, 8.0, 0, 0.0, None, False)
+    try:
+        recommend_training_profile(hw, max_seq_len=0)
+    except ValueError as exc:
+        assert "max_seq_len" in str(exc)
+    else:
+        raise AssertionError("non-positive max_seq_len must be rejected")
+
+
 def test_token_estimator_uses_manifest_dtype(tmp_path: Path):
     (tmp_path / "shard_00000_train.bin").write_bytes(b"\0" * 8)
     (tmp_path / "shard_00000_val.bin").write_bytes(b"\0" * 4)
