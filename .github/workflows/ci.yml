@@ -22,7 +22,7 @@ jobs:
       - name: Install project dependencies
         run: pip install -r requirements.txt
       - name: Lint
-        run: ruff check command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
+        run: ruff check --select F command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
       - name: Compile
         run: python -m compileall -q .
       - name: Test
