@@ -74,6 +74,16 @@ python .\run_command_center.py --no-browser
 
 Without `--no-browser`, the backend opens the localhost command center in the default browser after its health endpoint is ready. The command center binds to localhost by default.
 
+## Production verification
+
+The standard release check is:
+
+```bash
+python scripts/verify_release.py
+```
+
+This runs compilation, the full test suite, and the required project/runtime doctor. It does not claim that machine-specific native export prerequisites were checked. Use `--bootstrap-native` when the release check must also clone/build and verify the supported llama.cpp toolchain.
+
 ## Production export requirement
 
 Final GGUF export requires a current llama.cpp checkout containing
@@ -106,9 +116,4 @@ python3 -m pip install -r requirements-optional.txt
 `sentence-transformers` and FAISS are optional. Without them, Model Lab uses a
 deterministic local token-gram fallback so the pipeline remains operational.
 
-`python scripts/verify_release.py` is intentionally read-only. To explicitly
-clone/build the native dependency as part of verification, use:
-
-```bash
-python3 scripts/verify_release.py --bootstrap-native
-```
+`python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is the exception: it is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
