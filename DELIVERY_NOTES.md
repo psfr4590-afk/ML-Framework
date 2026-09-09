@@ -1,35 +1,25 @@
 # Model Lab 1.3.0 Delivery Notes
 
-This archive is the implemented Model Lab source tree, based on the production-trusted r2 baseline and hardened for the delivery walkthrough.
+> **Historical document.** This file records the contents and verification boundary of the original delivery archive. It is not current release evidence and does not override the code, tests, or documentation on `main`.
 
-## Implemented in this delivery
+## Historical archive contents
 
-- Global semantic-dedup decision scope across embedding batches. Buffer boundaries no longer create independent duplicate universes.
-- Higher-weight semantic duplicates replace lower-weight representatives before final emission.
-- Persisted crawler telemetry under each dataset scratch directory (`crawl_stats.json`, `crawl_domains.json`).
+The archive was based on the production-trusted r2 baseline and included the following work:
+
+- Global semantic-dedup decision scope across embedding batches.
+- Higher-weight semantic duplicates replacing lower-weight representatives before final emission.
+- Persisted crawler telemetry under each dataset scratch directory.
 - FastAPI endpoints for crawler statistics, domain signal telemetry, and log tail.
-- Tk application styling is implemented with a safe fallback for minimal Tk installations.
-- `command_center.app` is a real compatibility export of the authoritative FastAPI application rather than a placeholder module.
-- Added regression coverage for cross-buffer semantic deduplication.
+- Tk application styling with a safe fallback for minimal Tk installations.
+- `command_center.app` as a compatibility export of the authoritative FastAPI application.
+- Regression coverage for cross-buffer semantic deduplication.
 
-## Verification performed for this archive
+## Historical verification boundary
 
-- Python compilation: PASS
-- Automated tests: 83 passed, 11 skipped
-- FastAPI command-center smoke test: PASS
-- Crawler security unit smoke test: PASS for private/local URL classes
+The archive verification recorded Python compilation, automated tests, a FastAPI command-center smoke test, and crawler security smoke coverage. The test count recorded here is historical and must not be used as the current repository test count.
 
-## Environment-dependent gates
+Machine-dependent release gates were intentionally not certified by that archive. Those gates included tokenizer integration, CUDA training, llama.cpp conversion and quantization, and runtime inference. Current release status must be established from the CI results and target-machine verification documented for the current `main` branch.
 
-The source tree contains the complete integration and release gates for tokenizer, CUDA training, llama.cpp conversion, quantization, and runtime inference. This build environment cannot certify those machine-dependent operations because it has no network access for dependency installation, no CUDA runtime, and no native llama.cpp checkout. The release scripts therefore fail closed rather than fabricating a green result.
+## Current-source rule
 
-The intended target-machine sequence remains:
-
-1. install `requirements.txt` with a host-appropriate PyTorch wheel;
-2. run `python run_pipeline.py --doctor`;
-3. run `python scripts/bootstrap_llama_cpp.sh` (or the Windows PowerShell equivalent);
-4. run the complete pytest suite;
-5. execute a reduced end-to-end crawl/clean/dedup/weight/tokenize/shard/train/export smoke run;
-6. verify GGUF inference with the pinned llama.cpp runtime.
-
-A release is not considered fully runtime-certified until those target-machine gates pass.
+Use the repository `main` branch, its CI results, and current release documentation for present-state claims. Do not copy historical test counts, environment limitations, or release conclusions from this document into current documentation.
