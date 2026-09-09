@@ -8,8 +8,12 @@ from __future__ import annotations
 import importlib
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+LLAMACPP_TAG = "b10516"
+LLAMACPP_COMMIT = "b95502b"
 
 
 def _check(name: str, ok: bool, detail: str, required: bool = True) -> dict:
@@ -48,12 +52,26 @@ def _llamacpp_state(root: Path) -> tuple[bool, str]:
     converter = target / "convert_hf_to_gguf.py"
     if not target.is_dir():
         return False, "llama.cpp checkout not present"
+    if not (target / ".git").is_dir():
+        return False, "llama.cpp checkout is not a Git repository"
     if not converter.is_file():
         return False, "llama.cpp checkout present but convert_hf_to_gguf.py is missing"
-    quant = list(target.rglob("llama-quantize*"))
+    try:
+        actual = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).stdout.strip()
+    except OSError as exc:
+        return False, f"unable to inspect llama.cpp revision: {exc}"
+    if not actual.startswith(LLAMACPP_COMMIT):
+        return False, f"llama.cpp revision mismatch: expected {LLAMACPP_COMMIT}..., found {actual or 'unknown'}"
+    quant = [p for p in target.rglob("llama-quantize*") if p.is_file()]
     if not quant:
-        return False, "converter present; llama-quantize executable not found"
-    return True, f"llama.cpp present; converter and quantizer found ({quant[0]})"
+        return False, f"llama.cpp {LLAMACPP_TAG} ({LLAMACPP_COMMIT}...) converter present; llama-quantize executable not found"
+    return True, f"llama.cpp {LLAMACPP_TAG} ({LLAMACPP_COMMIT}...) ready; converter and quantizer found ({quant[0]})"
 
 
 def _config_state(root: Path) -> tuple[bool, str]:
