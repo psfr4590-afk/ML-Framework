@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point for the pretrain data pipeline."""
+"""Canonical CLI entry point for the Model Lab pipeline."""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 STAGES = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
+VERSION = "1.3.0"
 
 
 def _load_cli_dataset_groups(config_path: Path) -> list[dict]:
@@ -49,22 +50,46 @@ def _parse_requested_stages(value: str) -> tuple[str, list[str] | None]:
     return requested, stages
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    return argparse.ArgumentParser(
+        description="Model Lab 1.3.0: local-first data and pretraining pipeline.",
+        epilog=(
+            "Examples:\n"
+            "  python run_pipeline.py --doctor\n"
+            "  python run_pipeline.py --list-stages\n"
+            "  python run_pipeline.py --list-groups\n"
+            "  python run_pipeline.py --no-resume\n"
+            "  mlab --help"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Pretraining data and model pipeline")
-    parser.add_argument("--config", default="config/pipeline_config.yaml")
-    parser.add_argument("--stages", default="all")
-    parser.add_argument("--no-resume", action="store_true")
-    parser.add_argument("--dataset-group", default=None)
-    parser.add_argument("--dataset-id", type=int, default=None)
-    parser.add_argument("--doctor", action="store_true")
-    parser.add_argument("--hardware-report", action="store_true", help="include detected hardware and training profile in doctor output")
-    parser.add_argument("--list-groups", action="store_true")
-    parser.add_argument("--list-stages", action="store_true")
-    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    parser.add_argument("--web", action="store_true")
+    parser = _build_parser()
+    parser.add_argument("--version", action="version", version=f"Model Lab {VERSION}")
+    parser.add_argument("--config", default="config/pipeline_config.yaml", help="pipeline config (default: %(default)s)")
+    parser.add_argument("--stages", default="all", help="comma-separated stages or 'all' (default: all)")
+    parser.add_argument("--no-resume", action="store_true", help="disable checkpoint resume for this run")
+    parser.add_argument("--dataset-group", default=None, help="dataset group ID to run")
+    parser.add_argument("--dataset-id", type=int, default=None, help="numeric dataset ID override")
+    parser.add_argument("--doctor", action="store_true", help="check project/runtime readiness without running stages")
+    parser.add_argument(
+        "--hardware-report",
+        action="store_true",
+        help="include detected hardware and conservative training guidance (with --doctor)",
+    )
+    parser.add_argument("--list-groups", action="store_true", help="list configured dataset groups without starting the pipeline")
+    parser.add_argument("--list-stages", action="store_true", help="list pipeline stages without starting the pipeline")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="logging verbosity")
+    parser.add_argument("--web", action="store_true", help="start the backend command center instead of the pipeline")
     args = parser.parse_args()
 
     logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    if args.hardware_report and not args.doctor:
+        print("--hardware-report requires --doctor")
+        return 1
 
     if args.doctor:
         from pipeline.doctor import run_doctor
