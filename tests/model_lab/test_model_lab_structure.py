@@ -77,7 +77,8 @@ def test_no_common_secret_literals_are_committed():
   data=p.read_text(encoding="utf-8",errors="ignore")
   for token in forbidden: assert token not in data,f"possible secret literal {token} in {p}"
 def test_release_docs_exist():
- for name in ["README.md","START_HERE.md","PROJECT_STATE.md","VERIFICATION.md"]: assert (ROOT/name).exists()
+ paths={"README.md","docs/development/START_HERE.md","docs/development/PROJECT_STATE.md","docs/verification/VERIFICATION.md"}
+ for name in paths: assert (ROOT/name).exists()
 def test_machine_verification_suite_is_present():
  assert (ROOT/"tests/model_lab/test_machine_environment.py").exists() and (ROOT/"scripts/run_release_verification.ps1").exists()
-def test_traceability_document_exists(): assert (ROOT/"VERIFICATION_CHECKLIST.md").exists()
+def test_traceability_document_exists(): assert (ROOT/"docs/verification/VERIFICATION_CHECKLIST.md").exists()
