@@ -1,4 +1,3 @@
-import json
 
 
 def test_refresh_pipeline_state_rejects_existing_but_unverified_artifact(tmp_path, monkeypatch):
@@ -36,7 +35,8 @@ def test_start_stage_rejects_second_start_during_thread_start(monkeypatch):
 
     class Dataset:
         def __getitem__(self, key):
-            if key == "stages": return {"crawl": "pending"}
+            if key == "stages":
+                return {"crawl": "pending"}
             raise KeyError(key)
 
     monkeypatch.setattr(runner.store, "get", lambda did: Dataset())
