@@ -23,6 +23,7 @@ MIN_PYTHON = (3, 11)
 MAX_PYTHON_EXCLUSIVE = (3, 14)
 REQUIRED = ("yaml", "requests", "bs4", "lxml", "numpy", "tokenizers", "torch")
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
+PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
 
 
 def project_root() -> Path:
@@ -72,7 +73,7 @@ def _pip_install(requirements: Path, *extra: str) -> int:
     if not requirements.is_file():
         print(f"Missing requirements file: {requirements}", file=sys.stderr)
         return 2
-    command = [sys.executable, "-m", "pip", "install", "-r", str(requirements), *extra]
+    command = [sys.executable, "-m", "pip", "install", *PIP_NETWORK_OPTIONS, "-r", str(requirements), *extra]
     print("$", " ".join(command))
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
