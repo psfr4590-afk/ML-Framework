@@ -58,7 +58,9 @@ python3 run_pipeline.py --config config/pipeline_config.smoke.yaml --no-resume
 
 The smoke run is the recommended first useful run. It is bounded, CPU-safe, and designed to prove that the pipeline can produce and chain real artifacts without committing a newcomer to a long training job.
 
-After the smoke run succeeds, inspect the host before doing expensive work:
+The repository default configuration is also intentionally safe: `config/pipeline_config.yaml` is the bounded starter profile used when no `--config` argument is supplied. The previous full-scale profile is preserved as `config/pipeline_config.full.yaml` and must be selected explicitly for large runs.
+
+After the starter/smoke run succeeds, inspect the host before doing expensive work:
 
 ```powershell
 python .\run_pipeline.py --doctor --hardware-report
@@ -84,7 +86,7 @@ The release verifier explicitly distinguishes automated checks from target-machi
 
 Training can use an explicit preset, or Model Lab can choose a conservative profile based on the detected hardware. Auto-sizing changes the model preset, sequence length, microbatch geometry, evaluation budget, checkpoint cadence, and total step budget together rather than relying on a parameter-only memory estimate.
 
-Enable it in `config/pipeline_config.yaml`:
+Enable it in `config/pipeline_config.full.yaml` for a larger run, or keep the starter defaults for the first run:
 
 ```yaml
 train:
