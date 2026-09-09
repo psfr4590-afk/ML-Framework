@@ -9,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 
+import yaml
+
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -20,6 +22,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 STAGES = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
+
+
+def _load_cli_dataset_groups(config_path: Path) -> list[dict]:
+    """Load dataset-group metadata without constructing a pipeline."""
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    configured = config.get("crawl", {}).get("dataset_groups_file", "config/dataset_groups.yaml")
+    groups_path = Path(configured)
+    if not groups_path.is_absolute():
+        groups_path = ROOT / groups_path
+    if not groups_path.is_file():
+        return [{"id": "default", "name": "default"}]
+    payload = yaml.safe_load(groups_path.read_text(encoding="utf-8")) or {}
+    return list(payload.get("dataset_groups", []))
 
 
 def main() -> int:
@@ -94,16 +109,17 @@ def main() -> int:
         print(f"Config not found: {config}")
         return 1
 
+    if args.list_groups:
+        print("Configured dataset groups:")
+        for group in _load_cli_dataset_groups(config):
+            print(f"  {group.get('id', ''):<32} {group.get('name', '')}")
+        return 0
+
     from pipeline.orchestrator import Pipeline
     pipeline = Pipeline(str(config), dataset_id=args.dataset_id)
     if args.no_resume:
         pipeline._resume = False
-
-    if args.list_groups:
-        print("Configured dataset groups:")
-        for group in pipeline._load_dataset_groups():
-            print(f"  {group.get('id', ''):<32} {group.get('name', '')}")
-        return 0
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
 
     requested = args.stages.strip().lower()
     try:
