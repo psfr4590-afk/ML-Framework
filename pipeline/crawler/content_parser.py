@@ -1,7 +1,7 @@
 """Format-aware parsing for web-crawled documents.
 
 The crawler must never turn a binary/data document into an empty or metadata-only
-Document.  This module converts common document/data formats into deterministic
+Document. This module converts common document/data formats into deterministic
 text while preserving record, page, sheet, and slide boundaries where possible.
 Unsupported or image-only content fails closed instead of silently producing bad
 training data.
@@ -12,7 +12,6 @@ import csv
 import io
 import json
 import mimetypes
-import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,12 +73,12 @@ _MIME_TYPES = {
 
 
 def _kind(url: str, content_type: str) -> str:
-    mime = content_type.split(";", 1)[0].strip().lower()
-    if mime in _MIME_TYPES:
-        return _MIME_TYPES[mime]
     suffix = Path(url.split("?", 1)[0]).suffix.lower()
     if suffix in _EXTENSIONS:
         return _EXTENSIONS[suffix]
+    mime = content_type.split(";", 1)[0].strip().lower()
+    if mime in _MIME_TYPES:
+        return _MIME_TYPES[mime]
     guessed = mimetypes.guess_type(url)[0]
     return _MIME_TYPES.get(guessed or "", "")
 
@@ -224,6 +223,7 @@ def _parse_xlsx(data: bytes) -> ParsedContent:
         workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         blocks = []
         total_rows = 0
+        sheet_count = len(workbook.sheetnames)
         for sheet in workbook.worksheets:
             rows = list(sheet.iter_rows(values_only=True))
             if not rows:
@@ -240,7 +240,7 @@ def _parse_xlsx(data: bytes) -> ParsedContent:
         workbook.close()
         if not blocks:
             raise ContentParseError("XLSX contains no non-empty data rows")
-        return ParsedContent(text="\n\n".join(blocks), content_type="tabular_data", metadata={"format": "xlsx", "sheets": len(workbook.sheetnames), "rows": total_rows})
+        return ParsedContent(text="\n\n".join(blocks), content_type="tabular_data", metadata={"format": "xlsx", "sheets": sheet_count, "rows": total_rows})
     except ContentParseError:
         raise
     except Exception as exc:
@@ -292,7 +292,7 @@ def parse_content(url: str, content_type: str, data: bytes) -> ParsedContent:
     if kind == "pdf":
         return _parse_pdf(data)
     if kind == "csv":
-        return _parse_csv(data, ",")
+        return _parse_csv(data)
     if kind == "tsv":
         return _parse_csv(data, "\t")
     if kind == "json":
