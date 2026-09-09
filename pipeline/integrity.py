@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 
+MANIFEST_SCHEMA = 2
+
+
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -33,7 +36,7 @@ def write_manifest(
     extra: dict | None = None,
 ) -> Path:
     payload = {
-        "schema": 2,
+        "schema": MANIFEST_SCHEMA,
         "kind": kind,
         "path": str(path),
         "size": path.stat().st_size,
@@ -53,7 +56,7 @@ def write_manifest(
 
 
 def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None) -> bool:
-    """Return true only when bytes and, when supplied, semantic provenance match."""
+    """Return true only when bytes and semantic manifest metadata are valid."""
     if not path.exists() or path.stat().st_size <= 0:
         return False
     mp = manifest_path(path)
@@ -61,6 +64,8 @@ def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None
         return False
     try:
         m = json.loads(mp.read_text(encoding="utf-8"))
+        if int(m.get("schema", -1)) != MANIFEST_SCHEMA or not isinstance(m.get("kind"), str) or not m["kind"]:
+            return False
         if int(m.get("size", -1)) != path.stat().st_size:
             return False
         if m.get("sha256") != sha256_file(path):
@@ -82,11 +87,7 @@ def validate_checkpoint(
     path: Path,
     expected_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Validate checkpoint bytes, manifest, schema, and model/config compatibility.
-
-    The returned payload is safe for callers to reuse after validation. PyTorch is
-    imported lazily so artifact-only users do not pay the model dependency cost.
-    """
+    """Validate checkpoint bytes, manifest, schema, and model/config compatibility."""
     path = Path(path)
     if not path.is_file() or path.stat().st_size < 1024:
         raise RuntimeError(f"Checkpoint missing or truncated: {path}")
@@ -97,6 +98,8 @@ def validate_checkpoint(
         meta = json.loads(mp.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Checkpoint manifest is invalid: {mp}") from exc
+    if int(meta.get("schema", -1)) != MANIFEST_SCHEMA or meta.get("kind") != "checkpoint":
+        raise RuntimeError(f"Checkpoint manifest schema/kind invalid: {mp}")
     if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
         raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
 
