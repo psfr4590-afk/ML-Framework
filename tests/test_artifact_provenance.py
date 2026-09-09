@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from pipeline.integrity import artifact_valid, sha256_file, write_manifest
 
