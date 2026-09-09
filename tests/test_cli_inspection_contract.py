@@ -21,7 +21,8 @@ def test_list_groups_does_not_construct_pipeline(monkeypatch, capsys):
     assert run_pipeline.main() == 0
     output = capsys.readouterr().out
     assert "Configured dataset groups:" in output
-    assert "swe_cs_systems" in output
+    assert "smoke" in output
+    assert "Bounded local smoke corpus" in output
 
 
 def test_pipeline_log_level_is_reapplied_after_pipeline_initialization(monkeypatch):
