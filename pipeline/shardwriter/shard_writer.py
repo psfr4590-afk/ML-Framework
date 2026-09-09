@@ -210,7 +210,7 @@ class ShardWriter:
 
 
 class ShardDataLoader:
-    """Memory-mapped loader for binary shards."""
+    """Memory-mapped loader for binary shards with SHA256 integrity verification."""
 
     def __init__(self, shard_dir: str | Path, split: str, seq_len: int,
                  dtype=np.uint16, seed: int = 42):
@@ -231,8 +231,28 @@ class ShardDataLoader:
             entries = {item["name"]: item for item in manifest.get("files", [])}
             for shard in self._shards:
                 item = entries.get(shard.name)
-                if not item or int(item.get("size", -1)) != shard.stat().st_size:
-                    raise RuntimeError(f"Shard manifest mismatch: {shard}")
+                if not item:
+                    raise RuntimeError(f"Shard entry not in manifest: {shard.name}")
+                # Verify file exists and size matches
+                actual_size = shard.stat().st_size
+                expected_size = int(item.get("size", -1))
+                if actual_size != expected_size:
+                    raise RuntimeError(
+                        f"Shard manifest mismatch for {shard.name}: "
+                        f"expected size {expected_size}, got {actual_size}"
+                    )
+                # NEW: Verify SHA256 hash matches manifest
+                expected_sha256 = item.get("sha256")
+                if not expected_sha256:
+                    raise RuntimeError(f"Shard manifest missing SHA256 for {shard.name}")
+                actual_sha256 = self._compute_sha256(shard)
+                if actual_sha256 != expected_sha256:
+                    raise RuntimeError(
+                        f"Shard integrity check failed for {shard.name}: "
+                        f"manifest SHA256={expected_sha256}, actual={actual_sha256}. "
+                        f"File may be corrupted."
+                    )
+                log.debug("Shard %s: size and SHA256 verified", shard.name)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, KeyError) as exc:
             raise RuntimeError(f"Invalid shard manifest: {manifest_path}") from exc
 
@@ -240,6 +260,18 @@ class ShardDataLoader:
         self._shard_idx = 0
         self._pos = 0
         self._data = self._load_shard(self._shards[0])
+
+    @staticmethod
+    def _compute_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
+        """Compute SHA256 hash of a file efficiently."""
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
 
     def _load_shard(self, path: Path) -> np.ndarray:
         return np.memmap(path, dtype=self._dtype, mode="r")
