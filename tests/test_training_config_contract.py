@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import torch
@@ -52,7 +53,7 @@ def test_load_checkpoint_rejects_stale_provenance(tmp_path):
         "val_loss": 1.0,
         "provenance": {"train_config_sha256": "old"},
     }
-    (tmp_path / "ckpt_0000001.pt.manifest.json").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    (tmp_path / "ckpt_0000001.pt.manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     try:
         load_checkpoint(
