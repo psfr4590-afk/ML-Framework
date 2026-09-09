@@ -16,7 +16,7 @@ def _load_config(name: str) -> dict:
 def test_default_runner_and_docs_share_one_starter_profile():
     runner = _read("run_pipeline.py")
     readme = _read("README.md")
-    start_here = _read("START_HERE.md")
+    start_here = _read("docs/development/START_HERE.md")
 
     assert 'default="config/pipeline_config.yaml"' in runner
     assert "python .\\run_pipeline.py --no-resume" in readme

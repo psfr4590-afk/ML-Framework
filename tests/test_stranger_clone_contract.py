@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_PUBLIC_FILES = {
     "README.md",
-    "START_HERE.md",
+    "docs/development/START_HERE.md",
     "LICENSE",
     ".gitignore",
     "pyproject.toml",
@@ -67,7 +67,7 @@ def test_public_tree_contains_no_generated_or_local_runtime_paths() -> None:
 
 def test_canonical_first_run_commands_are_documented() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    start_here = (ROOT / "START_HERE.md").read_text(encoding="utf-8")
+    start_here = (ROOT / "docs/development/START_HERE.md").read_text(encoding="utf-8")
     combined = f"{readme}\n{start_here}"
     required_fragments = [
         "bootstrap.py --install",
