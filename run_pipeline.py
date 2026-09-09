@@ -37,16 +37,16 @@ def _load_cli_dataset_groups(config_path: Path) -> list[dict]:
     return list(payload.get("dataset_groups", []))
 
 
-def _parse_requested_stages(value: str) -> list[str] | None:
+def _parse_requested_stages(value: str) -> tuple[str, list[str] | None]:
     """Validate a stage selection before constructing the runtime pipeline."""
     requested = value.strip().lower()
     if requested == "all":
-        return STAGES.copy()
+        return requested, None
     stages = [item.strip() for item in requested.split(",") if item.strip()]
     unknown = [stage for stage in stages if stage not in STAGES]
     if unknown or not stages:
-        return None
-    return stages
+        return requested, None
+    return requested, stages
 
 
 def main() -> int:
@@ -127,9 +127,8 @@ def main() -> int:
             print(f"  {group.get('id', ''):<32} {group.get('name', '')}")
         return 0
 
-    stages = _parse_requested_stages(args.stages)
-    if stages is None:
-        requested = args.stages.strip().lower()
+    requested, stages = _parse_requested_stages(args.stages)
+    if stages is None and requested != "all":
         unknown = [item.strip() for item in requested.split(",") if item.strip() and item.strip() not in STAGES]
         detail = unknown if unknown else [requested or "<empty>"]
         print(f"Unknown stages: {detail}. Valid: {STAGES}")
@@ -142,8 +141,11 @@ def main() -> int:
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
     try:
-        for stage in stages:
-            pipeline.run(stage, dataset_group=args.dataset_group)
+        if requested == "all":
+            pipeline.run("all", dataset_group=args.dataset_group)
+        else:
+            for stage in stages or []:
+                pipeline.run(stage, dataset_group=args.dataset_group)
     except KeyboardInterrupt:
         print("\nInterrupted. Atomic artifacts remain intact; rerun with resume enabled.")
         return 130
