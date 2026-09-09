@@ -29,7 +29,6 @@ class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
     """Enforce that all API requests originate from localhost (127.0.0.1 or ::1)."""
 
     async def dispatch(self, request: Request, call_next):
-        # For API routes, require localhost origin.
         if request.url.path.startswith("/api/"):
             client_host = request.client.host if request.client else None
             if client_host not in ("127.0.0.1", "::1"):
@@ -58,7 +57,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add localhost-only middleware
 app.add_middleware(LocalhostOnlyMiddleware)
 
 
@@ -95,13 +93,13 @@ def system():
     return {
         "application": "M²S Model Training Pipeline",
         "version": "1.3.0",
-        "platform": platform.platform(),
+        "platform": sys.platform,
         "python": sys.version.split()[0],
         "machine": platform.machine(),
-        "hostname": platform.node(),
         "stages": list(store.STAGES) if hasattr(store, "STAGES") else [
             "crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"
         ],
+        "security": {"api_access": "localhost-only"},
     }
 
 
