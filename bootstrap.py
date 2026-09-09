@@ -2,7 +2,7 @@
 """Canonical Model Lab bootstrapper.
 
 Resolves the project from this file, validates the environment, and optionally
-installs the declared core dependencies or reconciles the local llama.cpp toolchain.
+installs the declared dependencies or reconciles the local llama.cpp toolchain.
 It never depends on the caller's cwd.
 """
 from __future__ import annotations
@@ -17,8 +17,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RECONCILER = ROOT / "scripts" / "reconcile_environment.py"
+REQUIREMENTS = ROOT / "requirements.txt"
+TORCH_REQUIREMENTS = ROOT / "requirements-torch.txt"
 MIN_PYTHON = (3, 11)
 REQUIRED = ("yaml", "requests", "bs4", "lxml", "numpy", "tokenizers", "torch")
+CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 
 
 def project_root() -> Path:
@@ -54,14 +57,22 @@ def doctor() -> int:
     return 0 if not failures else 2
 
 
-def install() -> int:
-    req = ROOT / "requirements.txt"
-    if not req.is_file():
-        print(f"Missing requirements file: {req}", file=sys.stderr)
+def _pip_install(requirements: Path, *extra: str) -> int:
+    if not requirements.is_file():
+        print(f"Missing requirements file: {requirements}", file=sys.stderr)
         return 2
-    command = [sys.executable, "-m", "pip", "install", "-r", str(req)]
+    command = [sys.executable, "-m", "pip", "install", "-r", str(requirements), *extra]
     print("$", " ".join(command))
     return subprocess.run(command, cwd=ROOT, check=False).returncode
+
+
+def install(torch_channel: str = "cpu") -> int:
+    result = _pip_install(REQUIREMENTS)
+    if result != 0:
+        return result
+    if torch_channel == "cpu":
+        return _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
+    return _pip_install(TORCH_REQUIREMENTS)
 
 
 def ensure_llamacpp() -> int:
@@ -77,12 +88,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Model Lab bootstrap")
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--install", action="store_true")
+    parser.add_argument(
+        "--torch-channel",
+        choices=("cpu", "default"),
+        default="cpu",
+        help="PyTorch wheel source for --install (default: cpu)",
+    )
     parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()
     if args.ensure_llamacpp:
         return ensure_llamacpp()
     if args.install:
-        return install()
+        return install(args.torch_channel)
     return doctor()
 
 
