@@ -12,6 +12,8 @@ def validate_config(cfg: dict) -> None:
     for section in required:
         if not isinstance(cfg.get(section), dict):
             raise ValueError(f"Missing or invalid configuration section: {section}")
+    if "model_preset" in cfg["pipeline"]:
+        raise ValueError("pipeline.model_preset is obsolete; configure train.model_preset instead")
     tok, shard, train, export = cfg["tokenizer"], cfg["shard"], cfg["train"], cfg["export"]
     vocab = int(tok.get("vocab_size", 0))
     seq = int(shard.get("sequence_length", 0))
@@ -35,8 +37,15 @@ def validate_config(cfg: dict) -> None:
     preset = str(train.get("model_preset", "85M"))
     if preset not in PRESETS:
         raise ValueError(f"train.model_preset '{preset}' is unsupported")
+    auto_size = bool(train.get("auto_size", False))
+    if auto_size and "model_preset" not in train:
+        raise ValueError("train.model_preset must remain defined as the manual fallback when train.auto_size=true")
+    if train.get("target_training_hours") is not None and float(train["target_training_hours"]) <= 0:
+        raise ValueError("train.target_training_hours must be > 0 when configured")
+    if train.get("observed_tokens_per_sec") is not None and float(train["observed_tokens_per_sec"]) <= 0:
+        raise ValueError("train.observed_tokens_per_sec must be > 0 when configured")
     if int(train.get("warmup_steps", 0)) >= steps:
-        raise ValueError("train.warmup_steps must be smaller than total_steps")
+        raise ValueError("train.warmup_steps must be smaller than train.total_steps")
     quant = str(export.get("quant", "F16")).upper()
     if quant not in QUANTS:
         raise ValueError(f"export.quant '{quant}' is unsupported")
