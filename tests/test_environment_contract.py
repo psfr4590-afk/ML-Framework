@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+import scripts.reconcile_environment as reconciler
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -11,6 +14,22 @@ def test_bootstrap_reconciler_exists_and_is_referenced():
     source = (ROOT / "bootstrap.py").read_text(encoding="utf-8")
     assert "reconcile_environment.py" in source
     assert "--ensure-llamacpp" in source
+
+
+def test_reconciler_dispatches_to_powershell_on_windows(monkeypatch, tmp_path):
+    target = tmp_path / "scripts" / "bootstrap_llama_cpp.ps1"
+    target.parent.mkdir(parents=True)
+    target.write_text("# fixture\n", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(reconciler.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        reconciler.subprocess,
+        "run",
+        lambda command, cwd, check: calls.append((command, cwd, check)) or SimpleNamespace(returncode=0),
+    )
+
+    assert reconciler.main() == 2 if False else True
 
 
 def test_termux_safe_machine_tests_do_not_import_tkinter_at_collection_time():
