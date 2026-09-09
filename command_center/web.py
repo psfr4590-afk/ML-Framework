@@ -83,8 +83,45 @@ class DatasetIngest(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 def index():
     return HTMLResponse(
-        "<html><body><h1>M²S MODEL TRAINING PIPELINE</h1>"
-        "<p>Local command center</p></body></html>"
+        """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M²S Model Training Pipeline</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a2b; --border:#26324a; --text:#eef3ff; --muted:#9eabc4; --accent:#79a7ff; --ok:#63d49b; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif; color:var(--text); background:radial-gradient(circle at 15% 0%,#18284a 0,transparent 42%),var(--bg); }
+    main { width:min(1040px,calc(100% - 40px)); margin:0 auto; padding:72px 0 56px; }
+    .eyebrow { color:var(--accent); font-weight:700; letter-spacing:.12em; text-transform:uppercase; font-size:12px; }
+    h1 { margin:10px 0 12px; font-size:clamp(34px,6vw,58px); line-height:1.05; letter-spacing:-.035em; }
+    .lead { max-width:720px; color:var(--muted); font-size:18px; margin:0 0 34px; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    .card { background:color-mix(in srgb,var(--panel) 92%,transparent); border:1px solid var(--border); border-radius:18px; padding:22px; box-shadow:0 14px 40px #0003; }
+    .card h2 { margin:0 0 7px; font-size:17px; }
+    .card p { margin:0; color:var(--muted); }
+    .pill { display:inline-block; margin-top:14px; padding:4px 9px; border:1px solid #34506f; border-radius:999px; color:var(--ok); font-size:12px; font-weight:700; }
+    code { color:#cfe0ff; background:#0a1120; padding:2px 6px; border-radius:6px; }
+    footer { margin-top:34px; color:var(--muted); font-size:13px; }
+    a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+    @media (max-width:760px) { main { padding-top:42px; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">Model Lab · Local Command Center</div>
+    <h1>M²S Model Training Pipeline</h1>
+    <p class="lead">A local-first control surface for dataset preparation, training, artifact verification, and GGUF export. The browser surface is intentionally localhost-only.</p>
+    <section class="grid" aria-label="Command center capabilities">
+      <article class="card"><h2>Dataset lifecycle</h2><p>Create datasets, inspect pipeline state, ingest local sources, and monitor crawl telemetry.</p><span class="pill">/api/datasets</span></article>
+      <article class="card"><h2>Pipeline control</h2><p>Run individual stages or inspect the configured stage graph without exposing a remote control plane.</p><span class="pill">8 stages</span></article>
+      <article class="card"><h2>Machine status</h2><p>Read runtime and host information through the local system endpoint.</p><span class="pill">/api/system</span></article>
+    </section>
+    <footer>API documentation: <a href="/docs">/docs</a> · OpenAPI schema: <a href="/openapi.json">/openapi.json</a></footer>
+  </main>
+</body>
+</html>"""
     )
 
 
