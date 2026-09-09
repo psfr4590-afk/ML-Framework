@@ -1,31 +1,8 @@
-from __future__ import annotations
-
-NAV_ITEMS = [
-    ("dashboard", "Dashboard"),
-    ("dataset", "Datasets"),
-    ("sources", "Sources"),
-    ("crawler", "Crawler"),
-    ("pipeline", "Pipeline"),
-    ("training", "Training"),
-    ("outputs", "Outputs"),
-    ("diagnostics", "Diagnostics"),
-    ("logs", "Logs"),
-    ("system", "System"),
-    ("configuration", "Configuration"),
-    ("credentials", "Credentials"),
-    ("command_center", "Command Center"),
-]
-
-def current_screen() -> str:
-    from . import state
-    return str(state.get("screen", "dashboard"))
-
-def navigate(screen: str) -> str:
-    from . import state
-    from .events import emit
-    valid = {name for name, _ in NAV_ITEMS}
-    if screen not in valid:
-        raise ValueError(f"Unknown UI screen: {screen}")
-    state.set("screen", screen)
-    emit("navigation", screen)
-    return screen
+"""Model Lab screen registry and navigation."""
+from . import events,state
+NAV_ITEMS=[("Dashboard","Dashboard"),("Datasets","Dataset"),("Pipeline","Pipeline"),("Credentials","Credentials"),("Sources","Sources"),("Crawler","Crawler"),("Training","Training"),("Outputs","Outputs"),("Logs","Logs"),("System","System"),("Configuration","Configuration"),("Diagnostics","Diagnostics"),("Command Center","CommandCenter")]
+_registry={}
+def register(key,factory): _registry[key]=factory
+def navigate(key): state.set("screen",key); events.publish(events.NAV_CHANGE,key)
+def current(): return state.get("screen","Dashboard")
+def factory(key): return _registry.get(key)
