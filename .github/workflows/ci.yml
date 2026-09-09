@@ -30,6 +30,33 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU PyTorch
+        shell: pwsh
+        run: pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project dependencies
+        shell: pwsh
+        run: pip install -r requirements.txt
+      - name: Install package metadata
+        shell: pwsh
+        run: pip install . --no-deps
+      - name: Lint
+        shell: pwsh
+        run: ruff check --select F command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
+      - name: Compile
+        shell: pwsh
+        run: python -m compileall -q .
+      - name: Test
+        shell: pwsh
+        run: python -m pytest -q
+
   windows-script-contract:
     runs-on: windows-latest
     steps:

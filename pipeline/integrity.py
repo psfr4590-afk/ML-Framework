@@ -78,6 +78,61 @@ def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None
         return False
 
 
+def validate_checkpoint(
+    path: Path,
+    expected_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate checkpoint bytes, manifest, schema, and model/config compatibility.
+
+    The returned payload is safe for callers to reuse after validation. PyTorch is
+    imported lazily so artifact-only users do not pay the model dependency cost.
+    """
+    path = Path(path)
+    if not path.is_file() or path.stat().st_size < 1024:
+        raise RuntimeError(f"Checkpoint missing or truncated: {path}")
+    mp = manifest_path(path)
+    if not mp.is_file():
+        raise RuntimeError(f"Checkpoint integrity manifest missing: {mp}")
+    try:
+        meta = json.loads(mp.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Checkpoint manifest is invalid: {mp}") from exc
+    if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
+        raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
+
+    try:
+        import torch
+        from pipeline.trainer.model import LlamaModel, ModelConfig
+
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            payload = torch.load(path, map_location="cpu")
+    except Exception as exc:
+        raise RuntimeError(f"Unable to load checkpoint {path}: {exc}") from exc
+
+    if not isinstance(payload, dict) or "model" not in payload or "model_cfg" not in payload or "step" not in payload:
+        raise RuntimeError(f"Checkpoint schema invalid: {path}")
+    try:
+        cfg = ModelConfig.from_dict(payload["model_cfg"])
+    except Exception as exc:
+        raise RuntimeError(f"Checkpoint model config is invalid: {path}") from exc
+    if expected_config is not None and cfg.to_dict() != expected_config:
+        raise RuntimeError(f"Checkpoint model config mismatch: {path}")
+    state = payload["model"]
+    if not isinstance(state, dict):
+        raise RuntimeError(f"Checkpoint model state is not a mapping: {path}")
+    model = LlamaModel(cfg)
+    try:
+        missing, unexpected = model.load_state_dict(state, strict=False)
+    except RuntimeError as exc:
+        raise RuntimeError(f"Checkpoint tensor shapes do not match its model config: {exc}") from exc
+    missing = [x for x in missing if x not in {"rope_cos", "rope_sin"}]
+    if missing or unexpected:
+        raise RuntimeError(f"Checkpoint state is incompatible. Missing={missing}, unexpected={unexpected}")
+    return payload
+
+
 def atomic_jsonl_write(path: Path, producer) -> int:
     """Write producer() output atomically. Existing artifact remains intact on failure."""
     path.parent.mkdir(parents=True, exist_ok=True)

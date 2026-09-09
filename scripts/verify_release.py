@@ -9,6 +9,16 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+LINT_TARGETS = [
+    "command_center",
+    "pipeline",
+    "tests",
+    "scripts",
+    "run_pipeline.py",
+    "run_command_center.py",
+    "launch.py",
+    "bootstrap.py",
+]
 
 
 def run(cmd: list[str]) -> int:
@@ -34,6 +44,8 @@ def main() -> int:
     compile_targets = ["pipeline", "command_center", "scripts", "run_pipeline.py", "run_command_center.py", "launch.py"]
     if run([sys.executable, "-m", "compileall", "-q", *compile_targets]):
         failures.append("compileall")
+    if run(["ruff", "check", "--select", "F", *LINT_TARGETS]):
+        failures.append("ruff")
     if run([sys.executable, "-m", "pytest", "-q"]):
         failures.append("pytest")
     native_checked = False
@@ -51,9 +63,9 @@ def main() -> int:
         return 2
 
     if native_checked:
-        print("RELEASE GATE PASSED: syntax, tests, environment, and native export prerequisites are green.")
+        print("RELEASE GATE PASSED: syntax, lint, tests, environment, and native export prerequisites are green.")
     else:
-        print("RELEASE GATE PASSED: syntax, tests, and required environment checks are green.")
+        print("RELEASE GATE PASSED: syntax, lint, tests, and required environment checks are green.")
         print("Native export prerequisites were not checked; use --bootstrap-native for that gate.")
     return 0
 

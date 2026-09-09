@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
@@ -9,6 +10,7 @@ from typing import Iterator
 log = logging.getLogger("tokenizer")
 
 try:
+    import tokenizers as tokenizers_lib
     from tokenizers import Tokenizer, decoders
     from tokenizers.models import BPE
     from tokenizers.normalizers import NFKC, Sequence as NormSequence
@@ -17,7 +19,16 @@ try:
     HF_TOKENIZERS_AVAILABLE = True
 except ImportError:
     HF_TOKENIZERS_AVAILABLE = False
+    tokenizers_lib = None
     log.warning("tokenizers library not installed")
+
+
+def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _doc_stream(jsonl_path: Path, sample_size: int | None, seed: int = 42) -> Iterator[str]:
@@ -122,12 +133,24 @@ class BPETokenizerTrainer:
 
             out_json = self._output_path / "tokenizer.json"
             tokenizer.save(str(out_json))
-
+            corpus_sha256 = _sha256_file(corpus_path)
             config = {
                 "bos_token": "<|bos|>", "eos_token": "<|eos|>", "unk_token": "<|unk|>",
                 "pad_token": "<|pad|>", "sep_token": "<|sep|>", "mask_token": "<|mask|>",
                 "model_type": "llama", "tokenizer_class": "PreTrainedTokenizerFast",
                 "vocab_size": actual_vocab_size,
+                "provenance": {
+                    "schema": 1,
+                    "trainer": "BPETokenizerTrainer",
+                    "tokenizers_version": getattr(tokenizers_lib, "__version__", "unknown"),
+                    "corpus_sha256": corpus_sha256,
+                    "corpus_path": str(corpus_path),
+                    "sample_size": self._sample_size,
+                    "seed": 42,
+                    "vocab_size_requested": self._vocab_size,
+                    "min_frequency": self._min_freq,
+                    "special_tokens": list(self._special),
+                },
             }
             (self._output_path / "tokenizer_config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
             spm = {k: config[k] for k in ("bos_token", "eos_token", "unk_token", "pad_token", "sep_token", "mask_token")}
@@ -141,6 +164,8 @@ class BPETokenizerTrainer:
             saved_specials = json.loads((self._output_path / "special_tokens_map.json").read_text(encoding="utf-8"))
             if saved_config.get("vocab_size") != self._vocab_size:
                 raise RuntimeError(f"Tokenizer config vocab_size contract failed: expected={self._vocab_size}, actual={saved_config.get('vocab_size')}")
+            if not saved_config.get("provenance", {}).get("corpus_sha256"):
+                raise RuntimeError("Tokenizer provenance contract failed: corpus_sha256 is missing")
             for name in ("bos_token", "eos_token", "unk_token", "pad_token", "sep_token", "mask_token"):
                 if name not in saved_config or name not in saved_specials:
                     raise RuntimeError(f"Tokenizer special-token artifact contract failed: {name}")
