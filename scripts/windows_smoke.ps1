@@ -1,10 +1,24 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
+    [string]$RepoRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+# Resolve the repository from the script location, not the caller's working directory.
+# Windows PowerShell 5.1 can leave $PSCommandPath empty in some -File invocation paths,
+# so fall back to MyInvocation.MyCommand.Path.
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $ScriptPath = $PSCommandPath
+    if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+        $ScriptPath = $MyInvocation.MyCommand.Path
+    }
+    if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+        throw "Unable to determine the smoke script location. Run this file directly with powershell.exe -File."
+    }
+    $RepoRoot = Split-Path -Parent (Split-Path -Parent $ScriptPath)
+}
 
 function Invoke-Step {
     param(
@@ -44,7 +58,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Using Python $pythonVersion" -ForegroundColor Green
 Write-Host "Repository: $RepoRoot" -ForegroundColor Green
 
-if (-not (Test-Path -LiteralPath $VenvPython)) {
+if (Test-Path -LiteralPath $VenvPython) {
+    $venvVersion = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    if ($LASTEXITCODE -ne 0 -or $venvVersion -ne "3.12") {
+        throw "Existing .venv is not Python 3.12. Remove '$Venv' and rerun this script so it can create the correct environment."
+    }
+} else {
     Invoke-Step "py" @("-3.12", "-m", "venv", $Venv)
 }
 
