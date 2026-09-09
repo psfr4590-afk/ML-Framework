@@ -27,10 +27,10 @@ The doctor is non-destructive. It reports required runtime failures separately f
 For a small end-to-end verification experiment:
 
 ```powershell
-python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --dataset-group smoke --no-resume
+python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
 ```
 
-The smoke configuration limits source families, crawl depth, page count, vocabulary, sequence length, and training steps. CPU training is explicitly permitted for this validation profile.
+The smoke configuration uses its own dataset-group file containing only the smoke source, so no `--dataset-group` selector is required. It limits source families, crawl depth, page count, vocabulary, sequence length, and training steps. CPU training is explicitly permitted for this validation profile.
 
 ## Backend-only mode
 
