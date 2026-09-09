@@ -1,6 +1,6 @@
 # ML-Framework
 
-**ML-Framework** is the public source repository for **Model Lab**, the M²S end-to-end model training pipeline.
+**ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: an end-to-end, local-first system for building training datasets, training a model, and exporting it for local inference.
 
 This project is the result of a deliberately hardened build process. The goal is not another demo notebook or a collection of disconnected ML scripts. It is a reproducible path from seeded data sources to a locally usable trained model.
 
@@ -48,6 +48,8 @@ python -m pytest -q
 python .\launch.py
 ```
 
+The desktop control surface targets a **1760×990** Windows display. The repository also supports headless execution on Linux/macOS and a reduced Termux/Android profile.
+
 For a non-destructive release check:
 
 ```powershell
@@ -79,46 +81,22 @@ The recommender reports the hardware tier and selected profile. It does not inve
 
 ## Bounded smoke test
 
-The smoke configuration is intentionally safe to run as a verification experiment. It uses a single web seed, disables other remote source families, limits crawling to two pages, trains for two steps, and allows CPU execution for validation.
+Use `config/pipeline_config.smoke.yaml` for a deliberately small end-to-end validation profile. It is intended to exercise contracts and artifact chaining without pretending that a smoke run is equivalent to production training.
 
-```powershell
-python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
-```
+## Command center
 
-## Dataset sessions
+The FastAPI command center is localhost-only by default. It exposes dataset lifecycle, ingestion, stage control, credential management, crawler telemetry, and system information through the `/api/*` surface. The desktop launcher can start the backend and UI together; `run_command_center.py --no-browser` starts the backend without opening a browser.
 
-Dataset sessions isolate mutable output so separate experiments do not trample one another's artifacts. When a dataset session exists, run the pipeline against it with `--dataset-id`.
+## Security and generated data
 
-Example:
+Credentials belong in the runtime credential store or environment variables, never in Git. Dataset outputs, checkpoints, caches, scratch data, logs, and native build products are runtime artifacts and are intentionally excluded from the public source tree.
 
-```powershell
-python .\run_pipeline.py --config .\config\pipeline_config.yaml --dataset-id 5
-```
+The crawler is bounded and security-conscious: it applies URL validation, request timeouts, retries, politeness delays, robots handling where configured, content-size limits, and local/private-network refusal rules.
 
-## Configuration
+## Verification boundary
 
-The main configuration is `config/pipeline_config.yaml`. Smoke-test settings live in `config/pipeline_config.smoke.yaml` and `config/dataset_groups.smoke.yaml`.
+Automated CI covers Python compilation and the repository test suite. Environment-dependent gates remain explicit: CUDA availability, native llama.cpp binaries, network access, and human-visible Windows/Tkinter acceptance depend on the target machine. This distinction is intentional.
 
-Credentials are supplied through environment variables. Example metadata is provided in `config/credentials.example.yaml`. Secret values are intentionally absent from the repository.
+## License
 
-## Local-first design
-
-Model Lab is designed around local execution. Optional remote services are used as data sources or enrichment inputs where configured, while generated datasets, checkpoints, model artifacts, caches, logs, and native build products remain runtime state rather than source-control payloads.
-
-## Repository hygiene
-
-The public repository intentionally excludes:
-
-- generated datasets and scratch data
-- checkpoints and model weights
-- GGUF/model binaries
-- Python caches and test caches
-- local logs and runtime state
-- secrets and credential material
-- native build products
-
-The supplied delivery archive contains those runtime artifacts for reproducibility, but they do not belong in the source repository.
-
-## Status
-
-The source of truth for the current implementation is the validated Model Lab 1.3.0 delivery used to populate this repository. Release verification remains a combination of automated tests, environment checks, and human-visible desktop acceptance.
+See `LICENSE` for the project license.
