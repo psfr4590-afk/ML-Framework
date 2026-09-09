@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import platform
 import sys
 
@@ -22,7 +23,19 @@ from .service import (
 )
 from .store import store
 
-app = FastAPI(title="M²S Model Training Pipeline", version="1.3.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Initialize persistent command-center state for the application lifetime."""
+    init()
+    yield
+
+
+app = FastAPI(
+    title="M²S Model Training Pipeline",
+    version="1.3.0",
+    lifespan=lifespan,
+)
 
 
 class CredentialSet(BaseModel):
@@ -43,11 +56,6 @@ class DatasetCreate(BaseModel):
 
 class DatasetIngest(BaseModel):
     path: str
-
-
-@app.on_event("startup")
-def startup():
-    init()
 
 
 @app.get("/", response_class=HTMLResponse)
