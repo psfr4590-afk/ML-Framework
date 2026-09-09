@@ -4,6 +4,7 @@ from command_center.web import app
 
 
 LOOPBACK_CLIENT = ("127.0.0.1", 12345)
+REMOTE_CLIENT = ("192.0.2.10", 54321)
 
 
 def test_command_center_seeds_and_serves():
@@ -21,6 +22,13 @@ def test_command_center_seeds_and_serves():
         page = client.get('/')
         assert page.status_code == 200
         assert 'M²S MODEL TRAINING PIPELINE' in page.text
+
+
+def test_command_center_rejects_remote_api_client():
+    with TestClient(app, client=REMOTE_CLIENT) as client:
+        response = client.get('/api/system')
+        assert response.status_code == 403
+        assert response.json()["detail"].startswith("Command center is localhost-only.")
 
 
 def test_credential_store_roundtrip(tmp_path, monkeypatch):
