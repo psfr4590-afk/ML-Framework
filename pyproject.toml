@@ -1,0 +1,35 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".runtime",
+    "__pycache__",
+    "datasets",
+    "output",
+    "scratch",
+    "ui/screens/__init__.py.bak",
+    "ui/screens/__init__.py.bak.20260817_094313",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "B",
+    "SIM115",
+    "PLW",
+    "RUF",
+]
+extend-select = [
+    "S110",
+]
+ignore = [
+    "N999",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S110", "PLW1510"]
+"scripts/**" = ["UP031"]
