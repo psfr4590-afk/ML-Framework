@@ -39,3 +39,18 @@ def test_pipeline_log_level_is_reapplied_after_pipeline_initialization(monkeypat
 
     run_pipeline.main()
     assert logging.getLogger().level == logging.DEBUG
+
+
+def test_invalid_stages_do_not_construct_pipeline(monkeypatch, capsys):
+    class ExplodingPipeline:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("invalid --stages must be rejected before Pipeline startup")
+
+    import pipeline.orchestrator
+    monkeypatch.setattr(pipeline.orchestrator, "Pipeline", ExplodingPipeline)
+    monkeypatch.setattr(sys, "argv", ["run_pipeline.py", "--stages", "crawl,not-a-stage"])
+
+    assert run_pipeline.main() == 1
+    output = capsys.readouterr().out
+    assert "Unknown stages" in output
+    assert "not-a-stage" in output
