@@ -31,3 +31,30 @@ def test_artifact_valid_rejects_changed_source(tmp_path):
     assert artifact_valid(artifact)
     source.write_text("changed\n", encoding="utf-8")
     assert not artifact_valid(artifact)
+
+
+def test_artifact_valid_rejects_unknown_manifest_schema(tmp_path):
+    path = tmp_path / "artifact.jsonl"
+    path.write_text("data\n", encoding="utf-8")
+    manifest = {
+        "schema": 999,
+        "kind": "clean",
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+    path.with_name(path.name + ".manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert not artifact_valid(path)
+
+
+def test_artifact_valid_rejects_missing_manifest_kind(tmp_path):
+    path = tmp_path / "artifact.jsonl"
+    path.write_text("data\n", encoding="utf-8")
+    manifest = {
+        "schema": 2,
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+    path.with_name(path.name + ".manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert not artifact_valid(path)
