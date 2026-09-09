@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -35,6 +36,8 @@ def main() -> int:
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--web", action="store_true")
     args = parser.parse_args()
+
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
 
     if args.doctor:
         from pipeline.doctor import run_doctor
