@@ -37,7 +37,12 @@ class DatasetStore:
         if not p.exists(): return None
         return json.loads(p.read_text(encoding="utf-8"))
 
-    def list(self): return [self.get(i) for i in self._ids()]
+    def list(self, limit=None, offset=0):
+        """List datasets with optional pagination."""
+        ids = self._ids()
+        if limit is not None:
+            ids = ids[offset:offset + limit]
+        return [self.get(i) for i in ids]
 
     def create(self, name, description="", group_id=None, group_config=None):
         with LOCK:
@@ -73,25 +78,65 @@ class DatasetStore:
         return item
 
     def tail_events(self, did, limit=150):
+        """Efficiently read last N events from JSONL file without loading entire file."""
         p = self.path(did) / "events.jsonl"
         if not p.exists(): return []
-        from collections import deque
-        with p.open(encoding="utf-8", errors="replace") as f: return list(deque((json.loads(x) for x in f if x.strip()), maxlen=limit))
+        
+        try:
+            from collections import deque
+            # Use deque with maxlen to keep only the last N lines efficiently
+            with p.open(encoding="utf-8", errors="replace") as f:
+                return list(deque((json.loads(x) for x in f if x.strip()), maxlen=limit))
+        except (OSError, json.JSONDecodeError):
+            return []
 
     def refresh_stats(self, did):
-        root = self.path(did); files = bytes_ = docs = words = 0
-        for p in root.rglob("*"):
-            if p.is_file() and ".git" not in p.parts and ".runtime" not in p.parts:
-                files += 1; bytes_ += p.stat().st_size
+        """Efficiently compute dataset statistics with streaming JSON parsing."""
+        root = self.path(did)
+        files = bytes_ = docs = words = 0
+        
+        # Count files and bytes using os.walk for efficiency
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                # Skip .git and .runtime directories
+                dirnames[:] = [d for d in dirnames if d not in (".git", ".runtime")]
+                files += len(filenames)
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    try:
+                        bytes_ += os.path.getsize(filepath)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        
+        # Stream parse JSONL files to count docs and words
         for c in (root / "scratch" / "04_weighted.jsonl", root / "scratch" / "03_deduped.jsonl", root / "scratch" / "02_cleaned.jsonl"):
             if c.exists():
-                for line in c.read_text(encoding="utf-8", errors="ignore").splitlines():
-                    if line.strip():
-                        docs += 1
-                        try: words += len(str(json.loads(line).get("text", "")).split())
-                        except Exception: pass
-                break
-        d = self.get(did); d["stats"] = {**d.get("stats", {}), "files": files, "bytes": bytes_, "documents": docs, "words": words}; d["updated_at"] = now(); atomic_json(root / "dataset.json", d); return d["stats"]
+                try:
+                    with c.open(encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                data = json.loads(line)
+                                docs += 1
+                                text = str(data.get("text", ""))
+                                if text:
+                                    words += len(text.split())
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+                    # Only process the first valid file
+                    break
+                except OSError:
+                    pass
+        
+        d = self.get(did)
+        if d:
+            d["stats"] = {**d.get("stats", {}), "files": files, "bytes": bytes_, "documents": docs, "words": words}
+            d["updated_at"] = now()
+            atomic_json(root / "dataset.json", d)
 
     def ingest_path(self, did, source: Path):
         source = source.resolve(); root = self.path(did); dest = root / "raw"
@@ -99,7 +144,7 @@ class DatasetStore:
         paths = [source] if source.is_file() else [p for p in source.rglob("*") if p.is_file()]
         for p in paths:
             rel = p.name if source.is_file() else p.relative_to(source).as_posix(); target = dest / rel; target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(p, target)
-        stages = self.get(did)["stages"]; stages["crawl"] = "complete"; self.update(did, status="COLLECTED", stages=stages); self.refresh_stats(did); self.event(did, "ingest.completed", {"files": len(paths)}); return self.get(did)
+        stages = self.get(did)["stages"]; stages["crawl"] = "complete"; self.update(did, status="COLLECTED", stages=stages); self.refresh_stats(did); self.event(did, "ingest.completed", {"files": len(paths)})
 
     def _verified_stage(self, stage, paths):
         paths = [p for p in paths if p is not None]
@@ -112,8 +157,21 @@ class DatasetStore:
             try:
                 data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", [])
                 if not files: return "corrupt"
-                valid = all((marker.parent / item["name"]).is_file() and (marker.parent / item["name"]).stat().st_size == int(item["size"]) and sha256_file(marker.parent / item["name"]) == item["sha256"] for item in files)
-                return "complete" if valid else "corrupt"
+                # Optimize: check file existence and size first, only verify SHA if needed
+                for item in files:
+                    shard_path = marker.parent / item["name"]
+                    if not shard_path.is_file():
+                        return "corrupt"
+                    try:
+                        actual_size = shard_path.stat().st_size
+                        if actual_size != int(item["size"]):
+                            return "corrupt"
+                    except OSError:
+                        return "corrupt"
+                # Only verify SHA if size check passed
+                if all(sha256_file(marker.parent / item["name"]) == item["sha256"] for item in files):
+                    return "complete"
+                return "corrupt"
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError): return "corrupt"
         if stage == "train":
             return "complete" if any(artifact_valid(p) for p in paths) else "stale"
@@ -158,7 +216,10 @@ class DatasetStore:
         p = self.path(did) / "logs" / "command-center.log"
         if not p.exists(): return []
         from collections import deque
-        with p.open(encoding="utf-8", errors="replace") as f: return list(deque((x.rstrip() for x in f), maxlen=max(1, min(int(tail), 1000))))
+        try:
+            with p.open(encoding="utf-8", errors="replace") as f: return list(deque((x.rstrip() for x in f), maxlen=max(1, min(int(tail), 1000))))
+        except OSError:
+            return []
 
     def _json_or_empty(self, p):
         try: return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
