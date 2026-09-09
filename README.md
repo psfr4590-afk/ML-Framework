@@ -38,17 +38,39 @@ General web seeds live in `config/seed_urls.txt`.
 
 ## Quick start
 
-From the repository root on Windows:
+The repository has one canonical first-run path. Start from the project root and use the bootstrapper for installation and environment checks:
+
+### Windows PowerShell
 
 ```powershell
-pip install -r .\requirements.txt
-python .\run_pipeline.py --doctor
-python .\run_pipeline.py --doctor --hardware-report
-python -m pytest -q
-python .\launch.py
+python .\bootstrap.py --install
+python .\bootstrap.py --doctor
+python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
 ```
 
-The desktop control surface targets a **1760×990** Windows display. The repository also supports headless execution on Linux/macOS and a reduced Termux/Android profile.
+### Linux / macOS / Termux
+
+```bash
+python3 bootstrap.py --install
+python3 bootstrap.py --doctor
+python3 run_pipeline.py --config config/pipeline_config.smoke.yaml --no-resume
+```
+
+The smoke run is the recommended first useful run. It is bounded, CPU-safe, and designed to prove that the pipeline can produce and chain real artifacts without committing a newcomer to a long training job.
+
+After the smoke run succeeds, inspect the host before doing expensive work:
+
+```powershell
+python .\run_pipeline.py --doctor --hardware-report
+```
+
+or:
+
+```bash
+python3 run_pipeline.py --doctor --hardware-report
+```
+
+On Windows, `python .\launch.py` starts the localhost command center and desktop control surface after the environment is ready. Headless users can use `python run_command_center.py --no-browser` instead.
 
 For a non-destructive release check:
 
@@ -81,7 +103,9 @@ The recommender reports the hardware tier and selected profile. It does not inve
 
 ## Bounded smoke test
 
-Use `config/pipeline_config.smoke.yaml` for a deliberately small end-to-end validation profile. It is intended to exercise contracts and artifact chaining without pretending that a smoke run is equivalent to production training.
+`config/pipeline_config.smoke.yaml` is the canonical newcomer validation profile. It uses a dedicated dataset-group file, bounded source limits, a small vocabulary and sequence length, and a tiny training budget with CPU training explicitly permitted.
+
+The smoke profile is a real pipeline run, not merely a unit-test shortcut. It is intended to answer one question quickly: **can this checkout build a useful chain of artifacts on this machine?**
 
 ## Command center
 
