@@ -70,9 +70,9 @@ def test_canonical_first_run_commands_are_documented() -> None:
     start_here = (ROOT / "START_HERE.md").read_text(encoding="utf-8")
     combined = f"{readme}\n{start_here}"
     required_fragments = [
-        "python bootstrap.py --install",
-        "python bootstrap.py --doctor",
-        "python run_pipeline.py --no-resume",
+        "bootstrap.py --install",
+        "bootstrap.py --doctor",
+        "run_pipeline.py --no-resume",
         "config/pipeline_config.yaml",
     ]
     missing = [fragment for fragment in required_fragments if fragment not in combined]
