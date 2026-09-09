@@ -1,4 +1,4 @@
-"""Artifact integrity and atomic-write helpers."""
+"""Artifact integrity, provenance, and atomic-write helpers."""
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -23,10 +24,25 @@ def manifest_path(path: Path) -> Path:
     return path.with_name(path.name + ".manifest.json")
 
 
-def write_manifest(path: Path, *, kind: str, rows: int | None = None, extra: dict | None = None) -> Path:
-    payload = {"schema": 1, "kind": kind, "path": str(path), "size": path.stat().st_size, "sha256": sha256_file(path)}
+def write_manifest(
+    path: Path,
+    *,
+    kind: str,
+    rows: int | None = None,
+    provenance: dict[str, Any] | None = None,
+    extra: dict | None = None,
+) -> Path:
+    payload = {
+        "schema": 2,
+        "kind": kind,
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
     if rows is not None:
         payload["rows"] = rows
+    if provenance:
+        payload["provenance"] = provenance
     if extra:
         payload.update(extra)
     mp = manifest_path(path)
@@ -36,7 +52,8 @@ def write_manifest(path: Path, *, kind: str, rows: int | None = None, extra: dic
     return mp
 
 
-def artifact_valid(path: Path) -> bool:
+def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None) -> bool:
+    """Return true only when bytes and, when supplied, semantic provenance match."""
     if not path.exists() or path.stat().st_size <= 0:
         return False
     mp = manifest_path(path)
@@ -44,7 +61,19 @@ def artifact_valid(path: Path) -> bool:
         return False
     try:
         m = json.loads(mp.read_text(encoding="utf-8"))
-        return int(m.get("size", -1)) == path.stat().st_size and m.get("sha256") == sha256_file(path)
+        if int(m.get("size", -1)) != path.stat().st_size:
+            return False
+        if m.get("sha256") != sha256_file(path):
+            return False
+        if expected_provenance is not None and m.get("provenance") != expected_provenance:
+            return False
+        source = m.get("source")
+        source_sha256 = m.get("source_sha256")
+        if source and source_sha256:
+            source_path = Path(source)
+            if not source_path.is_file() or sha256_file(source_path) != source_sha256:
+                return False
+        return True
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
 
