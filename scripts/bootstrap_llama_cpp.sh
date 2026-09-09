@@ -32,9 +32,12 @@ else
 fi
 
 cmake -S . -B "$BUILD_DIR" "${BUILD_ARGS[@]}"
-cmake --build "$BUILD_DIR" --config Release --parallel --target llama-quantize
+cmake --build "$BUILD_DIR" --config Release --parallel --target llama-quantize llama-cli
 quantizer="$(find "$BUILD_DIR" -type f -name 'llama-quantize*' -print -quit)"
+cli="$(find "$BUILD_DIR" -type f -name 'llama-cli*' -print -quit)"
 test -n "$quantizer" || { echo "llama-quantize was not built" >&2; exit 1; }
+test -n "$cli" || { echo "llama-cli was not built" >&2; exit 1; }
 echo "llama.cpp ready at $TARGET"
 echo "  converter: $TARGET/convert_hf_to_gguf.py"
 echo "  quantizer: $quantizer"
+echo "  cli: $cli"
