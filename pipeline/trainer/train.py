@@ -201,7 +201,8 @@ class Trainer:
         keep_checkpoints = max(1, int(t.get("keep_checkpoints", 3)))
         eval_batches = max(1, int(t.get("eval_batches", 20)))
         seq_len = model_cfg.seq_len
-        dtype = np.uint32 if str(t.get("shard_dtype", "uint16")) == "uint32" else np.uint16
+        shard_dtype = str(t.get("shard_dtype", self.cfg.get("shard", {}).get("dtype", "uint16")))
+        dtype = np.uint32 if shard_dtype == "uint32" else np.uint16
         shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
 
         if max_seq_len := self.cfg.get("shard", {}).get("sequence_length"):
