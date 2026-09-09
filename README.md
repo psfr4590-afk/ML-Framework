@@ -70,7 +70,7 @@ or:
 python3 run_pipeline.py --doctor --hardware-report
 ```
 
-On Windows, `python .\launch.py` starts the localhost command center and desktop control surface after the environment is ready. Headless users can use `python run_command_center.py --no-browser` instead.
+On Windows, `python .\launch.py` starts the localhost command center and desktop control surface after the environment is ready. The desktop target window is **1760x990**, with a usable minimum of 1280x720. Headless users can use `python run_command_center.py --no-browser` instead.
 
 For a non-destructive release check:
 
@@ -119,7 +119,7 @@ The crawler is bounded and security-conscious: it applies URL validation, reques
 
 ## Verification boundary
 
-Automated CI covers Python compilation and the repository test suite. Environment-dependent gates remain explicit: CUDA availability, native llama.cpp binaries, network access, and human-visible Windows/Tkinter acceptance depend on the target machine. This distinction is intentional.
+Automated CI covers Python compilation and the repository test suite. Environment-dependent gates remain explicit: CUDA availability, native llama.cpp binaries, network access, and human-visible Windows/Tkinter acceptance depend on the target machine. The documented desktop target is 1760x990 with a usable minimum of 1280x720. This distinction is intentional.
 
 ## License
 
