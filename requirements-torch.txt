@@ -1,0 +1,3 @@
+# Host-specific PyTorch dependency.
+# The bootstrapper installs this from the official CPU wheel index by default.
+torch>=2.5,<3
