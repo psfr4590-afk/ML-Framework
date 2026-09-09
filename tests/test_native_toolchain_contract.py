@@ -15,7 +15,7 @@ def test_native_bootstrap_scripts_share_the_same_pin_and_required_tools():
         assert 'COMMIT="b95502b"' in content
         assert "convert_hf_to_gguf.py" in content
         assert "llama-quantize" in content
-        assert "--target llama-quantize" in content or "--target", "llama-quantize" in content
+        assert "--target" in content
 
 
 def test_native_doctor_rejects_wrong_revision(monkeypatch, tmp_path):
