@@ -40,3 +40,48 @@ def test_bootstrap_llamacpp_passes_project_root(monkeypatch):
     assert command[4:] == ["--ensure-llamacpp"]
     assert kwargs["cwd"] == ROOT
     assert kwargs["check"] is False
+
+
+def test_bootstrap_install_defaults_to_cpu_torch(monkeypatch):
+    bootstrap = _load_bootstrap()
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Result()
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
+    assert bootstrap.install() == 0
+
+    assert len(calls) == 2
+    core_command, core_kwargs = calls[0]
+    torch_command, torch_kwargs = calls[1]
+    assert core_command[:5] == [bootstrap.sys.executable, "-m", "pip", "install", "-r"]
+    assert core_command[5] == str(bootstrap.REQUIREMENTS)
+    assert core_kwargs["cwd"] == ROOT
+    assert torch_command[5] == str(bootstrap.TORCH_REQUIREMENTS)
+    assert torch_command[-2:] == ["--index-url", bootstrap.CPU_TORCH_INDEX]
+    assert torch_kwargs["cwd"] == ROOT
+
+
+def test_bootstrap_can_use_default_torch_index(monkeypatch):
+    bootstrap = _load_bootstrap()
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Result()
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
+    assert bootstrap.install("default") == 0
+
+    assert len(calls) == 2
+    torch_command, _ = calls[1]
+    assert torch_command[5] == str(bootstrap.TORCH_REQUIREMENTS)
+    assert "--index-url" not in torch_command
