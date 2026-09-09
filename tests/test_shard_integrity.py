@@ -1,6 +1,7 @@
 """Test ShardDataLoader SHA256 integrity verification."""
 from __future__ import annotations
 
+import gc
 import json
 import tempfile
 from pathlib import Path
@@ -44,6 +45,10 @@ def test_shard_data_loader_rejects_corrupted_file():
         # Verify loader succeeds with valid manifest and file
         loader = ShardDataLoader(shard_dir, "train", seq_len=2, dtype=np.uint16)
         assert loader is not None
+
+        # Release the Windows memory-mapped handle before mutating/cleaning up.
+        del loader
+        gc.collect()
 
         # Now corrupt the shard file
         with shard_path.open("r+b") as f:
