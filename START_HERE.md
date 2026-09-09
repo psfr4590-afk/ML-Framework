@@ -22,6 +22,8 @@ python3 bootstrap.py --doctor
 python3 run_pipeline.py --no-resume
 ```
 
+`bootstrap.py --install` installs the framework dependencies first, then installs PyTorch from the official CPU wheel index by default. This keeps the canonical first run from silently pulling a large host-specific CUDA bundle onto a low-resource machine. Hosts that intentionally want the default PyPI PyTorch wheel can use `--torch-channel default`.
+
 The default `config/pipeline_config.yaml` is the canonical starter profile. It is deliberately bounded and CPU-safe, and it exercises the real pipeline and artifact chain without starting a long production training job. A newcomer does not need to choose a profile for the first run.
 
 If the starter run succeeds, inspect the host before expensive work:
