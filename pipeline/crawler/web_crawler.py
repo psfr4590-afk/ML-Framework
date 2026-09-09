@@ -52,11 +52,7 @@ class WebCrawler(BaseCrawler):
 
     @staticmethod
     def _host_is_public(hostname: str | None) -> bool:
-        """Return True only when every resolved address is globally routable.
-
-        Crawling user-controlled URLs must not become an SSRF primitive.  Resolve
-        hostnames before connecting and fail closed if resolution is unavailable.
-        """
+        """Return True only when every resolved address is globally routable."""
         if not hostname:
             return False
         host = hostname.rstrip(".")
@@ -93,14 +89,18 @@ class WebCrawler(BaseCrawler):
             rp = RobotFileParser(urljoin(root, "/robots.txt"))
             try:
                 rp.read()
-            except Exception:
+            except Exception as exc:
+                # Robots failures fail closed. Otherwise a transient fetch error
+                # silently disables a safety/politeness control for the domain.
+                log.warning("robots.txt unavailable for %s: %s", root, exc)
                 self._robots[root] = RobotFileParser()
-                return True
+                return False
             self._robots[root] = rp
         try:
             return rp.can_fetch(self.user_agent, url)
-        except Exception:
-            return True
+        except Exception as exc:
+            log.warning("robots policy could not be evaluated for %s: %s", root, exc)
+            return False
 
     def _polite_wait(self, domain: str) -> None:
         now = time.monotonic()
@@ -121,11 +121,7 @@ class WebCrawler(BaseCrawler):
             self._polite_wait(domain)
             for attempt in range(self.retries + 1):
                 try:
-                    response = self.session.get(
-                        current_url,
-                        timeout=self.timeout,
-                        allow_redirects=False,
-                    )
+                    response = self.session.get(current_url, timeout=self.timeout, allow_redirects=False)
                     if response.is_redirect or response.is_permanent_redirect:
                         location = response.headers.get("Location")
                         response.close()
@@ -170,15 +166,9 @@ class WebCrawler(BaseCrawler):
     def _document(self, url: str, title: str, text: str, depth: int) -> Document:
         parsed = urlparse(url)
         doc = Document(
-            doc_id=hashlib.sha256(url.encode("utf-8")).hexdigest(),
-            url=url,
-            source="web",
-            text=text,
-            title=title,
-            content_type=classify_url(url),
-            code_language=detect_code_language(url),
-            domain=parsed.netloc.lower(),
-            crawl_depth=depth,
+            doc_id=hashlib.sha256(url.encode("utf-8")).hexdigest(), url=url, source="web", text=text,
+            title=title, content_type=classify_url(url), code_language=detect_code_language(url),
+            domain=parsed.netloc.lower(), crawl_depth=depth,
         )
         if doc.content_type == "unknown":
             doc.content_type = classify_text(text)
