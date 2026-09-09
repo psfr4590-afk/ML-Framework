@@ -1,0 +1,18 @@
+# Seed URLs — one per line, comments with #
+https://arxiv.org/list/cs.AI/recent
+https://arxiv.org/list/cs.LG/recent
+https://arxiv.org/list/cs.CL/recent
+https://distill.pub
+https://lilianweng.github.io
+https://openreview.net
+https://docs.python.org/3/
+https://developer.mozilla.org/en-US/docs/Web
+https://doc.rust-lang.org/book/
+https://paulgraham.com/articles.html
+https://huggingface.co/blog
+https://stackoverflow.com/questions?tab=votes&pagesize=50
+https://cs.stackexchange.com/questions?tab=votes
+https://stats.stackexchange.com/questions?tab=votes
+https://en.wikipedia.org/wiki/Portal:Mathematics
+https://en.wikipedia.org/wiki/Portal:Computer_science
+https://en.wikipedia.org/wiki/Portal:Science
