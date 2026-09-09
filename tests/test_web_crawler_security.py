@@ -115,6 +115,17 @@ def test_public_redirect_is_followed_manually(monkeypatch):
     assert all(kwargs["allow_redirects"] is False for _, kwargs in calls)
 
 
+def test_robots_fetch_failure_fails_closed(monkeypatch):
+    crawler = WebCrawler(
+        {"web": {"respect_robots_txt": True}},
+        _DummyLookup(),
+        _DummySignals(),
+    )
+    monkeypatch.setattr("pipeline.crawler.web_crawler.WebCrawler._host_is_public", staticmethod(lambda host: True))
+    monkeypatch.setattr("pipeline.crawler.web_crawler.RobotFileParser.read", lambda self: (_ for _ in ()).throw(OSError("network unavailable")))
+    assert not crawler._robots_allowed("https://public.example/")
+
+
 def test_oversized_response_is_not_materialized(monkeypatch):
     crawler = _crawler(monkeypatch)
     crawler.web["seed_urls"] = ["https://public.example/"]
