@@ -17,9 +17,9 @@ def test_bootstrap_reconciler_exists_and_is_referenced():
 
 
 def test_reconciler_dispatches_to_powershell_on_windows(monkeypatch, tmp_path):
-    target = tmp_path / "scripts" / "bootstrap_llama_cpp.ps1"
-    target.parent.mkdir(parents=True)
-    target.write_text("# fixture\n", encoding="utf-8")
+    script = tmp_path / "scripts" / "bootstrap_llama_cpp.ps1"
+    script.parent.mkdir(parents=True)
+    script.write_text("# fixture\n", encoding="utf-8")
     calls = []
 
     monkeypatch.setattr(reconciler.platform, "system", lambda: "Windows")
@@ -29,7 +29,27 @@ def test_reconciler_dispatches_to_powershell_on_windows(monkeypatch, tmp_path):
         lambda command, cwd, check: calls.append((command, cwd, check)) or SimpleNamespace(returncode=0),
     )
 
-    assert reconciler.main() == 2 if False else True
+    assert reconciler.main(["--project-root", str(tmp_path), "--ensure-llamacpp"]) == 0
+    assert calls == [
+        (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], tmp_path, False)
+    ]
+
+
+def test_reconciler_dispatches_to_bash_on_non_windows(monkeypatch, tmp_path):
+    script = tmp_path / "scripts" / "bootstrap_llama_cpp.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(reconciler.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        reconciler.subprocess,
+        "run",
+        lambda command, cwd, check: calls.append((command, cwd, check)) or SimpleNamespace(returncode=7),
+    )
+
+    assert reconciler.main(["--project-root", str(tmp_path), "--ensure-llamacpp"]) == 7
+    assert calls == [(["bash", str(script)], tmp_path, False)]
 
 
 def test_termux_safe_machine_tests_do_not_import_tkinter_at_collection_time():
