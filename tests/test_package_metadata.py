@@ -5,6 +5,33 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 
 
+_RUNTIME_REQUIREMENTS = {
+    "pyyaml",
+    "requests",
+    "beautifulsoup4",
+    "lxml",
+    "numpy",
+    "packaging",
+    "tokenizers",
+    "safetensors",
+    "datasets",
+    "huggingface_hub",
+    "trafilatura",
+    "langdetect",
+    "fastapi",
+    "starlette",
+    "uvicorn",
+    "jinja2",
+    "pydantic",
+    "httpx",
+    "cryptography",
+}
+
+
+def _requirement_name(line: str) -> str:
+    return line.split("<", 1)[0].split(">", 1)[0].split("=", 1)[0].split("!", 1)[0].strip().lower()
+
+
 def test_project_metadata_declares_supported_python_and_cli():
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = metadata["project"]
@@ -18,15 +45,20 @@ def test_project_metadata_declares_supported_python_and_cli():
 def test_packaging_dependencies_match_runtime_contract():
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    declared = set(metadata["project"]["dependencies"])
+    declared = {
+        _requirement_name(dependency): dependency
+        for dependency in metadata["project"]["dependencies"]
+    }
 
-    for line in requirements.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        assert line in declared
+    runtime_names = {
+        _requirement_name(line)
+        for line in requirements.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    } - {"pytest", "ruff"}
 
-    assert all(not dependency.lower().startswith("torch") for dependency in declared)
+    assert runtime_names == _RUNTIME_REQUIREMENTS
+    assert runtime_names <= set(declared)
+    assert all(not name.startswith("torch") for name in declared)
 
 
 def test_torch_has_a_separate_host_specific_requirement():
