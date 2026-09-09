@@ -68,7 +68,7 @@ def ensure_llamacpp() -> int:
     if not RECONCILER.is_file():
         print(f"Missing reconciler: {RECONCILER}", file=sys.stderr)
         return 2
-    command = [sys.executable, str(RECONCILER), "--ensure-llamacpp"]
+    command = [sys.executable, str(RECONCILER), "--project-root", str(ROOT), "--ensure-llamacpp"]
     print("$", " ".join(command))
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
