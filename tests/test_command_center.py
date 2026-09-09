@@ -3,8 +3,11 @@ from fastapi.testclient import TestClient
 from command_center.web import app
 
 
+LOOPBACK_CLIENT = ("127.0.0.1", 12345)
+
+
 def test_command_center_seeds_and_serves():
-    with TestClient(app) as client:
+    with TestClient(app, client=LOOPBACK_CLIENT) as client:
         response = client.get('/api/datasets')
         assert response.status_code == 200
         datasets = response.json()
@@ -48,7 +51,7 @@ def test_credential_api_does_not_return_secret():
         import os
         from cryptography.fernet import Fernet
         os.environ["PIPELINE_CREDENTIAL_KEY"] = Fernet.generate_key().decode()
-        with TestClient(app) as client:
+        with TestClient(app, client=LOOPBACK_CLIENT) as client:
             r = client.post("/api/credentials", json={
                 "name": "test", "secret": "do-not-return", "provider": "custom",
                 "kind": "token", "env_var": "TEST_TOKEN", "identity": "user"
