@@ -1,0 +1,252 @@
+"""
+semantic_dedup.py — Near-duplicate removal using sentence-transformer embeddings + FAISS.
+
+Strategy:
+  1. Embed each document (first N chars for speed).
+  2. Build a FAISS flat index (exact cosine) or IVF (approximate, for >1M docs).
+  3. For each doc, query k-nearest neighbors.
+  4. If any neighbor has cosine similarity >= threshold, mark as duplicate,
+     keeping whichever has the higher final_weight.
+
+Memory: all-MiniLM-L6-v2 is 384-dim float32 = ~1.5KB/doc.
+        1M docs ≈ 1.5GB; fine for your 8GB RAM.
+        If you hit limits, switch index_type to ivf in config.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Iterator
+
+import numpy as np
+
+from pipeline.types import Document
+
+log = logging.getLogger("embedder")
+
+try:
+    from sentence_transformers import SentenceTransformer
+    ST_AVAILABLE = True
+except ImportError:
+    ST_AVAILABLE = False
+    log.warning("sentence-transformers not installed; semantic dedup disabled")
+
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
+    log.warning("faiss-cpu not installed; falling back to brute-force cosine")
+
+
+def _cosine_brute(matrix: np.ndarray, query: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """Brute-force cosine similarity when FAISS is unavailable."""
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-10
+    normed = matrix / norms
+    q_normed = query / (np.linalg.norm(query) + 1e-10)
+    sims = normed @ q_normed
+    top_k = np.argsort(sims)[::-1][:k]
+    return sims[top_k], top_k
+
+
+class SemanticDeduplicator:
+
+    def __init__(self, cfg: dict):
+        self._cfg       = cfg
+        self._model_name = cfg.get("model", "all-MiniLM-L6-v2")
+        self._batch     = cfg.get("batch_size", 256)
+        self._threshold = cfg.get("similarity_threshold", 0.92)
+        self._chunk     = cfg.get("chunk_size", 512)
+        self._idx_type  = cfg.get("index_type", "flat")
+        self._nlist     = cfg.get("ivf_nlist", 100)
+        self._model     = None
+        self._index     = None
+        self._dim       = 0
+        self._docs:     list[Document] = []
+        self._embeddings: list[np.ndarray] = []
+        self.stats = {"total": 0, "kept": 0, "dropped": 0}
+
+    @staticmethod
+    def _fallback_similarity(a: str, b: str) -> float:
+        """Dependency-light token-gram similarity used when embeddings are unavailable."""
+        def grams(text: str) -> set[str]:
+            tokens = re.findall(r"\w+", text.lower())
+            return {" ".join(tokens[i:i+3]) for i in range(max(0, len(tokens) - 2))} or set(tokens)
+        ga, gb = grams(a), grams(b)
+        if not ga or not gb:
+            return 0.0
+        return len(ga & gb) / len(ga | gb)
+
+    def _fallback_run(self, docs: list[Document]) -> list[Document]:
+        kept: list[Document] = []
+        for doc in docs:
+            duplicate = False
+            for index, prior in enumerate(kept):
+                if self._fallback_similarity(doc.text, prior.text) >= self._threshold:
+                    duplicate = True
+                    if doc.final_weight > prior.final_weight:
+                        kept[index] = doc
+                    break
+            if not duplicate:
+                kept.append(doc)
+        self.stats["total"] += len(docs)
+        self.stats["kept"] += len(kept)
+        self.stats["dropped"] += len(docs) - len(kept)
+        log.warning("Semantic dedup fallback active: sentence-transformers unavailable")
+        return kept
+
+    def _load_model(self):
+        if not ST_AVAILABLE:
+            raise RuntimeError("sentence-transformers not installed")
+        if self._model is None:
+            log.info(f"Loading sentence-transformer: {self._model_name}")
+            self._model = SentenceTransformer(self._model_name)
+            self._dim   = self._model.get_sentence_embedding_dimension()
+            log.info(f"Embedding dim: {self._dim}")
+
+    def _embed(self, texts: list[str]) -> np.ndarray:
+        chunks = [t[:self._chunk] for t in texts]
+        vecs   = self._model.encode(
+            chunks,
+            batch_size=self._batch,
+            show_progress_bar=False,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        )
+        return vecs.astype(np.float32)
+
+    def _build_index(self, matrix: np.ndarray) -> "faiss.Index":
+        d = matrix.shape[1]
+        if self._idx_type == "ivf" and FAISS_AVAILABLE:
+            nlist = min(self._nlist, max(1, matrix.shape[0] // 10))
+            quantizer = faiss.IndexFlatIP(d)
+            index     = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
+            index.train(matrix)
+            index.add(matrix)
+            index.nprobe = min(10, nlist)
+        elif FAISS_AVAILABLE:
+            index = faiss.IndexFlatIP(d)
+            index.add(matrix)
+        else:
+            index = None
+        return index
+
+    def run(self, docs: list[Document]) -> list[Document]:
+        """Deduplicate a list of documents and return the subset to keep."""
+        if not docs:
+            return docs
+
+        if not ST_AVAILABLE:
+            return self._fallback_run(docs)
+
+        self._load_model()
+        self.stats["total"] += len(docs)
+
+        log.info(f"Embedding {len(docs)} docs ...")
+        matrix = self._embed([d.text for d in docs])
+
+        log.info("Building FAISS index ...")
+        index  = self._build_index(matrix)
+        is_dup = [False] * len(docs)
+        k = min(5, len(docs))
+
+        for i in range(len(docs)):
+            if is_dup[i]:
+                continue
+            q = matrix[i:i+1]
+            if FAISS_AVAILABLE and index is not None:
+                sims, idxs = index.search(q, k + 1)
+                sims = sims[0]
+                idxs = idxs[0]
+            else:
+                sims, idxs = _cosine_brute(matrix, q[0], k + 1)
+
+            for sim, j in zip(sims, idxs):
+                j = int(j)
+                if j <= i or j >= len(docs):
+                    continue
+                if float(sim) >= self._threshold:
+                    if docs[i].final_weight >= docs[j].final_weight:
+                        is_dup[j] = True
+                        log.debug(f"DUP drop [{j}] {docs[j].url[:60]} sim={sim:.3f} vs [{i}] {docs[i].url[:60]}")
+                    else:
+                        is_dup[i] = True
+                        log.debug(f"DUP drop [{i}] {docs[i].url[:60]} sim={sim:.3f} vs [{j}] {docs[j].url[:60]}")
+                    break
+
+        kept = [d for d, dup in zip(docs, is_dup) if not dup]
+        dropped = len(docs) - len(kept)
+        self.stats["kept"] += len(kept)
+        self.stats["dropped"] += dropped
+        log.info(f"Semantic dedup: {len(docs)} → {len(kept)} (-{dropped})")
+        return kept
+
+    def stream(self, docs: Iterator[Document], buffer_size: int = 10000) -> Iterator[Document]:
+        """Globally deduplicate a stream across batch boundaries."""
+        if buffer_size < 1:
+            raise ValueError("buffer_size must be >= 1")
+        all_docs: list[Document] = list(docs)
+        if not all_docs:
+            return
+
+        exact: dict[str, Document] = {}
+        for doc in all_docs:
+            key = re.sub(r"\s+", " ", doc.text).strip().lower()
+            digest = __import__("hashlib").sha256(key.encode("utf-8", errors="replace")).hexdigest()
+            prior = exact.get(digest)
+            if prior is None or doc.final_weight > prior.final_weight:
+                exact[digest] = doc
+        candidates = list(exact.values())
+
+        self.stats["total"] += len(all_docs)
+        if not ST_AVAILABLE:
+            winners = self._fallback_run(candidates)
+            self.stats["kept"] -= len(winners)
+            self.stats["dropped"] -= len(candidates) - len(winners)
+            self.stats["dropped"] += len(all_docs) - len(winners)
+            yield from winners
+            return
+
+        self._load_model()
+        reps: list[Document] = []
+        rep_vecs: list[np.ndarray] = []
+        winners: list[Document] = []
+
+        for start in range(0, len(candidates), buffer_size):
+            batch = candidates[start:start + buffer_size]
+            matrix = self._embed([d.text for d in batch])
+            for doc, vec in zip(batch, matrix):
+                match = None
+                if rep_vecs:
+                    mat = np.asarray(rep_vecs, dtype=np.float32)
+                    if FAISS_AVAILABLE:
+                        idx = self._build_index(mat)
+                        sims, ids = idx.search(vec.reshape(1, -1), min(5, len(rep_vecs)))
+                        pairs = zip(sims[0], ids[0])
+                    else:
+                        sims, ids = _cosine_brute(mat, vec, min(5, len(rep_vecs)))
+                        pairs = zip(sims, ids)
+                    for sim, rid in pairs:
+                        rid = int(rid)
+                        if rid >= 0 and float(sim) >= self._threshold:
+                            match = rid
+                            break
+                if match is None:
+                    reps.append(doc)
+                    rep_vecs.append(vec)
+                    winners.append(doc)
+                elif doc.final_weight > reps[match].final_weight:
+                    old = reps[match]
+                    reps[match] = doc
+                    winners[winners.index(old)] = doc
+
+        self.stats["kept"] += len(winners)
+        self.stats["dropped"] += len(all_docs) - len(winners)
+        log.info("Semantic dedup stream: %d → %d (-%d)", len(all_docs), len(winners), len(all_docs) - len(winners))
+        yield from winners
+
+    def print_stats(self):
+        s = self.stats
+        t = max(s["total"], 1)
+        log.info(f"SemanticDedup | total={s['total']} kept={s['kept']} dropped={s['dropped']} ({s['dropped']/t*100:.1f}%)")
