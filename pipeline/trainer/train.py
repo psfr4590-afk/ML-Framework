@@ -160,6 +160,7 @@ class Trainer:
         grad_clip = float(t.get("grad_clip", 1.0))
         eval_every = max(1, int(t.get("eval_every_steps", 500)))
         ckpt_every = max(1, int(t.get("checkpoint_every_steps", 1000)))
+        keep_checkpoints = max(1, int(t.get("keep_checkpoints", 3)))
         eval_batches = max(1, int(t.get("eval_batches", 20)))
         seq_len = model_cfg.seq_len
         dtype = np.uint32 if str(t.get("shard_dtype", "uint16")) == "uint32" else np.uint16
@@ -235,7 +236,7 @@ class Trainer:
 
                 if step % ckpt_every == 0:
                     save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir)
-                    self._prune_checkpoints(self.ckpt_dir, keep=3)
+                    self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
 
             val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
             save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final")
