@@ -5,7 +5,7 @@ import platform
 import sys
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -29,13 +29,18 @@ class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
     """Enforce that all API requests originate from localhost (127.0.0.1 or ::1)."""
 
     async def dispatch(self, request: Request, call_next):
-        # For API routes, require localhost origin
+        # For API routes, require localhost origin.
         if request.url.path.startswith("/api/"):
             client_host = request.client.host if request.client else None
             if client_host not in ("127.0.0.1", "::1"):
-                return HTTPException(
+                return JSONResponse(
                     status_code=403,
-                    detail=f"Command center is localhost-only. Remote access from {client_host} is rejected.",
+                    content={
+                        "detail": (
+                            "Command center is localhost-only. "
+                            f"Remote access from {client_host} is rejected."
+                        )
+                    },
                 )
         return await call_next(request)
 
