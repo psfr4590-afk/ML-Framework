@@ -222,7 +222,7 @@ class Pipeline:
 
     def stage_export(self):
         exporter = _load_class("scripts.export_gguf", "export_checkpoint"); exp = self.cfg.get("export", {})
-        result = exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
+        exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
 
     def run(self, stages: str = "all", dataset_group: str | None = None):
         stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]; requested = stage_names if stages == "all" else [s.strip() for s in stages.split(",") if s.strip()]
