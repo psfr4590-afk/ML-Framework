@@ -4,14 +4,14 @@
 
 ## First run
 
-There is one canonical first-run path. From the extracted project root, install with the bootstrapper, run the non-destructive doctor, then run the bounded smoke profile.
+There is exactly one canonical first-run path. From the extracted project root, install with the bootstrapper, run the non-destructive doctor, then run the default starter profile.
 
 ### Windows PowerShell
 
 ```powershell
 python .\bootstrap.py --install
 python .\bootstrap.py --doctor
-python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resume
+python .\run_pipeline.py --no-resume
 ```
 
 ### Linux / macOS / Termux
@@ -19,12 +19,12 @@ python .\run_pipeline.py --config .\config\pipeline_config.smoke.yaml --no-resum
 ```bash
 python3 bootstrap.py --install
 python3 bootstrap.py --doctor
-python3 run_pipeline.py --config config/pipeline_config.smoke.yaml --no-resume
+python3 run_pipeline.py --no-resume
 ```
 
-The smoke run is the first useful run. It is deliberately bounded and CPU-safe, and it exercises the real pipeline and artifact chain without starting a long production training job.
+The default `config/pipeline_config.yaml` is the canonical starter profile. It is deliberately bounded and CPU-safe, and it exercises the real pipeline and artifact chain without starting a long production training job. A newcomer does not need to choose a profile for the first run.
 
-If the smoke run succeeds, inspect the host before expensive work:
+If the starter run succeeds, inspect the host before expensive work:
 
 ```powershell
 python .\run_pipeline.py --doctor --hardware-report
