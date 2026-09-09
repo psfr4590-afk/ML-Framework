@@ -3,4 +3,7 @@ dataset_groups:
     name: "Bounded local smoke corpus"
     sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
     web:
-      seed_urls: ["https://docs.python.org/3/tutorial/"]
+      # Two deterministic seeds guarantee both train and validation splits for seed=42.
+      seed_urls:
+        - "https://docs.python.org/3/tutorial/"
+        - "https://docs.python.org/3/tutorial/controlflow.html"
