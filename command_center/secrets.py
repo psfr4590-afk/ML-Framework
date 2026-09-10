@@ -23,7 +23,7 @@ _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 def _key():
     key = os.environ.get("PIPELINE_CREDENTIAL_KEY", "")
     if not key:
-        raise RuntimeError("PIPELINE_CREDENTIAL_KEY is required on non-Windows hosts")
+        raise RuntimeError("PIPELINE_CREDENTIAL_KEY is required to access the credential store")
     return Fernet(key.encode())
 
 

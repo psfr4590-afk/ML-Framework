@@ -64,9 +64,26 @@ def _write_smoke_source_manifest(tmp_root: Path) -> None:
     path.write_text(json.dumps({
         "schema": 1,
         "retrieval_started_at": datetime.now(timezone.utc).isoformat(),
+        "retrieval_completed_at": datetime.now(timezone.utc).isoformat(),
         "sources": [{"kind": "local_fixture", "identifier": "local-release-fixture", "revision": "embedded", "license": "project-test-fixture", "raw_source_sha256": None}],
         "rights_note": "Deterministic test fixture only; not an external training source.",
     }, indent=2) + "\n", encoding="utf-8")
+
+
+def _validate_source_manifest(path: Path) -> None:
+    required_top_level = {"schema", "retrieval_started_at", "retrieval_completed_at", "sources", "rights_note"}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not required_top_level <= set(data):
+        raise RuntimeError("Source manifest is missing required top-level metadata")
+    if int(data["schema"]) != 1 or not isinstance(data["sources"], list):
+        raise RuntimeError("Source manifest schema is invalid")
+    required_source = {"kind", "identifier", "revision", "license", "raw_source_sha256"}
+    for source in data["sources"]:
+        if not isinstance(source, dict) or not required_source <= set(source):
+            raise RuntimeError("Source manifest source entry is incomplete")
+        digest = source["raw_source_sha256"]
+        if digest is not None and (not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest.lower())):
+            raise RuntimeError("Source manifest raw_source_sha256 is invalid")
 
 
 def _native_smoke() -> int:
@@ -87,6 +104,11 @@ def _native_smoke() -> int:
         config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
         _write_local_smoke_input(scratch)
         _write_smoke_source_manifest(tmp_root)
+        try:
+            _validate_source_manifest(tmp_root / "source_manifest.json")
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, RuntimeError) as exc:
+            print(f"Invalid smoke source manifest: {exc}")
+            return 2
 
         if run([sys.executable, "run_pipeline.py", "--config", str(config_path), "--no-resume"]):
             return 2

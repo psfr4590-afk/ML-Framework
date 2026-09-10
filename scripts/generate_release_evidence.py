@@ -18,7 +18,7 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     freeze = subprocess.run([sys.executable, "-m", "pip", "freeze"], cwd=ROOT, check=True, capture_output=True, text=True)
     (OUT / "pip-freeze.txt").write_text(freeze.stdout, encoding="utf-8")
-    run("cyclonedx-py", "requirements", "-i", "requirements.txt", "-o", str(OUT / "sbom.json"), "--format", "json")
+    run("cyclonedx-py", "environment", "-o", str(OUT / "sbom.json"), "--format", "json")
     return 0
 
 

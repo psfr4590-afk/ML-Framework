@@ -304,6 +304,8 @@ class ShardDataLoader:
         self._shard_idx = shard_idx
         self._pos = pos
         self._data = self._load_shard(self._shards[self._shard_idx])
+        if self._pos > len(self._data):
+            raise RuntimeError(f"Checkpoint {self._split} cursor position exceeds shard bounds")
 
     def next_batch(self, batch_size: int):
         import torch
