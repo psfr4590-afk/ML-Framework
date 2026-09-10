@@ -72,7 +72,7 @@ def _load_class(module: str, name: str):
 
 
 class Pipeline:
-    def __init__(self, config_path: str = "config/pipeline_config.yaml", dataset_id: int | None = None):
+    def __init__(self, config_path: str = "config/pipeline_config.yaml", dataset_id: int | None = None, resume: bool | None = None):
         requested = Path(config_path)
         if not requested.is_absolute(): requested = PROJECT_ROOT / requested
         self._cfg_path = requested.resolve()
@@ -97,7 +97,8 @@ class Pipeline:
         self.cfg.setdefault("export", {})["llamacpp_dir"] = str(PROJECT_ROOT / self.cfg.get("export", {}).get("llamacpp_dir", "llama.cpp"))
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
         _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
-        self._resume = bool(self.cfg["pipeline"].get("resume", True))
+        self._resume = bool(self.cfg["pipeline"].get("resume", True)) if resume is None else bool(resume)
+        self.cfg.setdefault("train", {})["resume"] = self._resume
         self._weights_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("source_weights_file", "config/source_weights.yaml")
         self._dataset_groups_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("dataset_groups_file", "config/dataset_groups.yaml")
         self._clean_config_path = PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")
@@ -228,9 +229,15 @@ class Pipeline:
         exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
 
     def run(self, stages: str = "all", dataset_group: str | None = None):
-        stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]; requested = stage_names if stages == "all" else [s.strip() for s in stages.split(",") if s.strip()]
+        stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
+        if stages == "all":
+            configured = self.cfg.get("stages", {}) or {}
+            requested = [stage for stage in stage_names if bool(configured.get(stage, configured.get("semantic_dedup", False) if stage == "dedup" else False))]
+        else:
+            requested = [s.strip() for s in stages.split(",") if s.strip()]
         unknown = [s for s in requested if s not in stage_names]
         if unknown: raise ValueError(f"Unknown stages: {unknown}")
+        if not requested: raise ValueError("No enabled pipeline stages are configured")
         artifacts: dict[str, Any] = {}
         if "crawl" in requested:
             artifacts["crawl"] = self.stage_crawl(dataset_group)
