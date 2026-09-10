@@ -276,11 +276,11 @@ def _parse_html(data: bytes) -> ParsedContent:
     html = _decode_text(data)
     soup = BeautifulSoup(html, "lxml")
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
-    for tag in soup(["script", "style", "noscript", "nav", "footer", "aside", "form", "iframe"]):
-        tag.decompose()
-    text = soup.get_text(" ", strip=True)
     links = [a.get("href") for a in soup.find_all("a", href=True)]
     links = [link for link in links if link]
+    for tag in soup(["script", "style", "noscript", "nav", "footer", "aside", "form", "iframe", "a"]):
+        tag.decompose()
+    text = soup.get_text(" ", strip=True)
     if not text:
         raise ContentParseError("HTML contains no extractable text")
     return ParsedContent(text=text, title=title, content_type="html", links=links, metadata={"format": "html"})
