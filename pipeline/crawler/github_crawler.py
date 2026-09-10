@@ -41,7 +41,8 @@ class GitHubCrawler(BaseCrawler):
         topics = cfg.get("topics", [])
         languages = cfg.get("languages", [])
         min_stars = int(cfg.get("min_stars", 0))
-        per_query = min(100, int(cfg.get("per_query", 10)))
+        per_query = min(100, max(1, int(cfg.get("per_query", 10))))
+        max_repos = max(0, int(cfg.get("max_repos", 0)))
         seen: set[str] = set()
         queries: list[str] = []
         for topic in topics:
@@ -51,8 +52,17 @@ class GitHubCrawler(BaseCrawler):
         if not queries:
             queries = list(cfg.get("queries", []))
         for query in queries:
-            data = self._request("search/repositories", {"q": query, "sort": "stars", "order": "desc", "per_page": per_query}) or {}
+            if max_repos and len(seen) >= max_repos:
+                break
+            remaining = max_repos - len(seen) if max_repos else per_query
+            request_size = min(per_query, remaining) if max_repos else per_query
+            data = self._request(
+                "search/repositories",
+                {"q": query, "sort": "stars", "order": "desc", "per_page": request_size},
+            ) or {}
             for repo in data.get("items", []):
+                if max_repos and len(seen) >= max_repos:
+                    break
                 url = repo.get("html_url", "")
                 if not url or url in seen or int(repo.get("stargazers_count", 0)) < min_stars:
                     continue
