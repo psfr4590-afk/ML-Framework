@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import subprocess
@@ -28,6 +29,14 @@ LINT_TARGETS = [
 def run(cmd: list[str]) -> int:
     print("$", " ".join(map(str, cmd)))
     return subprocess.run(cmd, cwd=ROOT, check=False).returncode
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _native_smoke() -> int:
@@ -59,6 +68,15 @@ def _native_smoke() -> int:
             if not final_gguf.is_file() or final_gguf.stat().st_size <= 0:
                 print(f"Missing final GGUF artifact: {final_gguf}")
                 return 2
+            for key in ("dataset_card", "model_card"):
+                card = Path(manifest[key])
+                if not card.is_file() or card.stat().st_size <= 0:
+                    print(f"Missing export card: {key}: {card}")
+                    return 2
+                hash_key = f"{key}_sha256"
+                if manifest.get(hash_key) != _sha256(card):
+                    print(f"Export card hash mismatch: {key}: {card}")
+                    return 2
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(f"Invalid export manifest: {exc}")
             return 2
@@ -136,7 +154,7 @@ def main() -> int:
         print("Platform:", platform.platform())
         return 2
 
-    print("RELEASE VERIFICATION PASSED: syntax, lint, tests, doctor, native export, GGUF integrity, and inference are green.")
+    print("RELEASE VERIFICATION PASSED: syntax, lint, tests, doctor, native export, export cards, GGUF integrity, and inference are green.")
     return 0
 
 
