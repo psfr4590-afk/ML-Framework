@@ -10,10 +10,11 @@ def _doc(doc_id: str, weight: float) -> Document:
     )
 
 
-def _weighter() -> DomainWeighter:
+def _weighter(seed: int = 42) -> DomainWeighter:
     return DomainWeighter(
         "config/source_weights.yaml",
         strategy="upsample",
+        seed=seed,
     )
 
 
@@ -48,6 +49,13 @@ def test_upsample_weight_above_one_has_at_least_floor_copies():
         counts[doc.doc_id] = counts.get(doc.doc_id, 0) + 1
     assert counts["two"] >= 2
     assert counts["three"] >= 3
+
+
+def test_weighting_is_deterministic_for_a_fixed_seed():
+    docs = [_doc(f"doc-{i}", 1.1 + (i % 7) / 10) for i in range(40)]
+    first = [d.doc_id for d in _weighter(123).apply(iter(docs))]
+    second = [d.doc_id for d in _weighter(123).apply(iter(docs))]
+    assert first == second
 
 
 def test_unknown_strategy_fails_loudly():
