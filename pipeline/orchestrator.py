@@ -206,8 +206,19 @@ class Pipeline:
         provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size()})
         if self._resume and marker.exists():
             try:
-                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", []); valid = data.get("provenance") == provenance and bool(files) and all((shard_dir / item["name"]).is_file() and (shard_dir / item["name"]).stat().st_size == int(item["size"]) for item in files)
-                if valid: log.info("[shard] Verified %d shards and provenance, skipping", len(files)); return shard_dir
+                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", [])
+                valid = data.get("provenance") == provenance and bool(files)
+                if valid:
+                    for item in files:
+                        shard_path = shard_dir / item["name"]
+                        if not shard_path.is_file() or shard_path.stat().st_size != int(item["size"]):
+                            valid = False
+                            break
+                        expected_sha = item.get("sha256")
+                        if not expected_sha or sha256_file(shard_path) != expected_sha:
+                            valid = False
+                            break
+                if valid: log.info("[shard] Verified %d shards, hashes, and provenance, skipping", len(files)); return shard_dir
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError): log.warning("[shard] Invalid shard manifest; rebuilding")
         shard_dir.mkdir(parents=True, exist_ok=True)
         for old in shard_dir.glob("shard_*.bin"): old.unlink(missing_ok=True)
