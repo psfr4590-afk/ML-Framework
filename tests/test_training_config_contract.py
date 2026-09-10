@@ -41,7 +41,16 @@ def test_load_checkpoint_rejects_stale_provenance(tmp_path):
     path = tmp_path / "ckpt_0000001.pt"
     model = torch.nn.Linear(2, 2)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    torch.save({"step": 1, "model": model.state_dict()}, path)
+    # Keep the fixture above the loader's truncation guard so this test reaches
+    # provenance validation rather than failing integrity validation first.
+    torch.save(
+        {
+            "step": 1,
+            "model": model.state_dict(),
+            "padding": torch.zeros(1024, dtype=torch.float32),
+        },
+        path,
+    )
     from pipeline.integrity import sha256_file
 
     manifest = {
