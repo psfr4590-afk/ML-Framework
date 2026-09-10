@@ -31,26 +31,53 @@ def _stable_hash(value: object) -> str:
 
 def _shard_manifest_hash(shard_dir: Path) -> Optional[str]:
     manifest = shard_dir / "shards.manifest.json"
-    if not manifest.is_file():
-        return None
-    return sha256_file(manifest)
+    return sha256_file(manifest) if manifest.is_file() else None
 
 
 def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path) -> dict:
+    pipeline_sha = cfg.get("_pipeline_config_sha256")
+    if not pipeline_sha:
+        raise RuntimeError("Training provenance requires the canonical pipeline configuration SHA-256")
+    shard_sha = _shard_manifest_hash(shard_dir)
+    if not shard_sha:
+        raise RuntimeError(f"Training provenance requires a valid shard manifest: {shard_dir}")
     return {
-        "train_config_sha256": _stable_hash(cfg),
+        "schema": 1,
+        "pipeline_config_sha256": pipeline_sha,
+        "train_config_sha256": _stable_hash(cfg.get("train", {})),
         "model_config_sha256": _stable_hash(model_cfg.to_dict()),
-        "shard_manifest_sha256": _shard_manifest_hash(shard_dir),
+        "shard_manifest_sha256": shard_sha,
+        "seed": int(cfg.get("train", {}).get("seed", 42)),
     }
 
 
 def _seed_everything(seed: int) -> None:
-    """Seed trainer-owned RNG sources before model/optimizer construction."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _rng_state() -> dict:
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _restore_rng_state(state: dict) -> None:
+    if not isinstance(state, dict):
+        raise RuntimeError("Checkpoint RNG state is invalid")
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch"])
+    if torch.cuda.is_available() and "torch_cuda" in state:
+        torch.cuda.set_rng_state_all(state["torch_cuda"])
 
 
 def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_steps: int) -> float:
@@ -62,22 +89,51 @@ def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_
     return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
 
 
-def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler,
-                    step: int, val_loss: float, cfg: dict, out_dir: Path, tag: str = "",
-                    provenance: Optional[dict] = None):
+def save_checkpoint(
+    model: LlamaModel,
+    optimizer: torch.optim.Optimizer,
+    scaler,
+    step: int,
+    val_loss: float,
+    cfg: dict,
+    out_dir: Path,
+    tag: str = "",
+    provenance: Optional[dict] = None,
+    train_loader: Optional[ShardDataLoader] = None,
+    val_loader: Optional[ShardDataLoader] = None,
+):
     out_dir.mkdir(parents=True, exist_ok=True)
     name = f"ckpt_{tag}_{step:07d}.pt" if tag else f"ckpt_{step:07d}.pt"
     path = out_dir / name
-    payload = {"step": step, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
-               "scaler": scaler.state_dict(), "val_loss": val_loss,
-               "model_cfg": model.cfg.to_dict(), "train_cfg": cfg,
-               "provenance": provenance or {}}
+    payload = {
+        "schema": 3,
+        "step": step,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scaler": scaler.state_dict(),
+        "val_loss": val_loss,
+        "model_cfg": model.cfg.to_dict(),
+        "train_cfg": cfg,
+        "provenance": provenance or {},
+        "rng_state": _rng_state(),
+        "loader_state": {
+            "train": train_loader.state_dict() if train_loader is not None else None,
+            "val": val_loader.state_dict() if val_loader is not None else None,
+        },
+    }
     tmp = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, tmp)
     os.replace(tmp, path)
-    manifest = {"schema": 2, "path": str(path), "size": path.stat().st_size,
-                "sha256": sha256_file(path), "step": step, "val_loss": val_loss,
-                "provenance": provenance or {}}
+    manifest = {
+        "schema": 2,
+        "kind": "checkpoint",
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+        "step": step,
+        "val_loss": val_loss,
+        "provenance": provenance or {},
+    }
     mp = path.with_name(path.name + ".manifest.json")
     mtmp = mp.with_suffix(mp.suffix + ".tmp")
     mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -85,26 +141,29 @@ def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler,
     return path
 
 
-def load_checkpoint(path: Path, model: LlamaModel,
-                    optimizer: Optional[torch.optim.Optimizer] = None,
-                    scaler=None, device: torch.device | None = None,
-                    expected_provenance: Optional[dict] = None) -> int:
+def load_checkpoint(
+    path: Path,
+    model: LlamaModel,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scaler=None,
+    device: torch.device | None = None,
+    expected_provenance: Optional[dict] = None,
+    train_loader: Optional[ShardDataLoader] = None,
+    val_loader: Optional[ShardDataLoader] = None,
+) -> int:
     if not path.exists() or path.stat().st_size < 1024:
         raise RuntimeError(f"Checkpoint missing or truncated: {path}")
     mp = path.with_name(path.name + ".manifest.json")
     if not mp.is_file():
         raise RuntimeError(f"Checkpoint integrity manifest missing: {mp}")
     meta = json.loads(mp.read_text(encoding="utf-8"))
-    if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
+    if meta.get("kind") != "checkpoint" or int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
         raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
-    if expected_provenance is not None:
-        actual = meta.get("provenance") or {}
-        if actual != expected_provenance:
-            raise RuntimeError(
-                f"Checkpoint provenance mismatch: {path}. "
-                "The checkpoint was produced from a different training configuration, model configuration, "
-                "or shard manifest; refusing automatic resume."
-            )
+    if expected_provenance is not None and meta.get("provenance") != expected_provenance:
+        raise RuntimeError(
+            f"Checkpoint provenance mismatch: {path}. The checkpoint was produced from a different "
+            "pipeline configuration, training configuration, model configuration, seed, or shard manifest."
+        )
     try:
         ckpt = torch.load(path, map_location=device or "cpu", weights_only=False)
     except TypeError:
@@ -116,6 +175,18 @@ def load_checkpoint(path: Path, model: LlamaModel,
         optimizer.load_state_dict(ckpt["optimizer"])
     if scaler is not None and "scaler" in ckpt:
         scaler.load_state_dict(ckpt["scaler"])
+    loader_state = ckpt.get("loader_state") or {}
+    if train_loader is not None:
+        if not loader_state.get("train"):
+            raise RuntimeError("Checkpoint has no deterministic train loader state; refusing resume")
+        train_loader.load_state_dict(loader_state["train"])
+    if val_loader is not None:
+        if not loader_state.get("val"):
+            raise RuntimeError("Checkpoint has no deterministic validation loader state; refusing resume")
+        val_loader.load_state_dict(loader_state["val"])
+    if "rng_state" not in ckpt:
+        raise RuntimeError("Checkpoint has no deterministic RNG state; refusing resume")
+    _restore_rng_state(ckpt["rng_state"])
     return int(ckpt["step"])
 
 
@@ -226,13 +297,18 @@ class Trainer:
 
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype, seed=seed)
         val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype, seed=seed)
-        provenance = _provenance(t, model_cfg, shard_dir)
+        provenance = _provenance(self.cfg, model_cfg, shard_dir)
 
         start_step, best_val = 0, float("inf")
         if bool(t.get("resume", True)):
             ckpt = latest_checkpoint(self.ckpt_dir)
             if ckpt:
-                start_step = load_checkpoint(ckpt, model, optimizer, scaler, device, expected_provenance=provenance)
+                start_step = load_checkpoint(
+                    ckpt, model, optimizer, scaler, device,
+                    expected_provenance=provenance,
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                )
                 try:
                     payload = torch.load(ckpt, map_location="cpu", weights_only=False)
                 except TypeError:
@@ -248,8 +324,7 @@ class Trainer:
 
         try:
             while step < total_steps:
-                lr = cosine_lr(step, warmup_steps, float(t.get("lr_max", 3e-4)),
-                               float(t.get("lr_min", 3e-5)), total_steps)
+                lr = cosine_lr(step, warmup_steps, float(t.get("lr_max", 3e-4)), float(t.get("lr_min", 3e-5)), total_steps)
                 for group in optimizer.param_groups:
                     group["lr"] = lr
                 accum_loss = 0.0
@@ -271,27 +346,24 @@ class Trainer:
                 if step % 10 == 0:
                     elapsed = max(time.time() - start_time, 1e-6)
                     tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed
-                    metrics.write(json.dumps({"step": step, "train_loss": accum_loss,
-                                              "lr": lr, "grad_norm": float(grad_norm),
-                                              "tokens_per_sec": tok_s}) + "\n")
+                    metrics.write(json.dumps({"step": step, "train_loss": accum_loss, "lr": lr, "grad_norm": float(grad_norm), "tokens_per_sec": tok_s}) + "\n")
                     metrics.flush()
 
                 if step % eval_every == 0:
                     val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
-                    metrics.write(json.dumps({"step": step, "val_loss": val_loss,
-                                              "val_ppl": math.exp(min(val_loss, 20))}) + "\n")
+                    metrics.write(json.dumps({"step": step, "val_loss": val_loss, "val_ppl": math.exp(min(val_loss, 20))}) + "\n")
                     metrics.flush()
                     model.train()
                     if val_loss < best_val:
                         best_val = val_loss
-                        save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="best", provenance=provenance)
+                        save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="best", provenance=provenance, train_loader=train_loader, val_loader=val_loader)
 
                 if step % ckpt_every == 0:
-                    save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir, provenance=provenance)
+                    save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir, provenance=provenance, train_loader=train_loader, val_loader=val_loader)
                     self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
 
             val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
-            save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final", provenance=provenance)
+            save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final", provenance=provenance, train_loader=train_loader, val_loader=val_loader)
             return model, step
         finally:
             metrics.close()
