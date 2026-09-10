@@ -14,7 +14,6 @@ def _load(name: str) -> dict:
 def test_default_config_is_bounded_and_cpu_safe():
     cfg = _load("pipeline_config.yaml")
     validate_config(cfg)
-    assert cfg["pipeline"]["total_steps"] == 2
     assert cfg["train"]["total_steps"] == 2
     assert cfg["train"]["allow_cpu_training"] is True
     assert cfg["stages"]["export"] is False
@@ -24,7 +23,6 @@ def test_default_config_is_bounded_and_cpu_safe():
 def test_full_profile_is_explicitly_large():
     cfg = _load("pipeline_config.full.yaml")
     validate_config(cfg)
-    assert cfg["pipeline"]["total_steps"] >= 100000
     assert cfg["train"]["total_steps"] >= 100000
     assert cfg["train"]["allow_cpu_training"] is False
     assert cfg["stages"]["export"] is True

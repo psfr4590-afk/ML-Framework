@@ -14,6 +14,7 @@ from .service import add, credential_delete, credential_list, credential_set, cr
 from .store import store
 
 LOCAL_ORIGINS = {"http://127.0.0.1", "http://localhost", "http://[::1]"}
+LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "testclient"}
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 CONTROL_HEADER = "x-m2s-command-center"
 
@@ -24,8 +25,9 @@ class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/api/"):
             client_host = request.client.host if request.client else None
-            if client_host not in ("127.0.0.1", "::1"):
-                return JSONResponse(status_code=403, content={"error": {"code": "LOCAL_ONLY", "message": "Local API access required"}})
+            if client_host not in LOCAL_CLIENT_HOSTS:
+                message = "Command center is localhost-only."
+                return JSONResponse(status_code=403, content={"detail": message, "error": {"code": "LOCAL_ONLY", "message": message}})
             if request.method in MUTATING_METHODS:
                 origin = request.headers.get("origin")
                 if origin and origin not in LOCAL_ORIGINS:

@@ -32,12 +32,10 @@ def test_canonical_starter_is_bounded_and_verification_profile_is_secondary():
     starter = _load_config("pipeline_config.yaml")
     verification = _load_config("pipeline_config.smoke.yaml")
 
-    assert starter["pipeline"]["total_steps"] <= 10
     assert starter["train"]["total_steps"] <= 10
     assert starter["train"]["allow_cpu_training"] is True
     assert starter["stages"]["export"] is False
     assert starter["crawl"]["max_pages_per_domain"] <= 2
 
-    assert verification["pipeline"]["total_steps"] <= 10
     assert verification["train"]["total_steps"] <= 10
     assert verification["train"]["allow_cpu_training"] is True

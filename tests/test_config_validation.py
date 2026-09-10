@@ -30,7 +30,7 @@ def test_pipeline_level_model_preset_is_rejected():
 def test_unknown_pipeline_stage_is_rejected():
     cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
     cfg["stages"]["shardd"] = True
-    with pytest.raises(ValueError, match="Unsupported pipeline configuration keys|Unsupported pipeline stages"):
+    with pytest.raises(ValueError, match="Unsupported stages configuration keys: shardd"):
         validate_config(cfg)
 
 

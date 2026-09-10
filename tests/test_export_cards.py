@@ -35,6 +35,10 @@ def test_write_export_cards_creates_both_cards_and_lineage(tmp_path, monkeypatch
         json.dumps({"dtype": "uint16", "files": [{"name": "shard_00000_train.bin", "size": 20}]}),
         encoding="utf-8",
     )
+    (tmp_path / "source_manifest.json").write_text(
+        json.dumps({"schema": 1, "sources": [], "source_definition_files": {}, "retrieval_started_at": "test", "rights_note": "test"}),
+        encoding="utf-8",
+    )
     monkeypatch.setattr("scripts.export_cards._git_commit", lambda: "git-sha")
 
     manifest = {
