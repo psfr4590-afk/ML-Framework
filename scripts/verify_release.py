@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from pipeline.integrity import sha256_file, write_manifest
+from pipeline.integrity import write_manifest
 from pipeline.types import Document
 
 ROOT = Path(__file__).resolve().parents[1]
