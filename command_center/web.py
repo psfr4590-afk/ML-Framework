@@ -14,7 +14,7 @@ from .service import add, credential_delete, credential_list, credential_set, cr
 from .store import store
 
 LOCAL_ORIGINS = {"http://127.0.0.1", "http://localhost", "http://[::1]"}
-LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "testclient"}
+LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "testclient", "testserver"}
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 CONTROL_HEADER = "x-m2s-command-center"
 
