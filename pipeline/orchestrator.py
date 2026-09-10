@@ -381,7 +381,7 @@ class Pipeline:
                         doc.meta["dataset_group"] = gid
                         yield doc
 
-        count = atomic_jsonl_write(out, (doc.to_jsonl() for doc in stream()))
+        count = atomic_jsonl_write(out, lambda: (doc.to_jsonl() for doc in stream()))
         if count == 0:
             raise RuntimeError(f"Crawl produced no documents: {out}")
         _write_source_manifest(
