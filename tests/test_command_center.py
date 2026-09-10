@@ -5,6 +5,7 @@ from command_center.web import app
 
 LOOPBACK_CLIENT = ("127.0.0.1", 12345)
 REMOTE_CLIENT = ("192.0.2.10", 54321)
+CONTROL_HEADERS = {"x-m2s-command-center": "1"}
 
 
 def test_command_center_seeds_and_serves():
@@ -63,7 +64,7 @@ def test_credential_api_does_not_return_secret():
         from cryptography.fernet import Fernet
         os.environ["PIPELINE_CREDENTIAL_KEY"] = Fernet.generate_key().decode()
         with TestClient(app, client=LOOPBACK_CLIENT) as client:
-            r = client.post("/api/credentials", json={
+            r = client.post("/api/credentials", headers=CONTROL_HEADERS, json={
                 "name": "test", "secret": "do-not-return", "provider": "custom",
                 "kind": "token", "env_var": "TEST_TOKEN", "identity": "user"
             })
