@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -289,7 +288,3 @@ def main(argv: list[str] | None = None) -> int:
         log.error("Export failed: %s", exc)
         return 2
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
