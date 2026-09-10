@@ -1,4 +1,4 @@
 # Optional acceleration for semantic near-deduplication.
 # The core pipeline remains fully operational without these packages.
 sentence-transformers>=3.0
-faiss-cpu>=1.8
+faiss-cpu>=1.15.0
