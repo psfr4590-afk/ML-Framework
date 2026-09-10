@@ -17,9 +17,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import bootstrap
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "runtime" / "system_info.json"
 
 
@@ -119,7 +122,7 @@ def build_report(torch_channel: str = "cpu") -> dict[str, Any]:
         "host": {
             "platform": platform.platform(),
             "python_version": platform.python_version(),
-            "python_executable": sys.executable,
+            "python_executable": Path(sys.executable).name,
             "machine": platform.machine(),
         },
         "hardware": profile.as_dict(),
