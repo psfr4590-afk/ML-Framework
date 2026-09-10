@@ -11,8 +11,10 @@ import ipaddress
 import logging
 import re
 import socket
+import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -24,6 +26,31 @@ from pipeline.crawler.source_scorer import classify_text, classify_url, detect_c
 from pipeline.types import Document
 
 log = logging.getLogger("crawler.web")
+_DNS_PIN_LOCK = threading.RLock()
+
+
+@contextmanager
+def _pin_dns(hostname: str, addresses: tuple[str, ...]):
+    """Pin socket DNS resolution for *hostname* to an already validated address set."""
+    host = hostname.rstrip(".").lower()
+    original_getaddrinfo = socket.getaddrinfo
+
+    def pinned_getaddrinfo(node, port, family=0, type=0, proto=0, flags=0):
+        if isinstance(node, str) and node.rstrip(".").lower() == host:
+            results = []
+            for address in addresses:
+                results.extend(original_getaddrinfo(address, port, family, type, proto, flags))
+            if not results:
+                raise socket.gaierror(socket.EAI_NONAME, "Pinned DNS address family unavailable")
+            return results
+        return original_getaddrinfo(node, port, family, type, proto, flags)
+
+    with _DNS_PIN_LOCK:
+        socket.getaddrinfo = pinned_getaddrinfo
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
 
 
 class WebCrawler(BaseCrawler):
@@ -44,6 +71,7 @@ class WebCrawler(BaseCrawler):
         self.user_agent = str(cfg.get("user_agent", "ModelLab/1.3 (+local research dataset builder)"))
         self.max_redirects = max(0, int(self.web.get("max_redirects", 5)))
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.headers.update({
             "User-Agent": self.user_agent,
             "Accept": "text/html,application/xhtml+xml,application/pdf,text/csv,text/tab-separated-values,application/json,application/xml,text/xml,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -54,23 +82,28 @@ class WebCrawler(BaseCrawler):
         self._domain_pages: dict[str, int] = {}
 
     @staticmethod
-    def _host_is_public(hostname: str | None) -> bool:
-        """Return True only when every resolved address is globally routable."""
+    def _resolve_addresses(hostname: str | None) -> tuple[str, ...]:
         if not hostname:
-            return False
+            return ()
         host = hostname.rstrip(".")
         try:
             literal = ipaddress.ip_address(host)
-            addresses = [literal]
+            return (str(literal),)
         except ValueError:
             try:
-                addresses = [
+                addresses = {
                     ipaddress.ip_address(info[4][0])
                     for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-                ]
+                }
             except (OSError, ValueError):
-                return False
-        return bool(addresses) and all(address.is_global for address in addresses)
+                return ()
+        return tuple(sorted(str(address) for address in addresses))
+
+    @classmethod
+    def _host_is_public(cls, hostname: str | None) -> bool:
+        """Return True only when every resolved address is globally routable."""
+        addresses = cls._resolve_addresses(hostname)
+        return bool(addresses) and all(ipaddress.ip_address(address).is_global for address in addresses)
 
     def _allowed(self, url: str) -> bool:
         parsed = urlparse(url)
@@ -82,6 +115,18 @@ class WebCrawler(BaseCrawler):
             return False
         return not self.allow or any(p.search(url) for p in self.allow)
 
+    def _validated_addresses(self, url: str) -> tuple[str, ...] | None:
+        """Resolve and validate the exact address set that the next request will use."""
+        hostname = urlparse(url).hostname
+        addresses = self._resolve_addresses(hostname)
+        if not addresses or not all(ipaddress.ip_address(address).is_global for address in addresses):
+            return None
+        return addresses
+
+    def _pinned_get(self, url: str, addresses: tuple[str, ...]):
+        with _pin_dns(urlparse(url).hostname or "", addresses):
+            return self.session.get(url, timeout=self.timeout, allow_redirects=False)
+
     def _robots_allowed(self, url: str) -> bool:
         if not self.respect_robots:
             return True
@@ -89,10 +134,27 @@ class WebCrawler(BaseCrawler):
         root = f"{parsed.scheme}://{parsed.netloc}"
         rp = self._robots.get(root)
         if rp is None:
-            rp = RobotFileParser(urljoin(root, "/robots.txt"))
+            robots_url = urljoin(root, "/robots.txt")
+            addresses = self._validated_addresses(robots_url)
+            if addresses is None:
+                self._robots[root] = RobotFileParser()
+                return False
+            rp = RobotFileParser(robots_url)
             try:
-                rp.read()
-            except Exception as exc:
+                response = self._pinned_get(robots_url, addresses)
+                if 200 <= response.status_code < 300:
+                    rp.parse(response.content.decode("utf-8", errors="replace").splitlines())
+                elif response.status_code in (401, 403):
+                    rp.disallow_all = True
+                elif 400 <= response.status_code < 500:
+                    rp.allow_all = True
+                else:
+                    log.warning("robots.txt unavailable for %s: HTTP %s", root, response.status_code)
+                    response.close()
+                    self._robots[root] = RobotFileParser()
+                    return False
+                response.close()
+            except requests.RequestException as exc:
                 log.warning("robots.txt unavailable for %s: %s", root, exc)
                 self._robots[root] = RobotFileParser()
                 return False
@@ -118,11 +180,15 @@ class WebCrawler(BaseCrawler):
             if not self._allowed(current_url) or not self._robots_allowed(current_url):
                 self.stats["skipped"] += 1
                 return None
+            addresses = self._validated_addresses(current_url)
+            if addresses is None:
+                self.stats["skipped"] += 1
+                return None
             domain = parsed.netloc.lower()
             self._polite_wait(domain)
             for attempt in range(self.retries + 1):
                 try:
-                    response = self.session.get(current_url, timeout=self.timeout, allow_redirects=False)
+                    response = self._pinned_get(current_url, addresses)
                     if response.is_redirect or response.is_permanent_redirect:
                         location = response.headers.get("Location")
                         response.close()
