@@ -1,5 +1,10 @@
 from __future__ import annotations
-import os, subprocess, sys, threading
+
+import os
+import subprocess
+import sys
+import threading
+
 from .config import ROOT
 from .secrets import credentials
 from .store import store
