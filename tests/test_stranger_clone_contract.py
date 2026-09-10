@@ -34,17 +34,43 @@ FORBIDDEN_PUBLIC_PATH_PARTS = {
     "models",
 }
 
+# These paths are explicitly local-only in .gitignore. A source ZIP has no Git
+# index, so they cannot be distinguished from tracked files by filesystem walk.
+LOCAL_ONLY_PATH_PARTS = {
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".venv",
+    "venv",
+    ".runtime",
+    "datasets",
+    "output",
+    "scratch",
+    "checkpoints",
+    "models",
+}
+
 
 def _tracked_paths() -> set[str]:
     import subprocess
 
-    result = subprocess.run(
-        ["git", "ls-files"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        # GitHub source ZIPs intentionally omit .git. Fall back to the public
+        # filesystem tree while excluding paths known to be local-only.
+        return {
+            path.relative_to(ROOT).as_posix()
+            for path in ROOT.rglob("*")
+            if path.is_file() and not any(part in LOCAL_ONLY_PATH_PARTS for part in path.relative_to(ROOT).parts)
+        }
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
