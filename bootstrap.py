@@ -64,7 +64,7 @@ def _python_requirement_message() -> str:
     version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     return (
         f"Python 3.11-3.13 required; found Python {version}. "
-        "Python 3.14+ is not supported because the project's dependency set "
+        "Python 3.14+ is not supported because dependency compatibility "
         "has not been validated for that interpreter range."
     )
 
