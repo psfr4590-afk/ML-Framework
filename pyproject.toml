@@ -39,6 +39,8 @@ ignore = ["N999"]
 "tests/**" = ["S110", "PLW1510"]
 "scripts/**" = ["UP031"]
 "tests/test_runtime.py" = ["E402"]
+"tests/model_lab/test_model_lab_services.py" = ["E402"]
+"ui/app.py" = ["E402"]
 "ui/screens/**" = ["F403", "F405"]
 "ui/core/application.py" = ["F403", "F405"]
 
