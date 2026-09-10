@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Production export path: native checkpoint -> Hugging Face -> GGUF -> Ollama.
-
-The project trains a small Llama-compatible model locally. Export is exposed as
-a library and CLI, while GGUF conversion stays delegated to llama.cpp.
-"""
+"""Production export path: native checkpoint -> Hugging Face -> GGUF -> Ollama."""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +15,7 @@ from typing import Any
 import torch
 
 from pipeline.trainer.model import LlamaModel, ModelConfig
+from scripts.export_cards import write_export_cards
 
 log = logging.getLogger("export")
 QUANTS = {"F16", "Q4_K_M", "Q5_K_M", "Q8_0"}
@@ -179,8 +176,35 @@ def export_checkpoint(output_dir: str | Path, llamacpp_dir: str | Path, quant: s
     modelfile = gguf_dir / "Modelfile"
     modelfile.write_text(f"FROM {final.name}\n\nPARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER repeat_penalty 1.1\n", encoding="utf-8")
     from pipeline.integrity import sha256_file
-    manifest = {"schema":2,"checkpoint":str(ckpt),"checkpoint_step":int(payload.get("step",0)),"model_name":model_name,"model_config":cfg.to_dict(),"quantization":quant,"llamacpp_dir":str(llamacpp_dir),"converter":str(converter),"converter_version":_llama_version(llamacpp_dir),"hf_dir":str(hf_dir),"f16_gguf":str(f16),"final_gguf":str(final),"final_gguf_sha256":sha256_file(final),"final_gguf_size":final.stat().st_size,"f16_gguf_sha256":sha256_file(f16),"modelfile":str(modelfile)}
-    _atomic_json(gguf_dir / "export_manifest.json", manifest); log.info("Export complete: %s", final); return manifest
+    manifest = {
+        "schema": 3,
+        "checkpoint": str(ckpt),
+        "checkpoint_step": int(payload.get("step", 0)),
+        "model_name": model_name,
+        "model_config": cfg.to_dict(),
+        "quantization": quant,
+        "llamacpp_dir": str(llamacpp_dir),
+        "converter": str(converter),
+        "converter_version": _llama_version(llamacpp_dir),
+        "hf_dir": str(hf_dir),
+        "f16_gguf": str(f16),
+        "final_gguf": str(final),
+        "final_gguf_sha256": sha256_file(final),
+        "final_gguf_size": final.stat().st_size,
+        "f16_gguf_sha256": sha256_file(f16),
+        "modelfile": str(modelfile),
+        "training_provenance": payload.get("provenance") or {},
+    }
+    card_paths = write_export_cards(output_dir, manifest, payload)
+    manifest["dataset_card"] = card_paths["dataset_card"]
+    manifest["model_card"] = card_paths["model_card"]
+    manifest["dataset_card_sha256"] = sha256_file(Path(card_paths["dataset_card"]))
+    manifest["model_card_sha256"] = sha256_file(Path(card_paths["model_card"]))
+    _atomic_json(gguf_dir / "export_manifest.json", manifest)
+    log.info("Export complete: %s", final)
+    log.info("Dataset card: %s", card_paths["dataset_card"])
+    log.info("Model card: %s", card_paths["model_card"])
+    return manifest
 
 
 def main(argv: list[str] | None = None) -> int:
