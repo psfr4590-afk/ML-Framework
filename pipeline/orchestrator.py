@@ -95,6 +95,7 @@ class Pipeline:
         self.cfg.setdefault("tokenizer", {})["output_path"] = str(self._out / "tokenizer")
         self.cfg.setdefault("shard", {})["output_dir"] = str(self._out / "shards"); self.cfg.setdefault("train", {})["shard_dir"] = str(self._out / "shards")
         self.cfg.setdefault("export", {})["llamacpp_dir"] = str(PROJECT_ROOT / self.cfg.get("export", {}).get("llamacpp_dir", "llama.cpp"))
+        self.cfg["_pipeline_config_sha256"] = self._config_sha256
         _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         self._resume = bool(self.cfg["pipeline"].get("resume", True))
         self._weights_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("source_weights_file", "config/source_weights.yaml")
@@ -217,6 +218,7 @@ class Pipeline:
         import torch
         train_cfg = self.cfg.get("train", {})
         if not torch.cuda.is_available() and not bool(train_cfg.get("allow_cpu_training", False)): raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining.")
+        self.cfg["_pipeline_config_sha256"] = self._config_sha256
         Trainer = _load_class("pipeline.trainer.train", "Trainer"); Trainer(self.cfg).run(); ckpt_dir = self._out / "checkpoints"; candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or sorted(ckpt_dir.glob("ckpt_final_*.pt")) if ckpt_dir.exists() else []
         if not candidates: raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
         return candidates[-1]
@@ -228,22 +230,23 @@ class Pipeline:
     def run(self, stages: str = "all", dataset_group: str | None = None):
         stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]; requested = stage_names if stages == "all" else [s.strip() for s in stages.split(",") if s.strip()]
         unknown = [s for s in requested if s not in stage_names]
-        if unknown: raise ValueError(f"Unknown stages: {unknown}; valid stages: {stage_names}")
-        if dataset_group and self.dataset_id is None and any(s in requested for s in ("train", "export")): raise RuntimeError("Training/export with dataset groups requires --dataset-id for isolated sessions.")
-        suffix = "" if self.dataset_id is not None else (f"__{dataset_group}" if dataset_group else ""); crawled = self._scratch / f"01_crawled{suffix}.jsonl"; cleaned = self._scratch / f"02_cleaned{suffix}.jsonl"; deduped = self._scratch / f"03_deduped{suffix}.jsonl"; weighted = self._scratch / f"04_weighted{suffix}.jsonl"; t0 = time.time()
-        if "crawl" in requested: crawled = self.stage_crawl(dataset_group)
-        if any(s in requested for s in ("clean", "dedup", "weight", "tokenize", "shard")) and not crawled.exists(): raise RuntimeError(f"Missing crawl artifact: {crawled}")
-        if "clean" in requested: cleaned = self.stage_clean(crawled, cleaned)
-        if "dedup" in requested: deduped = self.stage_embed_dedup(cleaned if cleaned.exists() else crawled, deduped)
-        if "weight" in requested: weighted = self.stage_weight(deduped if deduped.exists() else (cleaned if cleaned.exists() else crawled), weighted)
-        tokenizer = None
-        if "tokenize" in requested: tokenizer = self.stage_tokenize(weighted if weighted.exists() else (deduped if deduped.exists() else cleaned))
+        if unknown: raise ValueError(f"Unknown stages: {unknown}")
+        artifacts: dict[str, Any] = {}
+        if "crawl" in requested:
+            artifacts["crawl"] = self.stage_crawl(dataset_group)
+        if "clean" in requested:
+            artifacts["clean"] = self.stage_clean(artifacts.get("crawl", self._scratch / "01_crawled.jsonl"))
+        if "dedup" in requested:
+            artifacts["dedup"] = self.stage_embed_dedup(artifacts.get("clean", self._scratch / "02_cleaned.jsonl"))
+        if "weight" in requested:
+            artifacts["weight"] = self.stage_weight(artifacts.get("dedup", self._scratch / "03_deduped.jsonl"))
+        if "tokenize" in requested:
+            artifacts["tokenizer"] = self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl"))
         if "shard" in requested:
-            if tokenizer is None: tokenizer = _load_class("pipeline.tokenizer.train_tokenizer", "BPETokenizerTrainer")(self.cfg["tokenizer"]).load()
-            self.stage_shard(weighted if weighted.exists() else (deduped if deduped.exists() else cleaned), tokenizer)
-        if "train" in requested: self.stage_train()
-        if "export" in requested: self.stage_export()
-        log.info("Pipeline complete in %.1fs", time.time() - t0)
-
-
-__all__ = ["Pipeline"]
+            artifacts["shard"] = self.stage_shard(artifacts.get("weight", self._scratch / "04_weighted.jsonl"), artifacts.get("tokenizer") or self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl")))
+        if "train" in requested:
+            artifacts["train"] = self.stage_train()
+        if "export" in requested:
+            artifacts["export"] = self.stage_export()
+        log.info("Pipeline completed stages=%s", requested)
+        return artifacts
