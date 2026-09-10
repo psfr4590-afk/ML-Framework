@@ -4,9 +4,6 @@ pipeline:
   model_name: "pretrain-smoke"
   output_dir: "output"
   scratch_dir: "scratch"
-  total_steps: 2
-  batch_size: 1
-  grad_accum_steps: 1
   seed: 42
   resume: false
 
@@ -49,7 +46,6 @@ clean:
   config_file: "config/cleaner_config.yaml"
 
 embed_dedup:
-  # Keep smoke verification offline after dependency installation.
   mode: "auto"
   model: "all-MiniLM-L6-v2"
   model_path: null
