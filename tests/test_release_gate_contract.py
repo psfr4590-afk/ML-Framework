@@ -10,7 +10,7 @@ def test_release_gate_does_not_claim_native_prerequisites_without_bootstrap(monk
     assert verify_release.main() == 0
     output = capsys.readouterr().out
     assert "required environment checks are green" in output
-    assert "Native export prerequisites were not checked" in output
+    assert "Native artifact verification was not run" in output
 
 
 def test_release_gate_bootstrap_mode_reports_native_check(monkeypatch, capsys):
