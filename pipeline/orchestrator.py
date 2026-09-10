@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import inspect
 import json
 import logging
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -18,6 +19,17 @@ from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLook
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger("orchestrator")
+
+STAGE_IMPLEMENTATIONS = {
+    "crawl": ("pipeline.crawler.web_crawler", "WebCrawler"),
+    "clean": ("pipeline.cleaner.cleaner", "Cleaner"),
+    "dedup": ("pipeline.embedder.semantic_dedup", "SemanticDeduplicator"),
+    "weight": ("pipeline.weighter.weighter", "DomainWeighter"),
+    "tokenize": ("pipeline.tokenizer.train_tokenizer", "BPETokenizerTrainer"),
+    "shard": ("pipeline.shardwriter.shard_writer", "ShardWriter"),
+    "train": ("pipeline.trainer.train", "Trainer"),
+    "export": ("scripts.export_gguf", "export_checkpoint"),
+}
 
 
 def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
@@ -54,14 +66,17 @@ def _jsonl_write(docs: Iterator[Document], path: Path, kind: str = "jsonl", prov
 
 
 def _jsonl_read(path: Path) -> Iterator[Document]:
-    if not path.exists(): raise FileNotFoundError(f"Required pipeline input does not exist: {path}")
+    if not path.exists():
+        raise FileNotFoundError(f"Required pipeline input does not exist: {path}")
     with path.open("r", encoding="utf-8") as handle:
         for line_no, line in enumerate(handle, 1):
             line = line.strip()
-            if not line: continue
+            if not line:
+                continue
             try:
                 record = json.loads(line)
-                if not isinstance(record, dict): raise TypeError("record is not an object")
+                if not isinstance(record, dict):
+                    raise TypeError("record is not an object")
                 yield Document.from_dict(record)
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 raise RuntimeError(f"Input integrity failure at {path}:{line_no}: {exc}") from exc
@@ -71,60 +86,127 @@ def _load_class(module: str, name: str):
     return getattr(importlib.import_module(module), name)
 
 
+def _implementation_sha256(stage: str) -> str:
+    module_name, class_name = STAGE_IMPLEMENTATIONS[stage]
+    module = importlib.import_module(module_name)
+    target = getattr(module, class_name)
+    source = Path(inspect.getsourcefile(target) or module.__file__ or "").resolve()
+    digest = hashlib.sha256()
+    digest.update(sha256_file(Path(__file__).resolve()).encode())
+    if source.is_file():
+        digest.update(sha256_file(source).encode())
+    return digest.hexdigest()
+
+
+def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
+    crawl = cfg.get("crawl", {})
+    paths = {
+        "pipeline_config": root / "config" / "pipeline_config.yaml",
+        "source_weights": root / str(crawl.get("source_weights_file", "config/source_weights.yaml")),
+        "dataset_groups": root / str(crawl.get("dataset_groups_file", "config/dataset_groups.yaml")),
+    }
+    web = crawl.get("web", {})
+    if web.get("seed_urls_file"):
+        paths["seed_urls"] = root / str(web["seed_urls_file"])
+    return {name: path.resolve() for name, path in paths.items()}
+
+
+def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path]) -> None:
+    retrieval_started = datetime.now(timezone.utc).isoformat()
+    files = {name: {"path": str(value.relative_to(PROJECT_ROOT)), "sha256": _file_hash(value)} for name, value in source_paths.items()}
+    seed_path = source_paths.get("seed_urls")
+    seeds = []
+    if seed_path and seed_path.is_file():
+        seeds = [line.strip() for line in seed_path.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    manifest = {
+        "schema": 1,
+        "retrieval_started_at": retrieval_started,
+        "source_definition_files": files,
+        "sources": [{"kind": "seed_url", "identifier": url, "revision": None, "license": "unknown", "raw_source_sha256": None} for url in seeds],
+        "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 class Pipeline:
     def __init__(self, config_path: str = "config/pipeline_config.yaml", dataset_id: int | None = None, resume: bool | None = None):
         requested = Path(config_path)
-        if not requested.is_absolute(): requested = PROJECT_ROOT / requested
+        if not requested.is_absolute():
+            requested = PROJECT_ROOT / requested
         self._cfg_path = requested.resolve()
         self._project_root = PROJECT_ROOT
-        if not self._cfg_path.is_file(): raise FileNotFoundError(f"Pipeline config not found: {self._cfg_path}")
+        if not self._cfg_path.is_file():
+            raise FileNotFoundError(f"Pipeline config not found: {self._cfg_path}")
         self._config_sha256 = sha256_file(self._cfg_path)
         self.cfg = _load_config(self._cfg_path)
         self.cfg["_project_root"] = str(PROJECT_ROOT)
         validate_config(self.cfg)
         self.dataset_id = dataset_id
-        configured_out = Path(self.cfg["pipeline"].get("output_dir", "output")); configured_scratch = Path(self.cfg["pipeline"].get("scratch_dir", "scratch"))
+        configured_out = Path(self.cfg["pipeline"].get("output_dir", "output"))
+        configured_scratch = Path(self.cfg["pipeline"].get("scratch_dir", "scratch"))
         if dataset_id is not None:
             self._dataset_root = PROJECT_ROOT / "datasets" / f"dataset_{dataset_id:03d}"
-            if not self._dataset_root.is_dir(): raise FileNotFoundError(f"Dataset session does not exist: {self._dataset_root}")
+            if not self._dataset_root.is_dir():
+                raise FileNotFoundError(f"Dataset session does not exist: {self._dataset_root}")
             self._out = self._dataset_root / "output"; self._scratch = self._dataset_root / "scratch"
         else:
             self._dataset_root = None; self._out = (PROJECT_ROOT / configured_out).resolve(); self._scratch = (PROJECT_ROOT / configured_scratch).resolve()
         self._out.mkdir(parents=True, exist_ok=True); self._scratch.mkdir(parents=True, exist_ok=True)
         self.cfg["pipeline"]["output_dir"] = str(self._out); self.cfg["pipeline"]["scratch_dir"] = str(self._scratch)
         self.cfg.setdefault("tokenizer", {})["output_path"] = str(self._out / "tokenizer")
-        self.cfg.setdefault("shard", {})["output_dir"] = str(self._out / "shards"); self.cfg.setdefault("train", {})["shard_dir"] = str(self._out / "shards")
+        self.cfg.setdefault("shard", {})["output_dir"] = str(self._out / "shards")
+        self.cfg.setdefault("train", {})["shard_dir"] = str(self._out / "shards")
         self.cfg.setdefault("export", {})["llamacpp_dir"] = str(PROJECT_ROOT / self.cfg.get("export", {}).get("llamacpp_dir", "llama.cpp"))
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
-        _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         self._resume = bool(self.cfg["pipeline"].get("resume", True)) if resume is None else bool(resume)
         self.cfg.setdefault("train", {})["resume"] = self._resume
         self._weights_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("source_weights_file", "config/source_weights.yaml")
         self._dataset_groups_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("dataset_groups_file", "config/dataset_groups.yaml")
         self._clean_config_path = PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")
+        self._source_definition_paths = _source_definition_paths(self.cfg, PROJECT_ROOT)
+        self._source_definition_hashes = {name: _file_hash(path) for name, path in self._source_definition_paths.items()}
+        self._source_manifest_path = self._out.parent / "source_manifest.json"
+        if self.cfg.get("stages", {}).get("crawl"):
+            _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths)
         self._weights = SourceWeightLookup(str(self._weights_path)); self._signals = DomainSignalTracker(self._weights.signal_gate_config())
+        _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
     def _provenance(self, stage: str, input_path: Path | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        data: dict[str, Any] = {"schema": 1, "stage": stage, "pipeline_config_sha256": self._config_sha256}
-        if input_path is not None: data["input_sha256"] = sha256_file(input_path)
-        if extra: data.update(extra)
+        data: dict[str, Any] = {
+            "schema": 2,
+            "stage": stage,
+            "pipeline_config_sha256": self._config_sha256,
+            "source_definition_sha256": _hash_value(self._source_definition_hashes),
+            "implementation_sha256": _implementation_sha256(stage),
+        }
+        if input_path is not None:
+            data["input_sha256"] = sha256_file(input_path)
+        if extra:
+            data.update(extra)
+        if stage == "crawl":
+            data["source_manifest_sha256"] = _file_hash(self._source_manifest_path)
         return data
 
     def _should_skip(self, path: Path, stage: str, provenance: dict[str, Any]) -> bool:
         if self._resume and artifact_valid(path, expected_provenance=provenance):
             log.info("[%s] Verified artifact integrity and provenance, skipping: %s", stage, path); return True
-        if path.exists() and self._resume: log.warning("[%s] Existing artifact is stale, unverified, or corrupt; rebuilding: %s", stage, path)
+        if path.exists() and self._resume:
+            log.warning("[%s] Existing artifact is stale, unverified, or corrupt; rebuilding: %s", stage, path)
         return False
 
     def _load_dataset_groups(self) -> list[dict]:
-        if not self._dataset_groups_path.exists(): return [{"id": "default", "name": "default", "sources": self.cfg.get("crawl", {}).get("sources", {})}]
+        if not self._dataset_groups_path.exists():
+            return [{"id": "default", "name": "default", "sources": self.cfg.get("crawl", {}).get("sources", {})}]
         return list((yaml.safe_load(self._dataset_groups_path.read_text(encoding="utf-8")) or {}).get("dataset_groups", []))
 
     def _session_group(self) -> dict | None:
-        if self.dataset_id is None: return None
+        if self.dataset_id is None:
+            return None
         meta_path = self._dataset_root / "dataset.json"
-        if not meta_path.exists(): raise FileNotFoundError(f"Missing dataset metadata: {meta_path}")
+        if not meta_path.exists():
+            raise FileNotFoundError(f"Missing dataset metadata: {meta_path}")
         meta = json.loads(meta_path.read_text(encoding="utf-8")); gid = meta.get("group_id")
         for group in self._load_dataset_groups():
             if group.get("id") == gid: return group
@@ -179,8 +261,7 @@ class Pipeline:
                 for doc in _jsonl_read(in_path):
                     key = hashlib.sha256(" ".join(doc.text.lower().split()).encode("utf-8", errors="replace")).hexdigest()
                     if key in seen: continue
-                    seen.add(key)
-                    yield doc
+                    seen.add(key); yield doc
             yield from deduper.stream(unique_docs(), buffer_size=buffer_size)
         _jsonl_write(stream(), out, kind="dedup", provenance=provenance); return out
 
@@ -201,37 +282,31 @@ class Pipeline:
 
     def stage_shard(self, corpus_path: Path, tokenizer) -> Path:
         Writer = _load_class("pipeline.shardwriter.shard_writer", "ShardWriter"); shard_cfg = self.cfg["shard"]; shard_dir = Path(shard_cfg["output_dir"]); marker = shard_dir / "shards.manifest.json"
-        tok_cfg = self.cfg.get("tokenizer", {})
-        tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if tok_cfg.get("output_path") else None
+        tok_cfg = self.cfg.get("tokenizer", {}); tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if tok_cfg.get("output_path") else None
         provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size()})
         if self._resume and marker.exists():
             try:
-                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", [])
-                valid = data.get("provenance") == provenance and bool(files)
+                data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", []); valid = data.get("provenance") == provenance and bool(files)
                 if valid:
                     for item in files:
                         shard_path = shard_dir / item["name"]
-                        if not shard_path.is_file() or shard_path.stat().st_size != int(item["size"]):
-                            valid = False
-                            break
-                        expected_sha = item.get("sha256")
-                        if not expected_sha or sha256_file(shard_path) != expected_sha:
-                            valid = False
-                            break
+                        if not shard_path.is_file() or shard_path.stat().st_size != int(item["size"]) or not item.get("sha256") or sha256_file(shard_path) != item["sha256"]:
+                            valid = False; break
                 if valid: log.info("[shard] Verified %d shards, hashes, and provenance, skipping", len(files)); return shard_dir
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError): log.warning("[shard] Invalid shard manifest; rebuilding")
         shard_dir.mkdir(parents=True, exist_ok=True)
         for old in shard_dir.glob("shard_*.bin"): old.unlink(missing_ok=True)
         Writer(shard_cfg, tokenizer).write(corpus_path); paths = sorted(shard_dir.glob("shard_*.bin"))
         if not paths: raise RuntimeError("Shard stage produced no shard files")
-        marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8"); return shard_dir
+        marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8")
+        return shard_dir
 
     def stage_train(self) -> Path:
         import torch
         train_cfg = self.cfg.get("train", {})
         if not torch.cuda.is_available() and not bool(train_cfg.get("allow_cpu_training", False)): raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining.")
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
-        Trainer = _load_class("pipeline.trainer.train", "Trainer"); Trainer(self.cfg).run(); ckpt_dir = self._out / "checkpoints"; candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or sorted(ckpt_dir.glob("ckpt_final_*.pt")) if ckpt_dir.exists() else []
+        Trainer = _load_class("pipeline.trainer.train", "Trainer"); Trainer(self.cfg).run(); ckpt_dir = self._out / "checkpoints"; candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or (sorted(ckpt_dir.glob("ckpt_final_*.pt")) if ckpt_dir.exists() else [])
         if not candidates: raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
         return candidates[-1]
 
@@ -250,21 +325,13 @@ class Pipeline:
         if unknown: raise ValueError(f"Unknown stages: {unknown}")
         if not requested: raise ValueError("No enabled pipeline stages are configured")
         artifacts: dict[str, Any] = {}
-        if "crawl" in requested:
-            artifacts["crawl"] = self.stage_crawl(dataset_group)
-        if "clean" in requested:
-            artifacts["clean"] = self.stage_clean(artifacts.get("crawl", self._scratch / "01_crawled.jsonl"))
-        if "dedup" in requested:
-            artifacts["dedup"] = self.stage_embed_dedup(artifacts.get("clean", self._scratch / "02_cleaned.jsonl"))
-        if "weight" in requested:
-            artifacts["weight"] = self.stage_weight(artifacts.get("dedup", self._scratch / "03_deduped.jsonl"))
-        if "tokenize" in requested:
-            artifacts["tokenizer"] = self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl"))
-        if "shard" in requested:
-            artifacts["shard"] = self.stage_shard(artifacts.get("weight", self._scratch / "04_weighted.jsonl"), artifacts.get("tokenizer") or self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl")))
-        if "train" in requested:
-            artifacts["train"] = self.stage_train()
-        if "export" in requested:
-            artifacts["export"] = self.stage_export()
+        if "crawl" in requested: artifacts["crawl"] = self.stage_crawl(dataset_group)
+        if "clean" in requested: artifacts["clean"] = self.stage_clean(artifacts.get("crawl", self._scratch / "01_crawled.jsonl"))
+        if "dedup" in requested: artifacts["dedup"] = self.stage_embed_dedup(artifacts.get("clean", self._scratch / "02_cleaned.jsonl"))
+        if "weight" in requested: artifacts["weight"] = self.stage_weight(artifacts.get("dedup", self._scratch / "03_deduped.jsonl"))
+        if "tokenize" in requested: artifacts["tokenizer"] = self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl"))
+        if "shard" in requested: artifacts["shard"] = self.stage_shard(artifacts.get("weight", self._scratch / "04_weighted.jsonl"), artifacts.get("tokenizer") or self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl")))
+        if "train" in requested: artifacts["train"] = self.stage_train()
+        if "export" in requested: artifacts["export"] = self.stage_export()
         log.info("Pipeline completed stages=%s", requested)
         return artifacts
