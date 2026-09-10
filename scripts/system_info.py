@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import bootstrap
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "runtime" / "system_info.json"
 
@@ -38,11 +40,7 @@ def _command(command: list[str], timeout: float = 10.0) -> tuple[int | None, str
 
 def _pip_check() -> dict[str, Any]:
     code, output = _command([sys.executable, "-m", "pip", "check"], timeout=30.0)
-    return {
-        "passed": code == 0,
-        "exit_code": code,
-        "output": output,
-    }
+    return {"passed": code == 0, "exit_code": code, "output": output}
 
 
 def _nvidia_state() -> dict[str, Any]:
@@ -105,18 +103,14 @@ def _torch_state() -> dict[str, Any]:
 
 def build_report(torch_channel: str = "cpu") -> dict[str, Any]:
     """Collect measured host, dependency, and Torch runtime state."""
-    import bootstrap
-
     profile = bootstrap.detect_hardware()
     torch_state = _torch_state()
     nvidia_state = _nvidia_state()
     pip_check = _pip_check()
     constrained = (
-        profile.ram_gib is not None
-        and profile.ram_gib <= 8.0
+        profile.ram_gib is not None and profile.ram_gib <= 8.0
     ) or (
-        profile.gpu_vram_gib is not None
-        and profile.gpu_vram_gib <= 4.0
+        profile.gpu_vram_gib is not None and profile.gpu_vram_gib <= 4.0
     )
     return {
         "schema_version": 1,
