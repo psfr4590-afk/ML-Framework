@@ -7,19 +7,55 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+import yaml
 
 from pipeline.orchestrator import Pipeline
 from pipeline.trainer.model import LlamaModel, ModelConfig
 from pipeline.integrity import write_manifest
-from scripts.export_gguf import _enforce_training_provenance, _map_state
+from scripts.export_gguf import _enforce_training_provenance, _load_checkpoint, _map_state
 from command_center.store import DatasetStore
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_pipeline_default_config_is_project_rooted(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     pipeline = Pipeline()
-    assert pipeline._project_root == Path(__file__).resolve().parents[1]
-    assert pipeline._cfg_path == pipeline._project_root / "config" / "pipeline_config.yaml"
+    assert pipeline._project_root == REPO_ROOT
+    assert pipeline._cfg_path == REPO_ROOT / "config" / "pipeline_config.yaml"
+
+
+def test_pipeline_no_resume_disables_artifact_and_checkpoint_resume(tmp_path):
+    source = REPO_ROOT / "config" / "pipeline_config.yaml"
+    config = yaml.safe_load(source.read_text(encoding="utf-8"))
+    config["pipeline"]["resume"] = True
+    config["train"]["resume"] = True
+    config["pipeline"]["output_dir"] = str(tmp_path / "output")
+    config["pipeline"]["scratch_dir"] = str(tmp_path / "scratch")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    pipeline = Pipeline(str(config_path), resume=False)
+    assert pipeline._resume is False
+    assert pipeline.cfg["train"]["resume"] is False
+
+
+def test_pipeline_all_honors_configured_stage_enablement(monkeypatch):
+    pipeline = Pipeline()
+    calls: list[str] = []
+
+    monkeypatch.setattr(pipeline, "stage_crawl", lambda group=None: calls.append("crawl") or Path("crawl"))
+    monkeypatch.setattr(pipeline, "stage_clean", lambda path: calls.append("clean") or Path("clean"))
+    monkeypatch.setattr(pipeline, "stage_embed_dedup", lambda path: calls.append("dedup") or Path("dedup"))
+    monkeypatch.setattr(pipeline, "stage_weight", lambda path: calls.append("weight") or Path("weight"))
+    monkeypatch.setattr(pipeline, "stage_tokenize", lambda path: calls.append("tokenize") or object())
+    monkeypatch.setattr(pipeline, "stage_shard", lambda path, tokenizer: calls.append("shard") or Path("shard"))
+    monkeypatch.setattr(pipeline, "stage_train", lambda: calls.append("train") or Path("checkpoint"))
+    monkeypatch.setattr(pipeline, "stage_export", lambda: calls.append("export"))
+
+    pipeline.run("all")
+    assert calls == ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train"]
 
 
 def test_model_param_count_respects_weight_tying():
@@ -47,6 +83,20 @@ def test_export_mapping_produces_standard_llama_tensor_names():
         "lm_head.weight",
     }
     assert required <= set(mapped)
+
+
+def test_export_load_checkpoint_uses_canonical_integrity_gate(tmp_path):
+    from pipeline.trainer.train import save_checkpoint
+
+    cfg = ModelConfig(vocab_size=32, d_model=16, n_layers=1, n_heads=4, n_kv_heads=4, d_ffn=32, seq_len=16)
+    model = LlamaModel(cfg)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
+    path = save_checkpoint(model, optimizer, scaler, 1, 2.5, {"model_preset": "test"}, tmp_path)
+
+    path.write_bytes(path.read_bytes() + b"tampered")
+    with pytest.raises(RuntimeError, match="integrity verification failed"):
+        _load_checkpoint(path)
 
 
 def test_dataset_store_reports_pipeline_artifacts_under_output(tmp_path, monkeypatch):
