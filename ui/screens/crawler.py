@@ -38,7 +38,7 @@ class CrawlerScreen(tk.Frame):
     def refresh(self):
         did=selected_id()
         try: stats=registry.crawler().stats(did) if did else {}
-        except Exception as e: stats={}
+        except Exception: stats={}
         for source,labels in self._src_rows.items():
             s=stats.get(source,{})
             for key in ["fetched","skipped","errors","abandoned"]:
