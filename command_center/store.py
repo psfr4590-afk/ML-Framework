@@ -1,9 +1,14 @@
 from __future__ import annotations
-import json, os, shutil
+
+import json
+import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
+
 from pipeline.integrity import artifact_valid, sha256_file
+
 from .config import DATASETS, group_by_id, load_groups
 
 LOCK = RLock()
@@ -109,7 +114,7 @@ class DatasetStore:
                         pass
         except OSError:
             pass
-        
+
         # Stream parse JSONL files to count docs and words
         for c in (root / "scratch" / "04_weighted.jsonl", root / "scratch" / "03_deduped.jsonl", root / "scratch" / "02_cleaned.jsonl"):
             if c.exists():
@@ -131,7 +136,7 @@ class DatasetStore:
                     break
                 except OSError:
                     pass
-        
+
         d = self.get(did)
         if d:
             d["stats"] = {**d.get("stats", {}), "files": files, "bytes": bytes_, "documents": docs, "words": words}
