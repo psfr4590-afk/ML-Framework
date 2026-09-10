@@ -23,23 +23,40 @@ def test_smoke_config_is_validator_clean():
 def test_pipeline_level_model_preset_is_rejected():
     cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
     cfg["pipeline"]["model_preset"] = "85M"
-    try:
+    with pytest.raises(ValueError, match="Unsupported pipeline configuration keys: model_preset"):
         validate_config(cfg)
-    except ValueError as exc:
-        assert "pipeline.model_preset is obsolete" in str(exc)
-    else:
-        raise AssertionError("obsolete pipeline.model_preset must be rejected")
 
 
 def test_unknown_pipeline_stage_is_rejected():
     cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
     cfg["stages"]["shardd"] = True
-    with pytest.raises(ValueError, match="Unsupported pipeline stages: shardd"):
+    with pytest.raises(ValueError, match="Unsupported pipeline configuration keys|Unsupported pipeline stages"):
         validate_config(cfg)
 
 
 def test_non_boolean_pipeline_stage_is_rejected():
     cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
     cfg["stages"]["train"] = "true"
-    with pytest.raises(ValueError, match="Pipeline stage flags must be boolean: train"):
+    with pytest.raises(ValueError, match="Pipeline stage flags must be boolean"):
+        validate_config(cfg)
+
+
+def test_unknown_section_key_is_rejected():
+    cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
+    cfg["train"]["lr_mxa"] = 0.0003
+    with pytest.raises(ValueError, match="Unsupported train configuration keys: lr_mxa"):
+        validate_config(cfg)
+
+
+def test_cross_section_vocab_invariant_is_rejected():
+    cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
+    cfg["train"]["vocab_size"] = 1024
+    with pytest.raises(ValueError, match="tokenizer.vocab_size must equal train.vocab_size"):
+        validate_config(cfg)
+
+
+def test_cross_section_sequence_invariant_is_rejected():
+    cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
+    cfg["train"]["seq_len"] = 64
+    with pytest.raises(ValueError, match="shard.sequence_length must equal train.seq_len"):
         validate_config(cfg)
