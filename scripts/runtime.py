@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """Runtime project-root discovery and environment-state helpers."""
 from __future__ import annotations
-import json, os, platform, shutil, subprocess, sys
+
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 def is_project_root(path: Path) -> bool:
     path = Path(path)
     return path.is_dir() and all((path / x).is_file() if x in {"run_pipeline.py", "bootstrap.py", "requirements.txt"} else (path / x).is_dir() for x in ("run_pipeline.py", "bootstrap.py", "requirements.txt", "pipeline", "config"))
+
 
 def discover_project_root(start: Path | None = None) -> Path:
     start = (start or Path(__file__).resolve().parent).resolve()
@@ -43,8 +52,10 @@ def discover_project_root(start: Path | None = None) -> Path:
         raise RuntimeError("Multiple possible pipeline roots found; refusing ambiguous execution:\n" + "\n".join(map(str, best)))
     return ordered[0]
 
+
 def normalize_path(p: str | Path) -> str:
     return str(Path(p).resolve())
+
 
 def executable_version(exe: Path) -> str | None:
     try:
@@ -54,6 +65,7 @@ def executable_version(exe: Path) -> str | None:
     except Exception:
         return None
 
+
 def all_executables(names: Iterable[str]) -> dict[str, dict]:
     result = {}
     for name in names:
@@ -61,8 +73,10 @@ def all_executables(names: Iterable[str]) -> dict[str, dict]:
         result[name] = {"status": "FOUND" if path else "MISSING", "path": normalize_path(path) if path else None, "version": executable_version(Path(path)) if path else None}
     return result
 
+
 def python_state() -> dict:
     return {"status": "VERIFIED", "executable": normalize_path(sys.executable), "version": platform.python_version(), "implementation": platform.python_implementation()}
+
 
 def write_environment_state(root: Path, state: dict) -> Path:
     d = root / ".runtime"
