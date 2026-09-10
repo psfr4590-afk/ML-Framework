@@ -198,12 +198,22 @@ def test_shard_resume_rejects_same_size_hash_tampering(tmp_path, monkeypatch):
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     pipeline = Pipeline(str(config_path), resume=True)
 
+    input_path = tmp_path / "input.jsonl"
+    input_path.write_text("{}\n", encoding="utf-8")
     shard_dir = pipeline._out / "shards"
     shard_dir.mkdir(parents=True)
     shard = shard_dir / "shard_00000_train.bin"
     original = b"A" * 32
     shard.write_bytes(original)
-    provenance = pipeline._provenance("shard", tmp_path / "input.jsonl", {"shard_config_sha256": "config", "tokenizer_sha256": None, "tokenizer_vocab_size": 32})
+    provenance = pipeline._provenance(
+        "shard",
+        input_path,
+        {
+            "shard_config_sha256": pipeline._hash_value(pipeline.cfg["shard"]) if hasattr(pipeline, "_hash_value") else hashlib.sha256(json.dumps(pipeline.cfg["shard"], sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest(),
+            "tokenizer_sha256": None,
+            "tokenizer_vocab_size": 32,
+        },
+    )
     marker = shard_dir / "shards.manifest.json"
     marker.write_text(json.dumps({"schema": 4, "files": [{"name": shard.name, "size": len(original), "sha256": hashlib.sha256(original).hexdigest()}], "provenance": provenance}), encoding="utf-8")
 
@@ -220,7 +230,7 @@ def test_shard_resume_rejects_same_size_hash_tampering(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pipeline.orchestrator._load_class", lambda module, name: FakeWriter if name == "ShardWriter" else None)
     tokenizer = type("Tokenizer", (), {"get_vocab_size": lambda self: 32})()
-    result = pipeline.stage_shard(tmp_path / "input.jsonl", tokenizer)
+    result = pipeline.stage_shard(input_path, tokenizer)
     assert result == shard_dir
-    assert called == [tmp_path / "input.jsonl"]
+    assert called == [input_path]
     assert shard.read_bytes() == original
