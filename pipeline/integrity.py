@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -140,14 +141,18 @@ def validate_checkpoint(
     return payload
 
 
-def atomic_jsonl_write(path: Path, producer) -> int:
-    """Write producer() output atomically. Existing artifact remains intact on failure."""
+def atomic_jsonl_write(
+    path: Path,
+    producer: Callable[[], Iterable[Any]] | Iterable[Any],
+) -> int:
+    """Write an iterable or zero-argument producer atomically."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     count = 0
     try:
+        items = producer() if callable(producer) else producer
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            for item in producer():
+            for item in items:
                 f.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
                 count += 1
         if count == 0:
