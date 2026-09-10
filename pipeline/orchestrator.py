@@ -51,7 +51,6 @@ def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
         handler._model_lab_file = str(log_file)
-        handler._model_lab_file = str(log_file)
         root.addHandler(handler)
 
 
