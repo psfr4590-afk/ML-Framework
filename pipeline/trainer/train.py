@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import random
 import time
 from pathlib import Path
 from typing import Optional
@@ -41,6 +42,15 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path) -> dict:
         "model_config_sha256": _stable_hash(model_cfg.to_dict()),
         "shard_manifest_sha256": _shard_manifest_hash(shard_dir),
     }
+
+
+def _seed_everything(seed: int) -> None:
+    """Seed trainer-owned RNG sources before model/optimizer construction."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_steps: int) -> float:
@@ -137,6 +147,8 @@ class Trainer:
 
     def run(self):
         t = dict(self.t_cfg)
+        seed = int(t.get("seed", 42))
+        _seed_everything(seed)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cpu" and not bool(t.get("allow_cpu_training", False)):
             raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining")
@@ -212,8 +224,8 @@ class Trainer:
                     "rebuild shards or enable a compatible auto-size profile"
                 )
 
-        train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype)
-        val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype)
+        train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype, seed=seed)
+        val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype, seed=seed)
         provenance = _provenance(t, model_cfg, shard_dir)
 
         start_step, best_val = 0, float("inf")
