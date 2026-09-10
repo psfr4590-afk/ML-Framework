@@ -1,6 +1,13 @@
 """System and GPU inspection."""
-import platform,shutil,subprocess,sys,os
+import os
+import platform
+import shutil
+import subprocess
+import sys
+
 from ..core import registry
+
+
 class SystemService:
  def info(self):
   try:return registry.process().get("/api/system")
