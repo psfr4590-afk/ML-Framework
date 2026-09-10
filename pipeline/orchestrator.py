@@ -51,6 +51,7 @@ def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
         handler._model_lab_file = str(log_file)
+        handler._model_lab_file = str(log_file)
         root.addHandler(handler)
 
 
@@ -68,7 +69,7 @@ def _file_hash(path: Path) -> str | None:
 
 
 def _jsonl_write(docs: Iterator[Document], path: Path, kind: str = "jsonl", provenance: dict[str, Any] | None = None) -> int:
-    count = atomic_jsonl_write(path, (doc.to_jsonl() for doc in docs))
+    count = atomic_jsonl_write(path, lambda: (doc.to_jsonl() for doc in docs))
     write_manifest(path, kind=kind, rows=count, provenance=provenance)
     log.info("Wrote %d docs → %s", count, path)
     return count
