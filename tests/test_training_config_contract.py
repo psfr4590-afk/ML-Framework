@@ -55,6 +55,7 @@ def test_load_checkpoint_rejects_stale_provenance(tmp_path):
 
     manifest = {
         "schema": 2,
+        "kind": "checkpoint",
         "path": str(path),
         "size": path.stat().st_size,
         "sha256": sha256_file(path),
