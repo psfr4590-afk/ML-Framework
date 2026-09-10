@@ -145,7 +145,12 @@ def atomic_jsonl_write(
     path: Path,
     producer: Callable[[], Iterable[Any]] | Iterable[Any],
 ) -> int:
-    """Write an iterable or zero-argument producer atomically."""
+    """Write an iterable or zero-argument producer atomically.
+
+    Items may be ordinary JSON-serializable objects or already-serialized JSON
+    records. Pre-serialized strings are validated before being written so JSONL
+    callers cannot accidentally double-encode a complete JSON object.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     count = 0
@@ -153,7 +158,15 @@ def atomic_jsonl_write(
         items = producer() if callable(producer) else producer
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             for item in items:
-                f.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
+                if isinstance(item, str):
+                    try:
+                        json.loads(item)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError("pre-serialized JSONL item is not valid JSON") from exc
+                    line = item
+                else:
+                    line = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+                f.write(line + "\n")
                 count += 1
         if count == 0:
             raise RuntimeError(f"Refusing to commit empty artifact: {path}")
