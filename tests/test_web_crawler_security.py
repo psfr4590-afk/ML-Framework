@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import io
+import socket
 
+import pytest
 import requests
 
-from pipeline.crawler.web_crawler import WebCrawler
+from pipeline.crawler.web_crawler import WebCrawler, _pin_dns
 
 
 class _DummyLookup:
@@ -61,6 +63,7 @@ def test_redirect_to_private_address_is_blocked(monkeypatch):
         "pipeline.crawler.web_crawler.WebCrawler._host_is_public",
         staticmethod(lambda host: host not in {"127.0.0.1", "localhost"}),
     )
+    monkeypatch.setattr(crawler, "_validated_addresses", lambda url: ("93.184.216.34",))
 
     redirect = requests.Response()
     redirect.status_code = 302
@@ -87,6 +90,7 @@ def test_public_redirect_is_followed_manually(monkeypatch):
         "pipeline.crawler.web_crawler.WebCrawler._host_is_public",
         staticmethod(lambda host: True),
     )
+    monkeypatch.setattr(crawler, "_validated_addresses", lambda url: ("93.184.216.34",))
 
     first = requests.Response()
     first.status_code = 302
@@ -121,8 +125,12 @@ def test_robots_fetch_failure_fails_closed(monkeypatch):
         _DummyLookup(),
         _DummySignals(),
     )
-    monkeypatch.setattr("pipeline.crawler.web_crawler.WebCrawler._host_is_public", staticmethod(lambda host: True))
-    monkeypatch.setattr("pipeline.crawler.web_crawler.RobotFileParser.read", lambda self: (_ for _ in ()).throw(OSError("network unavailable")))
+    monkeypatch.setattr(crawler, "_validated_addresses", lambda url: ("93.184.216.34",))
+
+    def fail_get(*args, **kwargs):
+        raise requests.RequestException("network unavailable")
+
+    monkeypatch.setattr(crawler.session, "get", fail_get)
     assert not crawler._robots_allowed("https://public.example/")
 
 
@@ -133,6 +141,7 @@ def test_oversized_response_is_not_materialized(monkeypatch):
         "pipeline.crawler.web_crawler.WebCrawler._host_is_public",
         staticmethod(lambda host: True),
     )
+    monkeypatch.setattr(crawler, "_validated_addresses", lambda url: ("93.184.216.34",))
 
     response = requests.Response()
     response.status_code = 200
@@ -150,3 +159,78 @@ def test_oversized_response_is_not_materialized(monkeypatch):
     assert list(crawler.crawl()) == []
     assert crawler.stats["skipped"] == 1
     assert crawler.stats["fetched"] == 1
+
+
+def test_pin_dns_replaces_hostname_resolution_with_validated_addresses(monkeypatch):
+    original = socket.getaddrinfo
+    calls = []
+
+    def fake_getaddrinfo(node, port, family=0, type=0, proto=0, flags=0):
+        calls.append(node)
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port or 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with _pin_dns("example.com", ("93.184.216.34",)):
+        result = socket.getaddrinfo("example.com", 443, type=socket.SOCK_STREAM)
+    assert result[0][4][0] == "93.184.216.34"
+    assert calls == ["93.184.216.34"]
+    assert socket.getaddrinfo is fake_getaddrinfo
+    monkeypatch.setattr(socket, "getaddrinfo", original)
+
+
+def test_fetch_pins_the_actual_connection_to_the_validated_address(monkeypatch):
+    crawler = _crawler(monkeypatch)
+    observed = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"Content-Type": "text/plain"}
+        url = "https://example.com/"
+        is_redirect = False
+        is_permanent_redirect = False
+
+        def raise_for_status(self):
+            pass
+
+        def close(self):
+            pass
+
+    def fake_get(url, **kwargs):
+        observed.append(socket.getaddrinfo("example.com", 443, type=socket.SOCK_STREAM)[0][4][0])
+        return FakeResponse()
+
+    monkeypatch.setattr(crawler, "_allowed", lambda url: True)
+    monkeypatch.setattr(crawler, "_robots_allowed", lambda url: True)
+    monkeypatch.setattr(crawler, "_validated_addresses", lambda url: ("93.184.216.34",))
+    monkeypatch.setattr(crawler.session, "get", fake_get)
+    monkeypatch.setattr(crawler, "_polite_wait", lambda domain: None)
+
+    response = crawler._fetch("https://example.com/")
+    assert response is not None
+    assert observed == ["93.184.216.34"]
+
+
+def test_validated_addresses_reject_private_or_local_resolution(monkeypatch):
+    crawler = _crawler(monkeypatch)
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443))
+        ],
+    )
+    assert crawler._validated_addresses("https://example.com/") is None
+
+
+def test_pinned_dns_context_restores_socket_resolution_on_exception():
+    original = socket.getaddrinfo
+    with pytest.raises(RuntimeError):
+        with _pin_dns("example.com", ("93.184.216.34",)):
+            raise RuntimeError("test")
+    assert socket.getaddrinfo is original
+
+
+def test_crawler_disables_environment_proxies():
+    crawler = _crawler(pytest.MonkeyPatch())
+    assert crawler.session.trust_env is False
