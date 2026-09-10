@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from pipeline.orchestrator import Pipeline
@@ -73,6 +76,47 @@ def test_checkpoint_roundtrip_integrity(tmp_path):
     opt2 = torch.optim.AdamW(reloaded.parameters(), lr=1e-3)
     scaler2 = torch.amp.GradScaler("cuda", enabled=False)
     assert load_checkpoint(path, reloaded, opt2, scaler2, torch.device("cpu")) == 1
+
+
+def test_checkpoint_resume_restores_exact_loader_cursor(tmp_path):
+    from pipeline.shardwriter.shard_writer import ShardDataLoader
+    from pipeline.trainer.train import load_checkpoint, save_checkpoint
+
+    shard_dir = tmp_path / "shards"
+    shard_dir.mkdir()
+    files = []
+    for split, start in (("train", 0), ("val", 100)):
+        path = shard_dir / f"shard_00000_{split}.bin"
+        path.write_bytes(np.arange(start, start + 64, dtype=np.uint16).tobytes())
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        files.append({"name": path.name, "size": path.stat().st_size, "sha256": digest})
+    (shard_dir / "shards.manifest.json").write_text(
+        json.dumps({"version": 1, "dtype": "uint16", "sequence_length": 8, "vocab_size": 200, "files": files}),
+        encoding="utf-8",
+    )
+
+    train = ShardDataLoader(shard_dir, "train", 8, seed=17)
+    val = ShardDataLoader(shard_dir, "val", 8, seed=17)
+    model_cfg = ModelConfig(vocab_size=32, d_model=16, n_layers=1, n_heads=4, n_kv_heads=4, d_ffn=32, seq_len=8)
+    model = LlamaModel(model_cfg)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
+    provenance = {"schema": 1, "pipeline_config_sha256": "a" * 64, "train_config_sha256": "b" * 64, "model_config_sha256": "c" * 64, "shard_manifest_sha256": "d" * 64, "seed": 17}
+
+    train.next_batch(1)
+    val.next_batch(1)
+    path = save_checkpoint(model, optimizer, scaler, 3, 1.5, {"seed": 17}, tmp_path / "checkpoints", provenance=provenance, train_loader=train, val_loader=val)
+    expected_x, expected_y = train.next_batch(1)
+
+    resumed_model = LlamaModel(model_cfg)
+    resumed_optimizer = torch.optim.AdamW(resumed_model.parameters(), lr=1e-3)
+    resumed_scaler = torch.amp.GradScaler("cuda", enabled=False)
+    resumed_train = ShardDataLoader(shard_dir, "train", 8, seed=17)
+    resumed_val = ShardDataLoader(shard_dir, "val", 8, seed=17)
+    assert load_checkpoint(path, resumed_model, resumed_optimizer, resumed_scaler, torch.device("cpu"), expected_provenance=provenance, train_loader=resumed_train, val_loader=resumed_val) == 3
+    actual_x, actual_y = resumed_train.next_batch(1)
+    assert torch.equal(actual_x, expected_x)
+    assert torch.equal(actual_y, expected_y)
 
 
 def test_semantic_dedup_has_dependency_free_fallback(monkeypatch):
