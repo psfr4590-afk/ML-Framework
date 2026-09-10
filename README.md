@@ -52,6 +52,7 @@ ML-Framework/
 
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Start Here](docs/development/START_HERE.md)
+- [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md)
 - [Project State](docs/development/PROJECT_STATE.md)
 - [Source of Truth](docs/development/SYNC_SOURCE_OF_TRUTH.md)
 - [Release Checklist](docs/release/RELEASE_CHECKLIST.md)
@@ -171,6 +172,8 @@ The FastAPI command center is localhost-only by default. It exposes dataset life
 Credentials belong in the runtime credential store or environment variables, never in Git. Dataset outputs, checkpoints, caches, scratch data, logs, and native build products are runtime artifacts and are intentionally excluded from the public source tree.
 
 The crawler is bounded and security-conscious: it applies URL validation, request timeouts, retries, politeness delays, robots handling where configured, content-size limits, and local/private-network refusal rules.
+
+See [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md) before using the full seeded corpus. Public availability of a source does not by itself establish permission to use or redistribute its contents for training.
 
 ## Verification boundary
 

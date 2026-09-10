@@ -23,10 +23,11 @@ log = logging.getLogger("weighter")
 
 
 class DomainWeighter:
-    def __init__(self, config_path: str | Path, strategy: str = "upsample"):
+    def __init__(self, config_path: str | Path, strategy: str = "upsample", seed: int = 42):
         with open(config_path, encoding="utf-8") as f:
             self._cfg = yaml.safe_load(f) or {}
         self._strategy = strategy
+        self._rng = random.Random(seed)
         self.stats = {"docs_in": 0, "docs_out": 0, "total_weight": 0.0}
 
     def _repeat_count(self, weight: float) -> tuple[int, float]:
@@ -44,16 +45,16 @@ class DomainWeighter:
                 for _ in range(whole):
                     self.stats["docs_out"] += 1
                     yield doc
-                if w > 1.0 and frac > 0.0 and random.random() < frac:
+                if w > 1.0 and frac > 0.0 and self._rng.random() < frac:
                     self.stats["docs_out"] += 1
                     yield doc
             elif self._strategy == "downsample":
-                if w >= 1.0 or random.random() < w:
+                if w >= 1.0 or self._rng.random() < w:
                     self.stats["docs_out"] += 1
                     yield doc
             elif self._strategy == "both":
                 if w < 1.0:
-                    if random.random() < w:
+                    if self._rng.random() < w:
                         self.stats["docs_out"] += 1
                         yield doc
                 else:
@@ -62,7 +63,7 @@ class DomainWeighter:
                     for _ in range(max(1, whole)):
                         self.stats["docs_out"] += 1
                         yield doc
-                    if frac > 0.0 and random.random() < frac:
+                    if frac > 0.0 and self._rng.random() < frac:
                         self.stats["docs_out"] += 1
                         yield doc
             else:

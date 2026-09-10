@@ -17,9 +17,9 @@ from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
-from bs4 import BeautifulSoup
 
 from pipeline.crawler.base import BaseCrawler
+from pipeline.crawler.content_parser import ContentParseError, parse_content
 from pipeline.crawler.source_scorer import classify_text, classify_url, detect_code_language, score_document
 from pipeline.types import Document
 
@@ -44,7 +44,10 @@ class WebCrawler(BaseCrawler):
         self.user_agent = str(cfg.get("user_agent", "ModelLab/1.3 (+local research dataset builder)"))
         self.max_redirects = max(0, int(self.web.get("max_redirects", 5)))
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": self.user_agent, "Accept": "text/html,application/xhtml+xml"})
+        self.session.headers.update({
+            "User-Agent": self.user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/pdf,text/csv,text/tab-separated-values,application/json,application/xml,text/xml,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        })
         self._robots: dict[str, RobotFileParser] = {}
         self._last_request: dict[str, float] = {}
         self._seen_urls: set[str] = set()
@@ -90,8 +93,6 @@ class WebCrawler(BaseCrawler):
             try:
                 rp.read()
             except Exception as exc:
-                # Robots failures fail closed. Otherwise a transient fetch error
-                # silently disables a safety/politeness control for the domain.
                 log.warning("robots.txt unavailable for %s: %s", root, exc)
                 self._robots[root] = RobotFileParser()
                 return False
@@ -154,25 +155,21 @@ class WebCrawler(BaseCrawler):
             log.warning("fetch failed %s: %s", url, last)
         return None
 
-    def _extract(self, url: str, html: str) -> tuple[str, str, list[str]]:
-        soup = BeautifulSoup(html, "lxml")
-        title = soup.title.get_text(" ", strip=True) if soup.title else ""
-        for tag in soup(["script", "style", "noscript", "nav", "footer", "aside", "form", "iframe"]):
-            tag.decompose()
-        text = soup.get_text(" ", strip=True)
-        links = [urljoin(url, a.get("href")) for a in soup.find_all("a", href=True)]
-        return title, text, links
-
-    def _document(self, url: str, title: str, text: str, depth: int) -> Document:
+    def _document(self, url: str, title: str, text: str, depth: int, content_type: str, metadata: dict | None = None) -> Document:
         parsed = urlparse(url)
+        semantic_type = classify_url(url)
+        if semantic_type == "unknown":
+            semantic_type = content_type or classify_text(text)
         doc = Document(
             doc_id=hashlib.sha256(url.encode("utf-8")).hexdigest(), url=url, source="web", text=text,
-            title=title, content_type=classify_url(url), code_language=detect_code_language(url),
+            title=title, content_type=semantic_type, code_language=detect_code_language(url),
             domain=parsed.netloc.lower(), crawl_depth=depth,
         )
         if doc.content_type == "unknown":
             doc.content_type = classify_text(text)
-        doc.meta.update({"quality_signal": score_document(url, text)})
+        if metadata:
+            doc.meta.update({"parser": metadata})
+        doc.meta["quality_signal"] = score_document(url, text)
         self.signal_tracker.record(doc.domain, doc.meta["quality_signal"])
         return self._apply_weights(doc)
 
@@ -203,11 +200,7 @@ class WebCrawler(BaseCrawler):
                 response.close()
                 self.stats["skipped"] += 1
                 continue
-            ctype = response.headers.get("Content-Type", "").lower()
-            if "html" not in ctype and "xhtml" not in ctype:
-                response.close()
-                self.stats["skipped"] += 1
-                continue
+            response_content_type = response.headers.get("Content-Type", "").lower()
             max_bytes = int(self.web.get("max_content_bytes", 5_000_000))
             content_length = response.headers.get("Content-Length")
             if content_length and content_length.isdigit() and int(content_length) > max_bytes:
@@ -228,13 +221,21 @@ class WebCrawler(BaseCrawler):
                 else:
                     body = b"".join(chunks)
                     self._domain_pages[domain] = self._domain_pages.get(domain, 0) + 1
-                    response.encoding = response.encoding or "utf-8"
-                    html = body.decode(response.encoding, errors="replace")
-                    title, text, links = self._extract(final_url, html)
-                    if not text:
+                    try:
+                        parsed_content = parse_content(final_url, response_content_type, body)
+                    except ContentParseError as exc:
                         self.stats["skipped"] += 1
+                        log.warning("content parsing failed for %s: %s", final_url, exc)
                         continue
-                    doc = self._document(final_url, title, text, depth)
+                    links = [urljoin(final_url, link) for link in parsed_content.links]
+                    doc = self._document(
+                        final_url,
+                        parsed_content.title,
+                        parsed_content.text,
+                        depth,
+                        parsed_content.content_type,
+                        parsed_content.metadata,
+                    )
                     yield doc
                     if not self.follow_links or depth >= self.max_depth:
                         continue

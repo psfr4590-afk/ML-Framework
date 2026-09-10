@@ -172,13 +172,14 @@ class Pipeline:
         if not artifact_valid(in_path): raise RuntimeError(f"Dedup input failed integrity validation: {in_path}")
         deduper = _load_class("pipeline.embedder.semantic_dedup", "SemanticDeduplicator")(dedup_cfg); buffer_size = int(dedup_cfg.get("buffer_size", 10000))
         def stream() -> Iterator[Document]:
-            buf: list[Document] = []; seen: set[str] = set()
-            for doc in _jsonl_read(in_path):
-                key = hashlib.sha256(" ".join(doc.text.lower().split()).encode("utf-8", errors="replace")).hexdigest()
-                if key in seen: continue
-                seen.add(key); buf.append(doc)
-                if len(buf) >= buffer_size: yield from deduper.run(buf); buf.clear()
-            if buf: yield from deduper.run(buf)
+            seen: set[str] = set()
+            def unique_docs() -> Iterator[Document]:
+                for doc in _jsonl_read(in_path):
+                    key = hashlib.sha256(" ".join(doc.text.lower().split()).encode("utf-8", errors="replace")).hexdigest()
+                    if key in seen: continue
+                    seen.add(key)
+                    yield doc
+            yield from deduper.stream(unique_docs(), buffer_size=buffer_size)
         _jsonl_write(stream(), out, kind="dedup", provenance=provenance); return out
 
     def stage_weight(self, in_path: Path, out_path: Path | None = None) -> Path:
@@ -198,7 +199,8 @@ class Pipeline:
 
     def stage_shard(self, corpus_path: Path, tokenizer) -> Path:
         Writer = _load_class("pipeline.shardwriter.shard_writer", "ShardWriter"); shard_cfg = self.cfg["shard"]; shard_dir = Path(shard_cfg["output_dir"]); marker = shard_dir / "shards.manifest.json"
-        tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if (tok_cfg := self.cfg.get("tokenizer", {})) else None
+        tok_cfg = self.cfg.get("tokenizer", {})
+        tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if tok_cfg.get("output_path") else None
         provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size()})
         if self._resume and marker.exists():
             try:
@@ -209,7 +211,6 @@ class Pipeline:
         for old in shard_dir.glob("shard_*.bin"): old.unlink(missing_ok=True)
         Writer(shard_cfg, tokenizer).write(corpus_path); paths = sorted(shard_dir.glob("shard_*.bin"))
         if not paths: raise RuntimeError("Shard stage produced no shard files")
-        # Optimize: write manifest with compact JSON (no indent/sort_keys) for better performance
         marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8"); return shard_dir
 
     def stage_train(self) -> Path:

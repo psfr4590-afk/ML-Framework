@@ -18,6 +18,10 @@ huggingface_hub>=0.23,<2
 # Crawling / language helpers
 trafilatura>=1.12,<3
 langdetect>=1.0.9,<2
+pypdf>=5.0,<7
+openpyxl>=3.1,<4
+python-docx>=1.1,<2
+python-pptx>=0.6.23,<2
 
 # Local Command Center
 fastapi>=0.115,<1

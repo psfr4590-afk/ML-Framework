@@ -54,6 +54,16 @@ python3 run_pipeline.py --list-stages
 python3 run_pipeline.py --list-groups
 ```
 
+## What happens during a run
+
+The normal pipeline is intentionally linear:
+
+`crawl → clean → dedup → weight → tokenize → shard → train → export`
+
+Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused. This prevents an old or differently prepared dataset from leaking into tokenization, sharding, or training.
+
+The starter profile uses a small real crawl and only two training steps. It is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and then explicitly choose an appropriate larger configuration.
+
 ## Windows launch
 
 After the first-run path is healthy:
@@ -103,9 +113,11 @@ bash scripts/bootstrap_llama_cpp.sh
 python scripts/verify_release.py --bootstrap-native
 ```
 
-The native bootstrap pins the supported llama.cpp revisions and uses a reduced
-Android-safe build profile. It builds `llama-quantize` and `llama-cli`, which are
-the native artifacts required for quantized export and local inference.
+The native bootstrap uses a reduced Android-safe build profile when running under
+Termux and builds `llama-quantize`, the native artifact required for quantized
+export. The Python-side GGUF converter remains part of the pinned llama.cpp
+checkout. The desktop/native verification path can additionally build and verify
+`llama-cli` where that target is supported.
 
 If semantic-dedup acceleration is desired and the host supports it:
 
