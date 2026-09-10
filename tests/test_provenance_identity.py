@@ -32,6 +32,7 @@ def test_source_definition_paths_bind_to_selected_config():
 def test_source_manifest_records_complete_release_metadata(tmp_path):
     cfg = yaml.safe_load((ROOT / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
     cfg["_pipeline_config_path"] = str(ROOT / "config" / "pipeline_config.yaml")
+    cfg["crawl"]["dataset_groups_file"] = "config/dataset_groups.yaml"
     paths = _source_definition_paths(cfg, ROOT)
     target = tmp_path / "source_manifest.json"
     _write_source_manifest(
