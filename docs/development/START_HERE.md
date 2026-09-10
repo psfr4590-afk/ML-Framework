@@ -62,6 +62,10 @@ The normal pipeline is intentionally linear:
 
 Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused. This prevents an old or differently prepared dataset from leaking into tokenization, sharding, or training.
 
+Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring the model weights and accidentally replaying a different token sequence. Checkpoints without the required deterministic state or matching provenance are rejected rather than silently resumed.
+
+Final export is stricter still. The checkpoint must carry the canonical pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity. The current tokenizer, weighted-corpus manifest, and shard manifest must belong to the same pipeline configuration. A mismatch stops export before an artifact can be presented as a valid model.
+
 The starter profile uses a small real crawl and only two training steps. It is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and then explicitly choose an appropriate larger configuration.
 
 ## Windows launch
@@ -94,11 +98,22 @@ python scripts/verify_release.py
 
 This runs compilation, the full test suite, and the required project/runtime doctor. It does not claim that machine-specific native export prerequisites were checked. Use `--bootstrap-native` when the release check must also clone/build and verify the supported llama.cpp toolchain.
 
+Security/release dependency auditing is explicit:
+
+```bash
+python -m pip install -r requirements-security.txt
+python scripts/security_gate.py
+```
+
+The security gate checks tracked source for common secret patterns, verifies installed dependency consistency with `pip check`, and runs `pip-audit`. It is a gate, not a decorative report. A missing audit tool or failing audit is a failure.
+
+GitHub Actions runs the same security gate on pushes and pull requests and provides a separate production release workflow for native export verification. The CI path also runs the bootstrap doctor on a clean checkout, so the canonical onboarding path is exercised rather than merely documented.
+
 ## Production export requirement
 
 Final GGUF export requires a current llama.cpp checkout containing
 `convert_hf_to_gguf.py`. Quantized exports also require the built `llama-quantize`
-executable. The exporter refuses to claim success when either tool is missing.
+executable. The exporter refuses to claim success when either tool is missing or when the training provenance chain is incomplete or inconsistent.
 
 ## Termux / Android native toolchain
 
