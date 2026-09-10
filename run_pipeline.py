@@ -69,8 +69,8 @@ def main() -> int:
     parser = _build_parser()
     parser.add_argument("--version", action="version", version=f"Model Lab {VERSION}")
     parser.add_argument("--config", default="config/pipeline_config.yaml", help="pipeline config (default: %(default)s)")
-    parser.add_argument("--stages", default="all", help="comma-separated stages or 'all' (default: all)")
-    parser.add_argument("--no-resume", action="store_true", help="disable checkpoint resume for this run")
+    parser.add_argument("--stages", default="all", help="comma-separated stages or 'all' (default: all; uses config stage enablement)")
+    parser.add_argument("--no-resume", action="store_true", help="disable all artifact and checkpoint resume for this run")
     parser.add_argument("--dataset-group", default=None, help="dataset group ID to run")
     parser.add_argument("--dataset-id", type=int, default=None, help="numeric dataset ID override")
     parser.add_argument("--doctor", action="store_true", help="check project/runtime readiness without running stages")
@@ -160,9 +160,7 @@ def main() -> int:
         return 1
 
     from pipeline.orchestrator import Pipeline
-    pipeline = Pipeline(str(config), dataset_id=args.dataset_id)
-    if args.no_resume:
-        pipeline._resume = False
+    pipeline = Pipeline(str(config), dataset_id=args.dataset_id, resume=not args.no_resume)
     logging.getLogger().setLevel(getattr(logging, args.log_level))
 
     try:
