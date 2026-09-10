@@ -62,6 +62,41 @@ def _load_checkpoint(path: Path) -> tuple[dict[str, torch.Tensor], ModelConfig, 
     return state, cfg, payload
 
 
+def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> None:
+    """Refuse export unless the checkpoint and retained upstream artifacts agree."""
+    provenance = payload.get("provenance") or {}
+    required = ("schema", "pipeline_config_sha256", "train_config_sha256", "model_config_sha256", "shard_manifest_sha256", "seed")
+    missing = [key for key in required if key not in provenance or provenance[key] in (None, "")]
+    if missing:
+        raise RuntimeError(f"Checkpoint provenance is incomplete; refusing export: {missing}")
+
+    shard_manifest = output_dir / "shards" / "shards.manifest.json"
+    tokenizer_manifest = output_dir / "tokenizer" / "tokenizer.json.manifest.json"
+    weighted_manifest = output_dir.parent / "scratch" / "04_weighted.jsonl.manifest.json"
+    for path in (shard_manifest, tokenizer_manifest, weighted_manifest):
+        if not path.is_file():
+            raise RuntimeError(f"Required provenance artifact is missing; refusing export: {path}")
+
+    try:
+        shard_data = json.loads(shard_manifest.read_text(encoding="utf-8"))
+        tokenizer_data = json.loads(tokenizer_manifest.read_text(encoding="utf-8"))
+        weighted_data = json.loads(weighted_manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Required provenance manifest is invalid; refusing export") from exc
+
+    shard_sha = __import__("hashlib").sha256(shard_manifest.read_bytes()).hexdigest()
+    if shard_sha != provenance["shard_manifest_sha256"]:
+        raise RuntimeError("Checkpoint shard-manifest identity does not match current shards; refusing export")
+    for label, data in (("tokenizer", tokenizer_data), ("weighted", weighted_data)):
+        stage_prov = data.get("provenance") or {}
+        if stage_prov.get("pipeline_config_sha256") != provenance["pipeline_config_sha256"]:
+            raise RuntimeError(f"{label} provenance does not belong to the checkpoint pipeline configuration; refusing export")
+    if shard_data.get("provenance", {}).get("pipeline_config_sha256") != provenance["pipeline_config_sha256"]:
+        raise RuntimeError("Shard provenance does not belong to the checkpoint pipeline configuration; refusing export")
+    if int(tokenizer_data.get("vocab_size", -1)) != int(payload["model_cfg"].get("vocab_size", -2)):
+        raise RuntimeError("Tokenizer/model vocabulary provenance mismatch; refusing export")
+
+
 def _hf_config(cfg: ModelConfig, model_name: str) -> dict[str, Any]:
     return {"architectures":["LlamaForCausalLM"],"model_type":"llama","torch_dtype":"float32","vocab_size":cfg.vocab_size,"hidden_size":cfg.d_model,"intermediate_size":cfg.d_ffn,"num_hidden_layers":cfg.n_layers,"num_attention_heads":cfg.n_heads,"num_key_value_heads":cfg.n_kv_heads,"max_position_embeddings":cfg.seq_len,"rms_norm_eps":cfg.norm_eps,"rope_theta":cfg.rope_theta,"attention_bias":cfg.bias,"mlp_bias":cfg.bias,"tie_word_embeddings":True,"bos_token_id":2,"eos_token_id":3,"pad_token_id":0,"transformers_version":"4.0+","_name_or_path":model_name}
 
@@ -162,6 +197,7 @@ def export_checkpoint(output_dir: str | Path, llamacpp_dir: str | Path, quant: s
     if quant not in QUANTS: raise ValueError(f"Unsupported quantization '{quant}'. Choose from {sorted(QUANTS)}")
     ckpt = Path(checkpoint).resolve() if checkpoint else _find_best_checkpoint(output_dir / "checkpoints")
     state, cfg, payload = _load_checkpoint(ckpt)
+    _enforce_training_provenance(output_dir, payload)
     tokenizer_dir = output_dir / "tokenizer"; tokenizer_json = tokenizer_dir / "tokenizer.json"
     if not tokenizer_json.is_file(): raise FileNotFoundError(f"Tokenizer is missing: {tokenizer_json}")
     try: tok_data = json.loads(tokenizer_json.read_text(encoding="utf-8"))
