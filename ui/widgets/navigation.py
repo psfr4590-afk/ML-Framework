@@ -1,5 +1,5 @@
 import tkinter as tk
-from ..core.config import PANEL3, MUTED, TEXT, LINE, ACTIVE, HOVER, ACCENT
+from ..core.config import PANEL3, MUTED, TEXT, LINE, ACTIVE, HOVER
 from ..core.navigation import NAV_ITEMS
 
 ICONS = {"Dashboard":"▦","System":"⚙","Credentials":"⌁","Sources":"◈","Crawler":"◎","Dataset":"◫","Pipeline":"▶","Training":"△","CommandCenter":"≋","Outputs":"□","Diagnostics":"✓"}
