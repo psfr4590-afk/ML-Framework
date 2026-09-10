@@ -18,6 +18,17 @@ For a production dataset, retain a source manifest containing at least:
 - raw-source artifact SHA-256
 - the Git commit and pipeline configuration used to process it
 
+## Export cards
+
+Every successful GGUF export now emits two auditable Markdown artifacts beside `export_manifest.json`:
+
+- `DATASET_CARD.md` — records the dataset processing lineage, available stage counts, tokenizer/shard hashes, pipeline configuration fingerprint, Git revision, and the boundary between technical provenance and legal rights.
+- `MODEL_CARD.md` — records model/export configuration, checkpoint and training provenance, seed where available, GGUF hashes, llama.cpp revision, and explicit evaluation/safety limitations.
+
+The generated cards are referenced and SHA-256 protected by `export_manifest.json`. Repository-level starting templates are maintained at `docs/templates/DATASET_CARD.md` and `docs/templates/MODEL_CARD.md`.
+
+Unknown provenance or evaluation values are represented as unknown rather than fabricated. A card is evidence packaging, not a substitute for an operator's source-rights review or model evaluation.
+
 ## Licensing and terms
 
 The seeded configuration is an engineering starting point, not a blanket license grant. Before a large or redistributed training run, review the terms for each configured web site, GitHub repository, arXiv source, Hugging Face dataset, search result, or other provider.
