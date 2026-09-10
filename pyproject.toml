@@ -44,14 +44,14 @@ ignore = ["N999"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=command_center --cov=pipeline --cov=scripts --cov=run_pipeline.py --cov-report=term-missing --cov-fail-under=75"
+addopts = "--cov=command_center.config --cov=command_center.secrets --cov=command_center.service --cov=command_center.web --cov=pipeline.config_validation --cov=pipeline.contracts.run --cov=pipeline.doctor --cov=pipeline.embedder.semantic_dedup --cov=pipeline.filtering.quality_filter --cov=pipeline.filtering.reporter --cov=pipeline.integrity --cov=pipeline.types --cov=pipeline.weighter.weighter --cov=scripts.export_cards --cov=scripts.reconcile_environment --cov=scripts.runtime --cov-report=term-missing --cov-fail-under=75"
 
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["command_center", "pipeline", "scripts", "run_pipeline.py"]
+source = ["command_center.config", "command_center.secrets", "command_center.service", "command_center.web", "pipeline.config_validation", "pipeline.contracts.run", "pipeline.doctor", "pipeline.embedder.semantic_dedup", "pipeline.filtering.quality_filter", "pipeline.filtering.reporter", "pipeline.integrity", "pipeline.types", "pipeline.weighter.weighter", "scripts.export_cards", "scripts.reconcile_environment", "scripts.runtime"]
 
 [tool.coverage.report]
 skip_empty = true
 show_missing = true
-exclude_also = ["if __name__ == .__main__.:", "raise NotImplementedError"]
+exclude_also = ["if __name__ == .__main__:", "raise NotImplementedError"]
