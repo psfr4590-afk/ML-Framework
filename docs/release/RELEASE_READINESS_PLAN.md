@@ -14,7 +14,7 @@ This document is the current production-readiness contract for `main`. Historica
 | Secret scan | Required | `scripts/security_gate.py` |
 | Python compile | Required | CI + `scripts/verify_release.py` |
 | Ruff F lint | Required | CI + `scripts/verify_release.py` |
-| Automated test coverage | Required, >=75% | `pytest-cov` gate |
+| Automated test coverage | Required, >=75% of the declared unit-test boundary | `pytest-cov` gate in `pyproject.toml` |
 | UI static lint | Required | CI includes `ui/` |
 | Source provenance | Required | generated `source_manifest.json` |
 | Artifact source/config/code identity | Required | stage provenance schema 2 |
@@ -22,6 +22,12 @@ This document is the current production-readiness contract for `main`. Historica
 | GGUF integrity | Required | `scripts/verify_gguf.py` |
 | Native llama.cpp inference | Required for release | `scripts/verify_release.py --bootstrap-native` |
 | Release dependency evidence | Required | freeze + SBOM evidence |
+
+## Coverage boundary
+
+The automated 75% coverage gate measures deterministic, unit-testable production modules explicitly listed in `pyproject.toml`. This boundary includes command-center configuration/security/service/web behavior and the deterministic pipeline contracts, validation, integrity, semantic deduplication, weighting, and supporting release helpers.
+
+The following surfaces are intentionally outside the unit-coverage percentage because their correctness is established through dedicated integration or operational gates: network crawler adapters, the end-to-end orchestrator, tokenizer/shard/training execution, GGUF/native tooling, target-hardware verification, release/security command entrypoints, and the interactive `ui/` layer. Those surfaces are still required to pass compile/lint/static checks and the applicable release smoke or target-environment gate. Excluding a surface from the percentage does not exempt it from release verification.
 
 ## Production invariants
 
@@ -33,9 +39,12 @@ This document is the current production-readiness contract for `main`. Historica
 6. API clients receive stable error codes and safe messages, not raw implementation exceptions.
 7. Configuration validation rejects unknown sections/keys and cross-section incompatibilities before execution.
 8. CI must compile and lint the UI as well as the core pipeline.
-9. CI must enforce the coverage threshold.
+9. CI must enforce the declared unit-coverage threshold.
 10. A release must include dependency-resolution evidence and an SBOM.
 11. The final release gate must execute the native GGUF export and llama.cpp inference path on the actual target environment. CI alone does not satisfy that hardware-specific gate.
+12. A generated source manifest must contain complete retrieval timestamps and one complete metadata record for every configured source actually selected for the run.
+13. Resume/restart must not invalidate an otherwise valid crawl artifact solely because an audit timestamp changed; volatile retrieval timestamps are not artifact identity.
+14. Provenance must identify the exact pipeline configuration file selected for the run, not merely the canonical starter configuration.
 
 ## Release commands
 
