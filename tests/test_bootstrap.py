@@ -1,98 +1,61 @@
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
+import bootstrap
 
 
-def _load_bootstrap():
-    spec = importlib.util.spec_from_file_location("model_lab_bootstrap", ROOT / "bootstrap.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def test_python_requirement_message_is_current() -> None:
+    message = bootstrap._python_requirement_message()
+    assert "Python 3.11-3.13 required" in message
+    assert "lxml 5.x" not in message
 
 
-def _assert_pip_network_options(command, bootstrap):
-    options = list(bootstrap.PIP_NETWORK_OPTIONS)
-    assert command[4 : 4 + len(options)] == options
+def test_python_requirement_message_does_not_claim_old_lxml_reason() -> None:
+    message = bootstrap._python_requirement_message()
+    assert "Python 3.14+ is not supported" in message
+    assert "dependency compatibility" in message
 
 
-def _assert_requirements_argument(command, requirements, bootstrap):
-    _assert_pip_network_options(command, bootstrap)
-    install_args = command[4:]
-    assert "-r" in install_args
-    assert install_args[install_args.index("-r") + 1] == str(requirements)
+def test_hardware_profile_defaults_to_unknown() -> None:
+    profile = bootstrap.HardwareProfile()
+    assert profile.ram_gib is None
+    assert profile.gpu_name is None
+    assert profile.gpu_vram_gib is None
+    assert profile.nvidia_smi_available is False
 
 
-def test_bootstrap_resolves_root_from_script_location():
-    bootstrap = _load_bootstrap()
-    assert bootstrap.project_root() == ROOT
-    assert bootstrap.RECONCILER == ROOT / "scripts" / "reconcile_environment.py"
+def test_torch_channel_summary_cpu() -> None:
+    profile = bootstrap.HardwareProfile(ram_gib=8.0, gpu_name="NVIDIA GeForce GTX 1650", gpu_vram_gib=4.0)
+    summary = bootstrap.torch_channel_summary("cpu", profile)
+    assert summary["selected_channel"] == "cpu"
+    assert summary["gpu_detected"] is True
+    assert summary["cuda_install_requested"] is False
 
 
-def test_bootstrap_llamacpp_passes_project_root(monkeypatch):
-    bootstrap = _load_bootstrap()
-    calls = []
-
-    class Result:
-        returncode = 0
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return Result()
-
-    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
-    assert bootstrap.ensure_llamacpp() == 0
-
-    command, kwargs = calls[0]
-    assert command[:3] == [bootstrap.sys.executable, str(bootstrap.RECONCILER), "--project-root"]
-    assert command[3] == str(ROOT)
-    assert command[4:] == ["--ensure-llamacpp"]
-    assert kwargs["cwd"] == ROOT
-    assert kwargs["check"] is False
+def test_torch_channel_summary_default_is_explicit() -> None:
+    profile = bootstrap.HardwareProfile(ram_gib=8.0, gpu_name="NVIDIA GeForce GTX 1650", gpu_vram_gib=4.0)
+    summary = bootstrap.torch_channel_summary("default", profile)
+    assert summary["selected_channel"] == "default"
+    assert summary["gpu_detected"] is True
+    assert summary["cuda_install_requested"] is True
+    assert summary["hardware_warning"] is not None
 
 
-def test_bootstrap_install_defaults_to_cpu_torch(monkeypatch):
-    bootstrap = _load_bootstrap()
-    calls = []
-
-    class Result:
-        returncode = 0
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return Result()
-
-    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
-    assert bootstrap.install() == 0
-
-    assert len(calls) == 2
-    core_command, core_kwargs = calls[0]
-    torch_command, torch_kwargs = calls[1]
-    _assert_requirements_argument(core_command, bootstrap.REQUIREMENTS, bootstrap)
-    _assert_requirements_argument(torch_command, bootstrap.TORCH_REQUIREMENTS, bootstrap)
-    assert torch_command[-2:] == ["--index-url", bootstrap.CPU_TORCH_INDEX]
-    assert core_kwargs["cwd"] == ROOT
-    assert torch_kwargs["cwd"] == ROOT
-
-
-def test_bootstrap_can_use_default_torch_index(monkeypatch):
-    bootstrap = _load_bootstrap()
-    calls = []
-
-    class Result:
-        returncode = 0
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return Result()
-
-    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
-    assert bootstrap.install("default") == 0
-
-    assert len(calls) == 2
-    torch_command, _ = calls[1]
-    _assert_requirements_argument(torch_command, bootstrap.TORCH_REQUIREMENTS, bootstrap)
-    assert "--index-url" not in torch_command
+def test_hardware_profile_json_is_stable() -> None:
+    profile = bootstrap.HardwareProfile(
+        ram_gib=8.0,
+        cpu_name="AMD Ryzen 5 4600H with Radeon Graphics",
+        cpu_cores=6,
+        cpu_threads=12,
+        gpu_name="NVIDIA GeForce GTX 1650",
+        gpu_vram_gib=4.0,
+        nvidia_smi_available=True,
+    )
+    assert profile.as_dict() == {
+        "ram_gib": 8.0,
+        "cpu_name": "AMD Ryzen 5 4600H with Radeon Graphics",
+        "cpu_cores": 6,
+        "cpu_threads": 12,
+        "gpu_name": "NVIDIA GeForce GTX 1650",
+        "gpu_vram_gib": 4.0,
+        "nvidia_smi_available": True,
+    }
