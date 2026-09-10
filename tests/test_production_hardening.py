@@ -188,3 +188,39 @@ def test_semantic_dedup_has_dependency_free_fallback(monkeypatch):
     ]
     kept = deduper.run(docs)
     assert [d.doc_id for d in kept] == ["a", "c"]
+
+
+def test_shard_resume_rejects_same_size_hash_tampering(tmp_path, monkeypatch):
+    config = yaml.safe_load((REPO_ROOT / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
+    config["pipeline"]["output_dir"] = str(tmp_path / "output")
+    config["pipeline"]["scratch_dir"] = str(tmp_path / "scratch")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    pipeline = Pipeline(str(config_path), resume=True)
+
+    shard_dir = pipeline._out / "shards"
+    shard_dir.mkdir(parents=True)
+    shard = shard_dir / "shard_00000_train.bin"
+    original = b"A" * 32
+    shard.write_bytes(original)
+    provenance = pipeline._provenance("shard", tmp_path / "input.jsonl", {"shard_config_sha256": "config", "tokenizer_sha256": None, "tokenizer_vocab_size": 32})
+    marker = shard_dir / "shards.manifest.json"
+    marker.write_text(json.dumps({"schema": 4, "files": [{"name": shard.name, "size": len(original), "sha256": hashlib.sha256(original).hexdigest()}], "provenance": provenance}), encoding="utf-8")
+
+    shard.write_bytes(b"B" * len(original))
+    called = []
+
+    class FakeWriter:
+        def __init__(self, cfg, tokenizer):
+            pass
+
+        def write(self, corpus_path):
+            called.append(corpus_path)
+            shard.write_bytes(original)
+
+    monkeypatch.setattr("pipeline.orchestrator._load_class", lambda module, name: FakeWriter if name == "ShardWriter" else None)
+    tokenizer = type("Tokenizer", (), {"get_vocab_size": lambda self: 32})()
+    result = pipeline.stage_shard(tmp_path / "input.jsonl", tokenizer)
+    assert result == shard_dir
+    assert called == [tmp_path / "input.jsonl"]
+    assert shard.read_bytes() == original
