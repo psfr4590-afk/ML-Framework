@@ -1,10 +1,16 @@
 """Main Tk application and local backend lifecycle."""
 from __future__ import annotations
-import subprocess, sys, time, urllib.request
+
+import subprocess
+import sys
+import time
+import urllib.request
 import tkinter as tk
 from pathlib import Path
+
 from .config import *
 from . import events, navigation, state
+
 
 class BackendManager:
     def __init__(self, root: Path): self.root=root; self.proc=None
