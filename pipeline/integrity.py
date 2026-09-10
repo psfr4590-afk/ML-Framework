@@ -74,7 +74,11 @@ def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None
             return False
         source = m.get("source")
         source_sha256 = m.get("source_sha256")
-        if source and source_sha256:
+        if (source is None) != (source_sha256 is None):
+            return False
+        if source is not None:
+            if not isinstance(source, str) or not isinstance(source_sha256, str) or not source_sha256:
+                return False
             source_path = Path(source)
             if not source_path.is_file() or sha256_file(source_path) != source_sha256:
                 return False

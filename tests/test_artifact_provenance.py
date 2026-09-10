@@ -33,6 +33,23 @@ def test_artifact_valid_rejects_changed_source(tmp_path):
     assert not artifact_valid(artifact)
 
 
+def test_artifact_valid_rejects_incomplete_source_metadata(tmp_path):
+    path = tmp_path / "artifact.jsonl"
+    source = tmp_path / "source.jsonl"
+    path.write_text("data\n", encoding="utf-8")
+    source.write_text("source\n", encoding="utf-8")
+    manifest = {
+        "schema": 2,
+        "kind": "clean",
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+        "source": str(source),
+    }
+    path.with_name(path.name + ".manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert not artifact_valid(path)
+
+
 def test_artifact_valid_rejects_unknown_manifest_schema(tmp_path):
     path = tmp_path / "artifact.jsonl"
     path.write_text("data\n", encoding="utf-8")
