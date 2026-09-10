@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -84,7 +85,7 @@ def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> N
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("Required provenance manifest is invalid; refusing export") from exc
 
-    shard_sha = __import__("hashlib").sha256(shard_manifest.read_bytes()).hexdigest()
+    shard_sha = hashlib.sha256(shard_manifest.read_bytes()).hexdigest()
     if shard_sha != provenance["shard_manifest_sha256"]:
         raise RuntimeError("Checkpoint shard-manifest identity does not match current shards; refusing export")
     for label, data in (("tokenizer", tokenizer_data), ("weighted", weighted_data)):
@@ -211,7 +212,6 @@ def export_checkpoint(output_dir: str | Path, llamacpp_dir: str | Path, quant: s
     if quant != "F16": final = _quantize(f16, _find_quantizer(llamacpp_dir), quant, gguf_dir)
     modelfile = gguf_dir / "Modelfile"
     modelfile.write_text(f"FROM {final.name}\n\nPARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER repeat_penalty 1.1\n", encoding="utf-8")
-    from pipeline.integrity import sha256_file
     manifest = {
         "schema": 3,
         "checkpoint": str(ckpt),
@@ -225,17 +225,17 @@ def export_checkpoint(output_dir: str | Path, llamacpp_dir: str | Path, quant: s
         "hf_dir": str(hf_dir),
         "f16_gguf": str(f16),
         "final_gguf": str(final),
-        "final_gguf_sha256": sha256_file(final),
+        "final_gguf_sha256": hashlib.sha256(final.read_bytes()).hexdigest(),
         "final_gguf_size": final.stat().st_size,
-        "f16_gguf_sha256": sha256_file(f16),
+        "f16_gguf_sha256": hashlib.sha256(f16.read_bytes()).hexdigest(),
         "modelfile": str(modelfile),
         "training_provenance": payload.get("provenance") or {},
     }
     card_paths = write_export_cards(output_dir, manifest, payload)
     manifest["dataset_card"] = card_paths["dataset_card"]
     manifest["model_card"] = card_paths["model_card"]
-    manifest["dataset_card_sha256"] = sha256_file(Path(card_paths["dataset_card"]))
-    manifest["model_card_sha256"] = sha256_file(Path(card_paths["model_card"]))
+    manifest["dataset_card_sha256"] = hashlib.sha256(Path(card_paths["dataset_card"]).read_bytes()).hexdigest()
+    manifest["model_card_sha256"] = hashlib.sha256(Path(card_paths["model_card"]).read_bytes()).hexdigest()
     _atomic_json(gguf_dir / "export_manifest.json", manifest)
     log.info("Export complete: %s", final)
     log.info("Dataset card: %s", card_paths["dataset_card"])
