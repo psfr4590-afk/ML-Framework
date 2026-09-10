@@ -34,20 +34,21 @@ def _shard_manifest_hash(shard_dir: Path) -> Optional[str]:
     return sha256_file(manifest) if manifest.is_file() else None
 
 
-def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path) -> dict:
+def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: Optional[dict] = None) -> dict:
     pipeline_sha = cfg.get("_pipeline_config_sha256")
     if not pipeline_sha:
         raise RuntimeError("Training provenance requires the canonical pipeline configuration SHA-256")
     shard_sha = _shard_manifest_hash(shard_dir)
     if not shard_sha:
         raise RuntimeError(f"Training provenance requires a valid shard manifest: {shard_dir}")
+    effective_train_cfg = train_cfg if train_cfg is not None else cfg.get("train", {})
     return {
         "schema": 1,
         "pipeline_config_sha256": pipeline_sha,
-        "train_config_sha256": _stable_hash(cfg.get("train", {})),
+        "train_config_sha256": _stable_hash(effective_train_cfg),
         "model_config_sha256": _stable_hash(model_cfg.to_dict()),
         "shard_manifest_sha256": shard_sha,
-        "seed": int(cfg.get("train", {}).get("seed", 42)),
+        "seed": int(effective_train_cfg.get("seed", 42)),
     }
 
 
@@ -297,7 +298,7 @@ class Trainer:
 
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype, seed=seed)
         val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype, seed=seed)
-        provenance = _provenance(self.cfg, model_cfg, shard_dir)
+        provenance = _provenance(self.cfg, model_cfg, shard_dir, train_cfg=t)
 
         start_step, best_val = 0, float("inf")
         if bool(t.get("resume", True)):
