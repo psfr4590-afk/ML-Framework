@@ -41,6 +41,25 @@ def _secret_scan() -> list[str]:
     return findings
 
 
+def _audit_requirements() -> int:
+    """Audit declared third-party dependencies, excluding the local project package."""
+    requirement_files = (
+        ROOT / "requirements.txt",
+        ROOT / "requirements-torch.txt",
+        ROOT / "requirements-security.txt",
+    )
+    missing = [str(path) for path in requirement_files if not path.is_file()]
+    if missing:
+        print("Dependency audit inputs missing:")
+        for path in missing:
+            print(f"  {path}")
+        return 2
+    args = [sys.executable, "-m", "pip_audit", "--strict"]
+    for path in requirement_files:
+        args.extend(["-r", str(path)])
+    return subprocess.run(args, cwd=ROOT, check=False).returncode
+
+
 def main() -> int:
     failures: list[str] = []
     secret_findings = _secret_scan()
@@ -64,8 +83,8 @@ def main() -> int:
         print("pip-audit is not installed; refusing to mark dependency audit green")
         failures.append("pip-audit-missing")
     else:
-        audit = subprocess.run([sys.executable, "-m", "pip_audit", "--strict"], cwd=ROOT, check=False)
-        if audit.returncode:
+        audit = _audit_requirements()
+        if audit:
             failures.append("pip-audit")
         else:
             print("pip-audit: PASS")
