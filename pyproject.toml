@@ -49,7 +49,7 @@ addopts = "--cov=command_center --cov=pipeline --cov=scripts --cov=run_pipeline.
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["command_center", "pipeline", "scripts"]
+source = ["command_center", "pipeline", "scripts", "run_pipeline.py"]
 
 [tool.coverage.report]
 skip_empty = true
