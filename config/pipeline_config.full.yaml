@@ -5,9 +5,6 @@ pipeline:
   output_dir: "output"
   scratch_dir: "scratch"
   resume: true
-  total_steps: 100000
-  batch_size: 1
-  grad_accum_steps: 16
   seed: 42
 
 stages:
@@ -69,8 +66,6 @@ clean:
   config_file: "config/cleaner_config.yaml"
 
 embed_dedup:
-  # Embedding mode is explicit. Keep model access intentional rather than
-  # silently downloading a Hugging Face model during a long pipeline run.
   mode: "embedding"
   model: "all-MiniLM-L6-v2"
   model_path: null
