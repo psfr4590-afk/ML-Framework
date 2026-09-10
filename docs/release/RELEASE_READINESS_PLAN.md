@@ -27,7 +27,7 @@ This document is the current production-readiness contract for `main`. Historica
 
 The automated 75% coverage gate measures deterministic, unit-testable production modules explicitly listed in `pyproject.toml`. This boundary includes command-center configuration/security/service/web behavior and the deterministic pipeline contracts, validation, integrity, semantic deduplication, weighting, and supporting release helpers.
 
-The following surfaces are intentionally outside the unit-coverage percentage because their correctness is established through dedicated integration or operational gates: network crawler adapters, the end-to-end orchestrator, tokenizer/shard/training execution, GGUF/native tooling, target-hardware verification, release/security command entrypoints, and the interactive `ui/` layer. Those surfaces are still required to pass compile/lint/static checks and the applicable release smoke or target-environment gate. Excluding a surface from the percentage does not exempt it from release verification.
+The following surfaces are intentionally outside the unit-coverage percentage because their correctness is established through dedicated integration or operational gates: network crawler adapters, the end-to-end orchestrator, tokenizer/shard/training execution, GGUF/native tooling, target-hardware verification, release/security command entrypoints, the operational `scripts/runtime.py` helper, and the interactive `ui/` layer. Those surfaces are still required to pass compile/lint/static checks and the applicable release smoke or target-environment gate. Excluding a surface from the percentage does not exempt it from release verification.
 
 ## Production invariants
 
