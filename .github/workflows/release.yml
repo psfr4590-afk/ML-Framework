@@ -21,13 +21,21 @@ jobs:
           cache: pip
       - name: Install CPU PyTorch
         run: pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
-      - name: Install project dependencies
-        run: pip install -r requirements.txt
+      - name: Install project and release dependencies
+        run: pip install -r requirements-dev.txt
       - name: Install security gate tooling
         run: pip install -r requirements-security.txt
       - name: Install package metadata
         run: pip install . --no-deps
       - name: Security gate
         run: python scripts/security_gate.py
+      - name: Dependency and SBOM evidence
+        run: python scripts/generate_release_evidence.py
       - name: Production release verification
         run: python scripts/verify_release.py --bootstrap-native
+      - name: Upload release evidence
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: release-evidence
+          path: release-evidence/
+          if-no-files-found: error
