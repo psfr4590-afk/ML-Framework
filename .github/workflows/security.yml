@@ -1,0 +1,33 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU PyTorch
+        run: pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project dependencies
+        run: pip install -r requirements.txt
+      - name: Install security gate tooling
+        run: pip install -r requirements-security.txt
+      - name: Install package metadata
+        run: pip install . --no-deps
+      - name: Security gate
+        run: python scripts/security_gate.py
