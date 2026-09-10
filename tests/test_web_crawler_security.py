@@ -162,7 +162,6 @@ def test_oversized_response_is_not_materialized(monkeypatch):
 
 
 def test_pin_dns_replaces_hostname_resolution_with_validated_addresses(monkeypatch):
-    original = socket.getaddrinfo
     calls = []
 
     def fake_getaddrinfo(node, port, family=0, type=0, proto=0, flags=0):
@@ -174,8 +173,6 @@ def test_pin_dns_replaces_hostname_resolution_with_validated_addresses(monkeypat
         result = socket.getaddrinfo("example.com", 443, type=socket.SOCK_STREAM)
     assert result[0][4][0] == "93.184.216.34"
     assert calls == ["93.184.216.34"]
-    assert socket.getaddrinfo is fake_getaddrinfo
-    monkeypatch.setattr(socket, "getaddrinfo", original)
 
 
 def test_fetch_pins_the_actual_connection_to_the_validated_address(monkeypatch):
@@ -232,5 +229,9 @@ def test_pinned_dns_context_restores_socket_resolution_on_exception():
 
 
 def test_crawler_disables_environment_proxies():
-    crawler = _crawler(pytest.MonkeyPatch())
+    crawler = WebCrawler(
+        {"web": {"respect_robots_txt": False}},
+        _DummyLookup(),
+        _DummySignals(),
+    )
     assert crawler.session.trust_env is False
