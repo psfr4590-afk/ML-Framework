@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 from pipeline.config_validation import validate_config
@@ -28,3 +29,17 @@ def test_pipeline_level_model_preset_is_rejected():
         assert "pipeline.model_preset is obsolete" in str(exc)
     else:
         raise AssertionError("obsolete pipeline.model_preset must be rejected")
+
+
+def test_unknown_pipeline_stage_is_rejected():
+    cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
+    cfg["stages"]["shardd"] = True
+    with pytest.raises(ValueError, match="Unsupported pipeline stages: shardd"):
+        validate_config(cfg)
+
+
+def test_non_boolean_pipeline_stage_is_rejected():
+    cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
+    cfg["stages"]["train"] = "true"
+    with pytest.raises(ValueError, match="Pipeline stage flags must be boolean: train"):
+        validate_config(cfg)
