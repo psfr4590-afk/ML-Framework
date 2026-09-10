@@ -7,7 +7,7 @@ requests>=2.31,<3
 beautifulsoup4>=4.12,<5
 lxml>=6.1,<7
 numpy>=1.26,<3
-packaging>=23.0,<26
+packaging>=23.0,<27
 
 # ML / training
 tokenizers>=0.19,<1
