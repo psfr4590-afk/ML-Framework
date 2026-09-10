@@ -18,6 +18,8 @@ A release is not considered trusted merely because unit tests are green. Every i
 - [ ] GGUF F16 export succeeds
 - [ ] Requested quantized GGUF export succeeds
 - [ ] Export manifest hashes match the files on disk
+- [ ] Dataset and model cards are generated for every export
+- [ ] Export manifest records dataset/model card paths and SHA-256 hashes
 - [ ] llama.cpp can load the final GGUF and generate at least one token
 - [ ] Interrupted stage resumes only from verified artifacts
 - [ ] Changed source/config invalidates the affected artifact rather than silently reusing it
