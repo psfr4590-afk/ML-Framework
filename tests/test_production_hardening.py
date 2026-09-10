@@ -5,12 +5,13 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from pipeline.orchestrator import Pipeline
 from pipeline.trainer.model import LlamaModel, ModelConfig
 from pipeline.integrity import write_manifest
-from scripts.export_gguf import _map_state
+from scripts.export_gguf import _enforce_training_provenance, _map_state
 from command_center.store import DatasetStore
 
 
@@ -117,6 +118,11 @@ def test_checkpoint_resume_restores_exact_loader_cursor(tmp_path):
     actual_x, actual_y = resumed_train.next_batch(1)
     assert torch.equal(actual_x, expected_x)
     assert torch.equal(actual_y, expected_y)
+
+
+def test_export_provenance_rejects_missing_or_mismatched_lineage(tmp_path):
+    with pytest.raises(RuntimeError, match="incomplete"):
+        _enforce_training_provenance(tmp_path / "output", {"provenance": {}})
 
 
 def test_semantic_dedup_has_dependency_free_fallback(monkeypatch):
