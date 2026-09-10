@@ -96,7 +96,7 @@ def write_export_cards(
     tokenizer_path = output_dir / "tokenizer" / "tokenizer.json"
     tokenizer_sha = _sha256(tokenizer_path)
 
-    crawl_path, crawl_manifest = stages["crawl"]
+    crawl_path, _ = stages["crawl"]
     pipeline_sha = checkpoint_provenance.get("pipeline_config_sha256")
     if not pipeline_sha:
         for _, (_, manifest) in stages.items():
