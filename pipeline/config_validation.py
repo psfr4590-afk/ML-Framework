@@ -3,6 +3,7 @@ from __future__ import annotations
 
 QUANTS = {"F16", "Q4_K_M", "Q5_K_M", "Q8_0"}
 PRESETS = {"85M", "117M", "360M"}
+STAGES = {"crawl", "clean", "semantic_dedup", "weight", "tokenize", "shard", "train", "export"}
 
 
 def validate_config(cfg: dict) -> None:
@@ -12,6 +13,13 @@ def validate_config(cfg: dict) -> None:
     for section in required:
         if not isinstance(cfg.get(section), dict):
             raise ValueError(f"Missing or invalid configuration section: {section}")
+    stages = cfg["stages"]
+    unknown_stages = set(stages) - STAGES
+    if unknown_stages:
+        raise ValueError(f"Unsupported pipeline stages: {', '.join(sorted(unknown_stages))}")
+    invalid_stage_values = [name for name, enabled in stages.items() if not isinstance(enabled, bool)]
+    if invalid_stage_values:
+        raise ValueError(f"Pipeline stage flags must be boolean: {', '.join(sorted(invalid_stage_values))}")
     if "model_preset" in cfg["pipeline"]:
         raise ValueError("pipeline.model_preset is obsolete; configure train.model_preset instead")
     tok, shard, train, export = cfg["tokenizer"], cfg["shard"], cfg["train"], cfg["export"]
