@@ -15,14 +15,16 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      # Match the canonical bootstrap path: core dependencies and host-specific
-      # PyTorch are resolved from separate requirement files.
       - name: Install CPU PyTorch
         run: pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
       - name: Install project dependencies
         run: pip install -r requirements.txt
       - name: Install package metadata
         run: pip install . --no-deps
+      - name: Bootstrap doctor
+        run: python bootstrap.py --doctor
+      - name: Dependency consistency
+        run: python -m pip check
       - name: Lint
         run: ruff check --select F command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
       - name: Compile
@@ -47,6 +49,12 @@ jobs:
       - name: Install package metadata
         shell: pwsh
         run: pip install . --no-deps
+      - name: Bootstrap doctor
+        shell: pwsh
+        run: python bootstrap.py --doctor
+      - name: Dependency consistency
+        shell: pwsh
+        run: python -m pip check
       - name: Lint
         shell: pwsh
         run: ruff check --select F command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
