@@ -17,7 +17,7 @@ import os
 import random
 import tempfile
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import numpy as np
 
@@ -143,12 +143,7 @@ class ShardWriter:
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(1024 * 1024), b""):
                     digest.update(chunk)
-            item = {
-                "name": path.name,
-                "size": path.stat().st_size,
-                "sha256": digest.hexdigest(),
-            }
-            files.append(item)
+            files.append({"name": path.name, "size": path.stat().st_size, "sha256": digest.hexdigest()})
         manifest = {
             "version": 1,
             "dtype": str(np.dtype(self._dtype)),
@@ -210,7 +205,7 @@ class ShardWriter:
 
 
 class ShardDataLoader:
-    """Memory-mapped loader for binary shards with SHA256 integrity verification."""
+    """Memory-mapped loader with integrity checks and checkpointable cursor state."""
 
     def __init__(self, shard_dir: str | Path, split: str, seq_len: int,
                  dtype=np.uint16, seed: int = 42):
@@ -218,7 +213,8 @@ class ShardDataLoader:
         self._split = split
         self._seq_len = seq_len
         self._dtype = dtype
-        self._rng = random.Random(seed)
+        self._seed = int(seed)
+        self._rng = random.Random(self._seed)
         self._shards = sorted(self._dir.glob(f"shard_*_{split}.bin"))
         if not self._shards:
             raise FileNotFoundError(f"No {split} shards in {shard_dir}")
@@ -233,26 +229,21 @@ class ShardDataLoader:
                 item = entries.get(shard.name)
                 if not item:
                     raise RuntimeError(f"Shard entry not in manifest: {shard.name}")
-                # Verify file exists and size matches
                 actual_size = shard.stat().st_size
                 expected_size = int(item.get("size", -1))
                 if actual_size != expected_size:
                     raise RuntimeError(
-                        f"Shard manifest mismatch for {shard.name}: "
-                        f"expected size {expected_size}, got {actual_size}"
+                        f"Shard manifest mismatch for {shard.name}: expected size {expected_size}, got {actual_size}"
                     )
-                # NEW: Verify SHA256 hash matches manifest
                 expected_sha256 = item.get("sha256")
                 if not expected_sha256:
                     raise RuntimeError(f"Shard manifest missing SHA256 for {shard.name}")
                 actual_sha256 = self._compute_sha256(shard)
                 if actual_sha256 != expected_sha256:
                     raise RuntimeError(
-                        f"Shard integrity check failed for {shard.name}: "
-                        f"manifest SHA256={expected_sha256}, actual={actual_sha256}. "
+                        f"Shard integrity check failed for {shard.name}: manifest SHA256={expected_sha256}, actual={actual_sha256}. "
                         f"File may be corrupted."
                     )
-                log.debug("Shard %s: size and SHA256 verified", shard.name)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, KeyError) as exc:
             raise RuntimeError(f"Invalid shard manifest: {manifest_path}") from exc
 
@@ -263,7 +254,6 @@ class ShardDataLoader:
 
     @staticmethod
     def _compute_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
-        """Compute SHA256 hash of a file efficiently."""
         h = hashlib.sha256()
         with path.open("rb") as f:
             while True:
@@ -275,6 +265,45 @@ class ShardDataLoader:
 
     def _load_shard(self, path: Path) -> np.ndarray:
         return np.memmap(path, dtype=self._dtype, mode="r")
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "schema": 1,
+            "split": self._split,
+            "seq_len": self._seq_len,
+            "dtype": str(np.dtype(self._dtype)),
+            "seed": self._seed,
+            "shards": [path.name for path in self._shards],
+            "shard_idx": self._shard_idx,
+            "pos": self._pos,
+            "rng_state": self._rng.getstate(),
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        if not isinstance(state, dict) or int(state.get("schema", -1)) != 1:
+            raise RuntimeError(f"Invalid {self._split} loader state schema")
+        if state.get("split") != self._split or int(state.get("seq_len", -1)) != self._seq_len:
+            raise RuntimeError(f"Checkpoint {self._split} loader geometry mismatch")
+        if state.get("dtype") != str(np.dtype(self._dtype)) or int(state.get("seed", -1)) != self._seed:
+            raise RuntimeError(f"Checkpoint {self._split} loader configuration mismatch")
+        current_names = sorted(path.name for path in self._shards)
+        saved_names = list(state.get("shards", []))
+        if sorted(saved_names) != current_names or len(saved_names) != len(self._shards):
+            raise RuntimeError(f"Checkpoint {self._split} shard set mismatch; refusing non-deterministic resume")
+        shard_idx = int(state.get("shard_idx", -1))
+        pos = int(state.get("pos", -1))
+        if not 0 <= shard_idx < len(self._shards) or pos < 0:
+            raise RuntimeError(f"Checkpoint {self._split} cursor state is invalid")
+        try:
+            rng_state = state["rng_state"]
+            if isinstance(rng_state, list):
+                rng_state = tuple(rng_state)
+            self._rng.setstate(rng_state)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"Checkpoint {self._split} RNG state is invalid") from exc
+        self._shard_idx = shard_idx
+        self._pos = pos
+        self._data = self._load_shard(self._shards[self._shard_idx])
 
     def next_batch(self, batch_size: int):
         import torch
@@ -289,8 +318,7 @@ class ShardDataLoader:
                 attempts += 1
                 if attempts > len(self._shards):
                     raise RuntimeError(
-                        f"No {self._split} shard contains at least {L} tokens; "
-                        "increase corpus/shard size or reduce seq_len"
+                        f"No {self._split} shard contains at least {L} tokens; increase corpus/shard size or reduce seq_len"
                     )
             chunk = self._data[self._pos:self._pos + L].astype(np.int64)
             x_list.append(chunk[:-1])
