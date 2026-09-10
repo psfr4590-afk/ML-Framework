@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Target = Join-Path $Root "third_party\llama.cpp"
 $Repo = "https://github.com/ggml-org/llama.cpp.git"
@@ -27,19 +27,23 @@ $Args = @(
     "-DLLAMA_CURL=OFF",
     "-DLLAMA_BUILD_TESTS=OFF",
     "-DLLAMA_BUILD_SERVER=OFF",
-    "-DLLAMA_BUILD_APP=OFF",
+    "-DLLAMA_BUILD_APP=ON",
     "-DLLAMA_BUILD_TOOLS=ON",
     "-DLLAMA_BUILD_EXAMPLES=ON"
 )
 
 cmake @Args
-cmake --build $Build --config Release --target llama-quantize --parallel
+cmake --build $Build --config Release --target llama-quantize llama-cli --parallel
 
 $Quant = Get-ChildItem -Path $Build -Recurse -File -Filter "llama-quantize.exe" |
     Select-Object -First 1
+$Cli = Get-ChildItem -Path $Build -Recurse -File -Filter "llama-cli.exe" |
+    Select-Object -First 1
 
 if (-not $Quant) { throw "llama-quantize was not built" }
+if (-not $Cli) { throw "llama-cli was not built" }
 
 Write-Host "llama.cpp ready at $Target"
 Write-Host "  converter: $Target\convert_hf_to_gguf.py"
 Write-Host "  quantizer: $($Quant.FullName)"
+Write-Host "  cli: $($Cli.FullName)"

@@ -83,6 +83,7 @@ jobs:
             '$Commit = "b95502b"',
             'convert_hf_to_gguf.py',
             'llama-quantize',
+            'llama-cli',
             '-DGGML_NATIVE=OFF',
             '-DGGML_OPENMP=OFF'
           )

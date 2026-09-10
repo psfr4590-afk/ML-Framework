@@ -22,6 +22,7 @@ def test_release_gate_bootstrap_mode_reports_native_check(monkeypatch, capsys):
         return 0
 
     monkeypatch.setattr(verify_release, "run", fake_run)
+    monkeypatch.setattr(verify_release, "_native_smoke", lambda: 0)
 
     assert verify_release.main() == 0
     output = capsys.readouterr().out
