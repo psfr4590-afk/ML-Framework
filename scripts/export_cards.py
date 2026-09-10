@@ -173,7 +173,7 @@ def write_export_cards(
         "",
         "## Training provenance",
         "",
-        f"- Dataset card: `DATASET_CARD.md`",
+        "- Dataset card: `DATASET_CARD.md`",
         f"- Training provenance: `{_format_value(checkpoint_provenance)}`",
         f"- Pipeline configuration SHA-256: `{_format_value(pipeline_sha)}`",
         f"- Shard manifest SHA-256: `{_format_value(shard_sha)}`",
