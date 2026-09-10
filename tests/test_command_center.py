@@ -66,7 +66,7 @@ def test_credential_api_does_not_return_secret():
         with TestClient(app, client=LOOPBACK_CLIENT) as client:
             r = client.post("/api/credentials", headers=CONTROL_HEADERS, json={
                 "name": "test", "secret": "do-not-return", "provider": "custom",
-                "kind": "token", "env_var": "TEST_TOKEN", "identity": "user"
+                "kind": "token", "env_var": "GITHUB_TOKEN", "identity": "user"
             })
             assert r.status_code == 200
             assert "secret" not in r.json()
