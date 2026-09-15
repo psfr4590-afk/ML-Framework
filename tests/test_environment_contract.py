@@ -18,8 +18,10 @@ def test_bootstrap_reconciler_exists_and_is_referenced():
 
 def test_reconciler_dispatches_to_powershell_on_windows(monkeypatch, tmp_path):
     script = tmp_path / "scripts" / "bootstrap_llama_cpp.ps1"
+    patcher = tmp_path / "scripts" / "patch_llama_cpp_tokenizer.py"
     script.parent.mkdir(parents=True)
     script.write_text("# fixture\n", encoding="utf-8")
+    patcher.write_text("# fixture\n", encoding="utf-8")
     calls = []
 
     monkeypatch.setattr(reconciler.platform, "system", lambda: "Windows")
@@ -31,7 +33,41 @@ def test_reconciler_dispatches_to_powershell_on_windows(monkeypatch, tmp_path):
 
     assert reconciler.main(["--project-root", str(tmp_path), "--ensure-llamacpp"]) == 0
     assert calls == [
-        (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], tmp_path, False)
+        (
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            tmp_path,
+            False,
+        ),
+        (
+            [reconciler.sys.executable, str(patcher), "--llamacpp-dir", str(tmp_path / "third_party" / "llama.cpp")],
+            tmp_path,
+            False,
+        ),
+    ]
+
+
+def test_reconciler_does_not_apply_tokenizer_overlay_after_native_failure(monkeypatch, tmp_path):
+    script = tmp_path / "scripts" / "bootstrap_llama_cpp.ps1"
+    patcher = tmp_path / "scripts" / "patch_llama_cpp_tokenizer.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("# fixture\n", encoding="utf-8")
+    patcher.write_text("# fixture\n", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(reconciler.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        reconciler.subprocess,
+        "run",
+        lambda command, cwd, check: calls.append((command, cwd, check)) or SimpleNamespace(returncode=9),
+    )
+
+    assert reconciler.main(["--project-root", str(tmp_path), "--ensure-llamacpp"]) == 9
+    assert calls == [
+        (
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            tmp_path,
+            False,
+        )
     ]
 
 
@@ -49,7 +85,7 @@ def test_reconciler_dispatches_to_bash_on_non_windows(monkeypatch, tmp_path):
     )
 
     assert reconciler.main(["--project-root", str(tmp_path), "--ensure-llamacpp"]) == 7
-    assert calls == [( ["bash", str(script)], tmp_path, False)]
+    assert calls == [(["bash", str(script)], tmp_path, False)]
 
 
 def test_termux_safe_machine_tests_do_not_import_tkinter_at_collection_time():
