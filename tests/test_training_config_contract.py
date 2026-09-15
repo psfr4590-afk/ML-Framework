@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 import yaml
 
-from pipeline.trainer.train import latest_checkpoint, load_checkpoint
+from pipeline.trainer.train import latest_checkpoint, load_checkpoint, save_checkpoint
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +35,70 @@ def test_latest_checkpoint_uses_highest_numeric_training_step(tmp_path):
         (ckpt_dir / f"{name}.manifest.json").write_text("{}", encoding="utf-8")
 
     assert latest_checkpoint(ckpt_dir).name == "ckpt_0000010.pt"
+
+
+def test_latest_checkpoint_requires_integrity_manifest(tmp_path):
+    ckpt_dir = tmp_path / "checkpoints"
+    ckpt_dir.mkdir()
+    path = ckpt_dir / "ckpt_0000011.pt"
+    path.write_bytes(b"checkpoint")
+
+    assert latest_checkpoint(ckpt_dir) is None
+
+
+def test_load_checkpoint_restores_model_optimizer_and_step(tmp_path):
+    path = tmp_path / "ckpt_0000001.pt"
+    model = torch.nn.Linear(2, 2)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
+
+    source = {name: value.detach().clone() for name, value in model.state_dict().items()}
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(1.0)
+
+    saved = save_checkpoint(
+        model,
+        optimizer,
+        scaler,
+        step=7,
+        val_loss=1.25,
+        cfg={"seed": 42},
+        out_dir=tmp_path,
+        provenance={"contract": "resume-test"},
+    )
+
+    restored = torch.nn.Linear(2, 2)
+    restored_optimizer = torch.optim.AdamW(restored.parameters(), lr=1e-3)
+    restored_scaler = torch.amp.GradScaler("cuda", enabled=False)
+    step = load_checkpoint(
+        saved,
+        restored,
+        optimizer=restored_optimizer,
+        scaler=restored_scaler,
+        device=torch.device("cpu"),
+        expected_provenance={"contract": "resume-test"},
+    )
+
+    assert step == 7
+    for name, value in source.items():
+        assert torch.equal(restored.state_dict()[name], value + 1.0)
+
+
+def test_resume_contract_uses_numbered_checkpoint_not_terminal_artifact(tmp_path):
+    ckpt_dir = tmp_path / "checkpoints"
+    ckpt_dir.mkdir()
+    numbered = ckpt_dir / "ckpt_0000002.pt"
+    final = ckpt_dir / "ckpt_final_0000002.pt"
+    best = ckpt_dir / "ckpt_best_0000002.pt"
+    for path in (numbered, final, best):
+        path.write_bytes(b"checkpoint")
+        (ckpt_dir / f"{path.name}.manifest.json").write_text("{}", encoding="utf-8")
+
+    selected = latest_checkpoint(ckpt_dir)
+    assert selected == numbered
+    assert selected != final
+    assert selected != best
 
 
 def test_load_checkpoint_rejects_stale_provenance(tmp_path):
