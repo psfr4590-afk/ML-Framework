@@ -29,7 +29,7 @@ class BaseCrawler(abc.ABC):
     def _record_retrieval_identity(doc: Document) -> Document:
         """Bind the emitted source record to the exact canonical bytes consumed downstream."""
         canonical = json.dumps(
-            doc.to_dict(),
+            doc.to_jsonl(),
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
