@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -60,3 +62,16 @@ def test_release_gate_requires_native_flag_for_artifact_verification():
     assert "A production release requires --bootstrap-native" in source
     assert "scripts/verify_gguf.py" in source
     assert "inference_validation" in source
+
+
+def test_release_verifier_runs_directly_from_repo_root():
+    result = subprocess.run(
+        [sys.executable, "scripts/verify_release.py", "--skip-tests"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "--skip-tests is not allowed" in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr
