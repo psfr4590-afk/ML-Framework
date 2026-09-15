@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.patch_llama_cpp_tokenizer import MODEL_LAB_BPE_HASH, patch_tokenizer_registry
+from scripts.patch_llama_cpp_tokenizer import patch_tokenizer_registry
 from scripts.verify_gguf import verify_gguf
 from scripts.verify_release import RELEASE_SMOKE_SOURCES, _write_local_smoke_input
 
@@ -77,7 +77,7 @@ def test_release_smoke_fixture_has_multiple_source_families_and_lexical_diversit
     assert manifest["provenance"]["stage"] == "weight"
 
 
-def test_llama_cpp_tokenizer_overlay_registers_exact_model_lab_hash(tmp_path: Path):
+def test_llama_cpp_tokenizer_overlay_registers_bytelevel_structurally(tmp_path: Path):
     llama_cpp = tmp_path / "llama.cpp"
     conversion = llama_cpp / "conversion"
     conversion.mkdir(parents=True)
@@ -93,8 +93,8 @@ def test_llama_cpp_tokenizer_overlay_registers_exact_model_lab_hash(tmp_path: Pa
 
     assert patch_tokenizer_registry(llama_cpp) is True
     patched = base.read_text(encoding="utf-8")
-    assert MODEL_LAB_BPE_HASH in patched
-    assert f'res = "gpt-2"' in patched
+    assert 'pre_tokenizer.__class__.__name__ == "ByteLevel"' in patched
+    assert 'res = "gpt-2"' in patched
     assert patch_tokenizer_registry(llama_cpp) is False
     assert base.read_text(encoding="utf-8") == patched
 
