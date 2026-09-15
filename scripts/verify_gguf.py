@@ -41,6 +41,7 @@ def verify_gguf(model: str | Path, llama_cli: str | Path, prompt: str = "Hello")
         "-m", str(model_path),
         "-p", prompt,
         "-n", "1",
+        "--single-turn",
         "--no-display-prompt",
         "--simple-io",
     ]
