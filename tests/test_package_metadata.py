@@ -16,6 +16,7 @@ _RUNTIME_REQUIREMENTS = {
     "safetensors",
     "datasets",
     "huggingface_hub",
+    "sentencepiece",
     "trafilatura",
     "langdetect",
     "pypdf",

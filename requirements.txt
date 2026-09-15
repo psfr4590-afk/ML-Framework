@@ -14,6 +14,7 @@ tokenizers>=0.19,<1
 safetensors>=0.4,<1
 datasets>=5.0.1,<6
 huggingface_hub>=0.23,<2
+sentencepiece>=0.2,<1
 
 # Crawling / language helpers
 trafilatura>=1.12,<3
