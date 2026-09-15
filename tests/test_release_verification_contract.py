@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.patch_llama_cpp_tokenizer import MODEL_LAB_BPE_HASH, patch_tokenizer_registry
 from scripts.verify_gguf import verify_gguf
 from scripts.verify_release import RELEASE_SMOKE_SOURCES, _write_local_smoke_input
 
@@ -74,6 +75,38 @@ def test_release_smoke_fixture_has_multiple_source_families_and_lexical_diversit
     assert sum("term" in row["text"] for row in rows) == 256
     assert manifest["provenance"]["pipeline_config_sha256"] == pipeline_sha
     assert manifest["provenance"]["stage"] == "weight"
+
+
+def test_llama_cpp_tokenizer_overlay_registers_exact_model_lab_hash(tmp_path: Path):
+    llama_cpp = tmp_path / "llama.cpp"
+    conversion = llama_cpp / "conversion"
+    conversion.mkdir(parents=True)
+    base = conversion / "base.py"
+    base.write_text(
+        "# Marker: Start get_vocab_base_pre\n"
+        "    def get_vocab_base_pre(self, tokenizer):\n"
+        "        res = None\n"
+        "        if chkhsh == \"known\":\n"
+        "            res = \"gpt-2\"\n",
+        encoding="utf-8",
+    )
+
+    assert patch_tokenizer_registry(llama_cpp) is True
+    patched = base.read_text(encoding="utf-8")
+    assert MODEL_LAB_BPE_HASH in patched
+    assert f'res = "gpt-2"' in patched
+    assert patch_tokenizer_registry(llama_cpp) is False
+    assert base.read_text(encoding="utf-8") == patched
+
+
+def test_llama_cpp_tokenizer_overlay_fails_closed_on_unknown_layout(tmp_path: Path):
+    llama_cpp = tmp_path / "llama.cpp"
+    conversion = llama_cpp / "conversion"
+    conversion.mkdir(parents=True)
+    (conversion / "base.py").write_text("def unrelated():\n    return None\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="generated get_vocab_base_pre marker is missing"):
+        patch_tokenizer_registry(llama_cpp)
 
 
 def test_release_gate_requires_native_flag_for_artifact_verification():
