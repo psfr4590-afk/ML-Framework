@@ -60,8 +60,10 @@ def test_verify_gguf_rejects_empty_generation(monkeypatch, tmp_path: Path):
 
 def test_release_smoke_fixture_has_multiple_source_families_and_lexical_diversity(tmp_path: Path):
     scratch = tmp_path / "scratch"
-    _write_local_smoke_input(scratch)
+    pipeline_sha = "a" * 64
+    _write_local_smoke_input(scratch, pipeline_config_sha256=pipeline_sha)
     corpus = scratch / "04_weighted.jsonl"
+    manifest = json.loads((scratch / "04_weighted.jsonl.manifest.json").read_text(encoding="utf-8"))
     rows = [json.loads(line) for line in corpus.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     assert len(RELEASE_SMOKE_SOURCES) == 8
@@ -70,6 +72,8 @@ def test_release_smoke_fixture_has_multiple_source_families_and_lexical_diversit
     assert len({row["text"] for row in rows}) == 256
     assert len({row["meta"]["source_family"] for row in rows}) == 8
     assert sum("term" in row["text"] for row in rows) == 256
+    assert manifest["provenance"]["pipeline_config_sha256"] == pipeline_sha
+    assert manifest["provenance"]["stage"] == "weight"
 
 
 def test_release_gate_requires_native_flag_for_artifact_verification():
