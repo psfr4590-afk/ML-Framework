@@ -36,8 +36,17 @@ def test_torch_channel_summary_default_is_explicit() -> None:
     summary = bootstrap.torch_channel_summary("default", profile)
     assert summary["selected_channel"] == "default"
     assert summary["gpu_detected"] is True
-    assert summary["cuda_install_requested"] is True
+    assert summary["cuda_install_requested"] is False
     assert summary["hardware_warning"] is not None
+
+
+def test_torch_channel_summary_cuda() -> None:
+    profile = bootstrap.HardwareProfile(ram_gib=8.0, gpu_name="NVIDIA GeForce GTX 1650", gpu_vram_gib=4.0)
+    summary = bootstrap.torch_channel_summary("cuda", profile)
+    assert summary["selected_channel"] == "cuda"
+    assert summary["gpu_detected"] is True
+    assert summary["cuda_install_requested"] is True
+    assert summary["hardware_warning"] is None
 
 
 def test_hardware_profile_json_is_stable() -> None:
