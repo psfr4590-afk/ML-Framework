@@ -12,12 +12,15 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import yaml
 
 from pipeline.integrity import write_manifest
 from pipeline.types import Document
 
-ROOT = Path(__file__).resolve().parents[1]
 LINT_TARGETS = [
     "command_center", "pipeline", "tests", "scripts", "ui",
     "run_pipeline.py", "run_command_center.py", "launch.py", "bootstrap.py",
