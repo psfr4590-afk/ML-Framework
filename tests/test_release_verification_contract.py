@@ -38,6 +38,7 @@ def test_verify_gguf_runs_one_token_generation(monkeypatch, tmp_path: Path):
     argv = seen["cmd"]
     assert isinstance(argv, list)
     assert "-n" in argv and argv[argv.index("-n") + 1] == "1"
+    assert "--single-turn" in argv
     assert "--no-display-prompt" in argv
     assert "--simple-io" in argv
     assert seen["kwargs"] == {"text": True, "capture_output": True, "check": False, "timeout": 120}
