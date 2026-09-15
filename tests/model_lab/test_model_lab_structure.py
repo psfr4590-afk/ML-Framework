@@ -71,9 +71,11 @@ def test_documentation_mentions_machine_verification_boundary():
  readme=text(ROOT/"README.md"); assert "Windows" in readme and ("1760x990" in readme or "1760×990" in readme)
 def test_no_common_secret_literals_are_committed():
  forbidden=["g"+"hp_","github"+"_pat_","AI"+"za"]
+ ignored_dirs={".git",".venv","venv","env","__pycache__",".pytest_cache"}
+ ignored_suffixes={".pyc",".png",".jpg",".jpeg",".gif",".ico",".bin",".pt",".dll",".pyd",".so",".dylib"}
  for p in ROOT.rglob("*"):
-  if not p.is_file() or ".git" in p.parts or "llama.cpp" in p.parts: continue
-  if p.name in {"README.md",".env.example","credentials.example.yaml"} or p.suffix.lower() in {".pyc",".png",".jpg",".jpeg",".gif",".ico",".bin",".pt"}: continue
+  if not p.is_file() or any(part in ignored_dirs for part in p.parts) or "llama.cpp" in p.parts: continue
+  if p.name in {"README.md",".env.example","credentials.example.yaml"} or p.suffix.lower() in ignored_suffixes: continue
   data=p.read_text(encoding="utf-8",errors="ignore")
   for token in forbidden: assert token not in data,f"possible secret literal {token} in {p}"
 def test_release_docs_exist():
