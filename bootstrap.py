@@ -28,6 +28,7 @@ MIN_PYTHON = (3, 11)
 MAX_PYTHON_EXCLUSIVE = (3, 14)
 REQUIRED = ("yaml", "requests", "bs4", "lxml", "numpy", "tokenizers", "torch")
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
+CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
 
 
@@ -194,10 +195,12 @@ def torch_channel_summary(channel: str, profile: HardwareProfile) -> dict[str, A
         )
     elif channel == "default" and not gpu_detected:
         warning = "Default PyPI Torch was explicitly requested without a detected NVIDIA GPU."
+    elif channel == "cuda" and not gpu_detected:
+        warning = "CUDA Torch was explicitly requested without a detected NVIDIA GPU."
     return {
         "selected_channel": channel,
         "gpu_detected": gpu_detected,
-        "cuda_install_requested": channel == "default" and gpu_detected,
+        "cuda_install_requested": channel == "cuda",
         "hardware_warning": warning,
     }
 
@@ -247,7 +250,7 @@ def doctor() -> int:
         print(f"{exe}: {'OK' if shutil.which(exe) else 'MISSING'}")
     profile = detect_hardware()
     _print_hardware(profile)
-    print(f"Torch channel recommendation: {'default' if profile.nvidia_gpu_detected else 'cpu'}")
+    print(f"Torch channel recommendation: {'cuda' if profile.nvidia_gpu_detected else 'cpu'}")
     runtime = torch_runtime_status()
     print(f"Torch runtime: {'OK' if runtime['installed'] else 'MISSING'}")
     if runtime["installed"]:
@@ -276,6 +279,8 @@ def install(torch_channel: str = "cpu") -> int:
         return result
     if torch_channel == "cpu":
         return _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
+    if torch_channel == "cuda":
+        return _pip_install(TORCH_REQUIREMENTS, "--index-url", CUDA_TORCH_INDEX)
     return _pip_install(TORCH_REQUIREMENTS)
 
 
@@ -294,9 +299,9 @@ def main() -> int:
     parser.add_argument("--install", action="store_true")
     parser.add_argument(
         "--torch-channel",
-        choices=("cpu", "default"),
+        choices=("cpu", "cuda", "default"),
         default="cpu",
-        help="PyTorch wheel source for --install (default: cpu)",
+        help="PyTorch wheel source for --install (default: cpu; use cuda for the official cu128 wheel index)",
     )
     parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()
