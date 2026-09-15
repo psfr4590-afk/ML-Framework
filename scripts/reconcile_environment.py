@@ -23,7 +23,20 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     command = (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)] if platform.system() == "Windows" else ["bash", str(script)])
     print("Reconciling native llama.cpp toolchain...")
-    return subprocess.run(command, cwd=root, check=False).returncode
+    result = subprocess.run(command, cwd=root, check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    patcher = root / "scripts" / "patch_llama_cpp_tokenizer.py"
+    if not patcher.is_file():
+        print(f"Missing llama.cpp tokenizer compatibility patcher: {patcher}", file=sys.stderr)
+        return 2
+    print("Applying Model Lab llama.cpp tokenizer compatibility overlay...")
+    return subprocess.run(
+        [sys.executable, str(patcher), "--llamacpp-dir", str(root / "third_party" / "llama.cpp")],
+        cwd=root,
+        check=False,
+    ).returncode
 
 
 if __name__ == "__main__":
