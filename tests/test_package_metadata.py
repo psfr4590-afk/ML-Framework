@@ -31,6 +31,8 @@ _RUNTIME_REQUIREMENTS = {
     "cryptography",
 }
 
+_VERIFICATION_REQUIREMENTS = {"pytest", "pytest-cov", "ruff"}
+
 
 def _requirement_name(line: str) -> str:
     return line.split("<", 1)[0].split(">", 1)[0].split("=", 1)[0].split("!", 1)[0].strip().lower()
@@ -54,11 +56,12 @@ def test_packaging_dependencies_match_runtime_contract():
         for dependency in metadata["project"]["dependencies"]
     }
 
-    runtime_names = {
+    requirement_names = {
         _requirement_name(line)
         for line in requirements.splitlines()
         if line.strip() and not line.strip().startswith("#")
-    } - {"pytest", "ruff"}
+    }
+    runtime_names = requirement_names - _VERIFICATION_REQUIREMENTS
 
     assert runtime_names == _RUNTIME_REQUIREMENTS
     assert runtime_names <= set(declared)
