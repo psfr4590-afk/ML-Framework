@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 import yaml
 
+from pipeline.trainer.model import LlamaModel, ModelConfig
 from pipeline.trainer.train import latest_checkpoint, load_checkpoint, save_checkpoint
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,8 +48,8 @@ def test_latest_checkpoint_requires_integrity_manifest(tmp_path):
 
 
 def test_load_checkpoint_restores_model_optimizer_and_step(tmp_path):
-    path = tmp_path / "ckpt_0000001.pt"
-    model = torch.nn.Linear(2, 2)
+    model_cfg = ModelConfig(vocab_size=32, d_model=16, n_layers=1, n_heads=4, n_kv_heads=4, d_ffn=32, seq_len=16)
+    model = LlamaModel(model_cfg)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     scaler = torch.amp.GradScaler("cuda", enabled=False)
 
@@ -68,7 +69,7 @@ def test_load_checkpoint_restores_model_optimizer_and_step(tmp_path):
         provenance={"contract": "resume-test"},
     )
 
-    restored = torch.nn.Linear(2, 2)
+    restored = LlamaModel(model_cfg)
     restored_optimizer = torch.optim.AdamW(restored.parameters(), lr=1e-3)
     restored_scaler = torch.amp.GradScaler("cuda", enabled=False)
     step = load_checkpoint(
