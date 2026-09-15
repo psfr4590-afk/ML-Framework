@@ -65,7 +65,10 @@ def test_both_downsamples_low_weights_and_upsamples_high_weights(tmp_path):
             )
         )
     )
-    assert [d.final_weight for d in docs] == [0.5, 1.0, 2.5, 2.5, 2.5]
+    # seed=1 yields 0.134... for the low-weight decision and 0.847... for
+    # the fractional high-weight decision, so the 2.5 document is repeated
+    # only for its two whole-weight copies.
+    assert [d.final_weight for d in docs] == [0.5, 1.0, 2.5, 2.5]
 
 
 def test_negative_weight_is_clamped_to_zero(tmp_path):
