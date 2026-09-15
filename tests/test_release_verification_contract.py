@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts.verify_gguf import verify_gguf
+from scripts.verify_release import RELEASE_SMOKE_SOURCES, _write_local_smoke_input
 
 
 class _Proc:
@@ -54,6 +56,20 @@ def test_verify_gguf_rejects_empty_generation(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("scripts.verify_gguf.subprocess.run", lambda *args, **kwargs: EmptyProc())
     with pytest.raises(RuntimeError, match="generated no visible token output"):
         verify_gguf(model, cli)
+
+
+def test_release_smoke_fixture_has_multiple_source_families_and_lexical_diversity(tmp_path: Path):
+    scratch = tmp_path / "scratch"
+    _write_local_smoke_input(scratch)
+    corpus = scratch / "04_weighted.jsonl"
+    rows = [json.loads(line) for line in corpus.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert len(RELEASE_SMOKE_SOURCES) == 8
+    assert len(rows) == 256
+    assert {row["source"] for row in rows} == {source for source, _ in RELEASE_SMOKE_SOURCES}
+    assert len({row["text"] for row in rows}) == 256
+    assert len({row["meta"]["source_family"] for row in rows}) == 8
+    assert sum("term" in row["text"] for row in rows) == 256
 
 
 def test_release_gate_requires_native_flag_for_artifact_verification():
