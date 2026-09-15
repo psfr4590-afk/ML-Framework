@@ -27,6 +27,18 @@ LINT_TARGETS = [
 ]
 
 
+RELEASE_SMOKE_SOURCES = (
+    ("local-technical", "systems architecture, compilers, operating systems, networking, storage, and distributed computing"),
+    ("local-scientific", "physics, chemistry, biology, astronomy, mathematics, statistics, and experimental methods"),
+    ("local-engineering", "mechanical, electrical, civil, software, control systems, reliability, and manufacturing engineering"),
+    ("local-humanities", "history, literature, linguistics, philosophy, archaeology, anthropology, and cultural studies"),
+    ("local-business", "accounting, finance, economics, operations, logistics, management, markets, and entrepreneurship"),
+    ("local-geography", "cartography, climate, geology, ecology, oceans, weather, agriculture, and geographic information"),
+    ("local-medicine", "anatomy, physiology, epidemiology, diagnostics, pharmacology, public health, and clinical research"),
+    ("local-creative", "music, visual design, architecture, photography, theater, film, animation, and digital media"),
+)
+
+
 def run(cmd: list[str]) -> int:
     print("$", " ".join(map(str, cmd)))
     return subprocess.run(cmd, cwd=ROOT, check=False).returncode
@@ -41,25 +53,38 @@ def _sha256(path: Path) -> str:
 
 
 def _write_local_smoke_input(scratch: Path) -> None:
+    """Write a deterministic, network-free multi-source corpus with enough lexical diversity for vocab=512."""
     scratch.mkdir(parents=True, exist_ok=True)
     corpus = scratch / "04_weighted.jsonl"
     docs = []
-    for index in range(32):
-        docs.append(Document(
-            doc_id=f"release-smoke-{index:03d}",
-            url=f"file://release-smoke/{index}",
-            source="local-release-fixture",
-            title="Deterministic local release fixture",
-            text=("A deterministic local training fixture validates tokenization, sharding, training, "
-                   "GGUF export, artifact integrity, and native inference without depending on the public Internet. " * 8).strip(),
-            language="en",
-            content_type="text/plain",
-            domain="local.release.fixture",
-            final_weight=1.0,
-            meta={"release_fixture": True},
-        ))
+    for source_index, (source, topic_text) in enumerate(RELEASE_SMOKE_SOURCES):
+        for local_index in range(32):
+            index = source_index * 32 + local_index
+            unique_terms = " ".join(
+                f"{source.replace('-', '')}term{index:03d}_{suffix}"
+                for suffix in ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot")
+            )
+            text = (
+                f"Deterministic {source} release fixture document {index:03d}. "
+                f"This local source covers {topic_text}. "
+                f"The verification corpus includes {unique_terms}. "
+                "The fixture exercises tokenization, sharding, training, GGUF export, artifact integrity, "
+                "and native inference without depending on the public Internet."
+            )
+            docs.append(Document(
+                doc_id=f"release-smoke-{index:03d}",
+                url=f"file://release-smoke/{source}/{local_index}",
+                source=source,
+                title=f"Deterministic {source} release fixture",
+                text=text,
+                language="en",
+                content_type="text/plain",
+                domain=f"{source}.release.fixture",
+                final_weight=1.0,
+                meta={"release_fixture": True, "source_family": source, "source_index": source_index},
+            ))
     corpus.write_text("".join(json.dumps(doc.to_jsonl(), sort_keys=True) + "\n" for doc in docs), encoding="utf-8")
-    write_manifest(corpus, kind="weight", rows=len(docs), provenance={"schema": 1, "fixture": "local-release"})
+    write_manifest(corpus, kind="weight", rows=len(docs), provenance={"schema": 1, "fixture": "local-release-multi-source", "source_families": len(RELEASE_SMOKE_SOURCES)})
 
 
 def _write_smoke_source_manifest(tmp_root: Path) -> None:
@@ -68,8 +93,11 @@ def _write_smoke_source_manifest(tmp_root: Path) -> None:
         "schema": 1,
         "retrieval_started_at": datetime.now(timezone.utc).isoformat(),
         "retrieval_completed_at": datetime.now(timezone.utc).isoformat(),
-        "sources": [{"kind": "local_fixture", "identifier": "local-release-fixture", "revision": "embedded", "license": "project-test-fixture", "raw_source_sha256": None}],
-        "rights_note": "Deterministic test fixture only; not an external training source.",
+        "sources": [
+            {"kind": "local_fixture", "identifier": source, "revision": "embedded", "license": "project-test-fixture", "raw_source_sha256": None}
+            for source, _ in RELEASE_SMOKE_SOURCES
+        ],
+        "rights_note": "Deterministic test fixtures only; not external training sources.",
     }, indent=2) + "\n", encoding="utf-8")
 
 
