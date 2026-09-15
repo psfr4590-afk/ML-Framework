@@ -1,4 +1,4 @@
 # Host-specific PyTorch dependency.
 # The bootstrapper installs this from the official CPU wheel index by default.
 # NVIDIA hosts can use: python bootstrap.py --install --torch-channel cuda
-torch>=2.5,<3
+torch>=2.14.0,<3
