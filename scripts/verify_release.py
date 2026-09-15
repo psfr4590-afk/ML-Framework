@@ -52,7 +52,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _write_local_smoke_input(scratch: Path) -> None:
+def _write_local_smoke_input(scratch: Path, pipeline_config_sha256: str | None = None) -> None:
     """Write a deterministic, network-free multi-source corpus with enough lexical diversity for vocab=512."""
     scratch.mkdir(parents=True, exist_ok=True)
     corpus = scratch / "04_weighted.jsonl"
@@ -84,7 +84,15 @@ def _write_local_smoke_input(scratch: Path) -> None:
                 meta={"release_fixture": True, "source_family": source, "source_index": source_index},
             ))
     corpus.write_text("".join(json.dumps(doc.to_jsonl(), sort_keys=True) + "\n" for doc in docs), encoding="utf-8")
-    write_manifest(corpus, kind="weight", rows=len(docs), provenance={"schema": 1, "fixture": "local-release-multi-source", "source_families": len(RELEASE_SMOKE_SOURCES)})
+    provenance = {
+        "schema": 2,
+        "stage": "weight",
+        "fixture": "local-release-multi-source",
+        "source_families": len(RELEASE_SMOKE_SOURCES),
+    }
+    if pipeline_config_sha256:
+        provenance["pipeline_config_sha256"] = pipeline_config_sha256
+    write_manifest(corpus, kind="weight", rows=len(docs), provenance=provenance)
 
 
 def _write_smoke_source_manifest(tmp_root: Path) -> None:
@@ -133,7 +141,7 @@ def _native_smoke() -> int:
         config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp")
         config_path = tmp_root / "release_smoke.yaml"
         config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-        _write_local_smoke_input(scratch)
+        _write_local_smoke_input(scratch, pipeline_config_sha256=_sha256(config_path))
         _write_smoke_source_manifest(tmp_root)
         try:
             _validate_source_manifest(tmp_root / "source_manifest.json")
