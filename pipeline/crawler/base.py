@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import abc
+import hashlib
+import json
 import logging
 from typing import Iterator
 
@@ -11,7 +13,7 @@ log = logging.getLogger("crawler.base")
 
 
 class BaseCrawler(abc.ABC):
-    """Every crawler yields Document objects."""
+    """Every crawler yields Document objects with deterministic retrieval identity."""
 
     def __init__(self, cfg: dict, weight_lookup, signal_tracker):
         self.cfg = cfg
@@ -22,6 +24,21 @@ class BaseCrawler(abc.ABC):
     @abc.abstractmethod
     def crawl(self) -> Iterator[Document]:
         ...
+
+    @staticmethod
+    def _record_retrieval_identity(doc: Document) -> Document:
+        """Bind the emitted source record to the exact canonical bytes consumed downstream."""
+        canonical = json.dumps(
+            doc.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        doc.meta["retrieval_provenance"] = {
+            "identity_type": "canonical_record",
+            "record_sha256": hashlib.sha256(canonical).hexdigest(),
+        }
+        return doc
 
     def _apply_weights(self, doc: Document) -> Document:
         dw, category = self.weight_lookup.domain_weight(doc.domain)
@@ -36,7 +53,7 @@ class BaseCrawler(abc.ABC):
         doc.final_weight = dw * ctw * qs
         if not doc.meta.get("category"):
             doc.meta["category"] = category
-        return doc
+        return self._record_retrieval_identity(doc)
 
     def print_stats(self):
         s = self.stats
