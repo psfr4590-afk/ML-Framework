@@ -9,7 +9,7 @@ from threading import RLock
 
 from pipeline.integrity import artifact_valid, sha256_file
 
-from .config import DATASETS, group_by_id, load_groups, profile_by_group_id, validate_profile_catalog
+from .config import DATASETS, group_by_id, profile_by_group_id, validate_profile_catalog
 
 LOCK = RLock()
 STAGES = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
