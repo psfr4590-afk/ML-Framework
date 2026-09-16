@@ -13,6 +13,21 @@ from pipeline.types import Document
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _identity_is_complete(doc: Document) -> bool:
+    identity = doc.meta.get("source_identity")
+    if doc.source == "web":
+        return bool(doc.url)
+    if not isinstance(identity, dict):
+        return False
+    required = {
+        "github": ("full_name", "commit_sha"),
+        "arxiv": ("arxiv_id", "version"),
+        "huggingface": ("repo", "revision", "split", "row_index"),
+        "google": ("result_url", "query"),
+    }.get(doc.source, ())
+    return all(identity.get(key) not in (None, "") for key in required)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Accept or reject a crawled Model Lab dataset corpus")
     parser.add_argument("--input", required=True, help="Crawled JSONL file")
@@ -65,11 +80,7 @@ def main() -> int:
                 key = ",".join(matches) if matches else "quality_gate"
                 reasons[key] = reasons.get(key, 0) + 1
                 continue
-            if doc.source == "web":
-                identity_ok = bool(doc.url)
-            else:
-                identity_ok = isinstance(doc.meta.get("source_identity"), dict)
-            if not identity_ok:
+            if not _identity_is_complete(doc):
                 rejected += 1
                 identity_missing += 1
                 reasons["missing_source_identity"] = reasons.get("missing_source_identity", 0) + 1
