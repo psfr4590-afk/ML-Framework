@@ -66,7 +66,14 @@ def test_source_manifest_all_groups_preserves_group_identity(tmp_path):
     cfg = _load_config("pipeline_config.full.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     target = tmp_path / "source_manifest.json"
-    _write_source_manifest(target, cfg, paths, selected_group_id="all")
+    _write_source_manifest(
+        target,
+        cfg,
+        paths,
+        selected_group_id="all",
+        retrieval_started_at="2026-01-01T00:00:00+00:00",
+        retrieval_completed_at="2026-01-01T00:01:00+00:00",
+    )
     data = json.loads(target.read_text(encoding="utf-8"))
     assert data["dataset_group"] == "all"
     groups = {source["dataset_group"] for source in data["sources"]}
@@ -89,7 +96,14 @@ def test_source_manifest_validation_rejects_changed_definition_hash(tmp_path):
     cfg = _load_config("pipeline_config.full.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     target = tmp_path / "source_manifest.json"
-    _write_source_manifest(target, cfg, paths, selected_group_id="swe_cs_systems")
+    _write_source_manifest(
+        target,
+        cfg,
+        paths,
+        selected_group_id="swe_cs_systems",
+        retrieval_started_at="2026-01-01T00:00:00+00:00",
+        retrieval_completed_at="2026-01-01T00:01:00+00:00",
+    )
     data = json.loads(target.read_text(encoding="utf-8"))
     data["source_definition_files"]["dataset_groups"]["sha256"] = "0" * 64
     target.write_text(json.dumps(data), encoding="utf-8")
