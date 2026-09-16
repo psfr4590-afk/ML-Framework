@@ -32,7 +32,9 @@ dataset_groups:
     sources: {web: true, github: true, arxiv: true, huggingface: true, google: true}
     github: {min_stars: 50, languages: [Python, Coq, Lean, Haskell, "C++"], topics: [formal-verification, theorem-proving, model-checking, digital-forensics, incident-response, reverse-engineering], max_repos: 200}
     arxiv: {categories: [cs.LO, cs.PL, cs.CR, math.ST, stat.ML, physics.data-an], max_results: 200}
-    huggingface: {datasets: [{repo: "qiaojin/PubMedQA", revision: "9001f28", config: "pqa_labeled", split: "train", text_field: "question", max_docs: 5000}]}
+    huggingface:
+      datasets:
+        - {repo: "qiaojin/PubMedQA", revision: "9001f28", config: "pqa_labeled", split: "train", text_fields: [question, context, long_answer, final_decision], max_docs: 5000}
     google: {queries: ["formal verification theorem proving tutorial", "digital forensics investigation methodology", "scientific reasoning hypothesis testing methods"]}
     web: {seed_urls: ["https://en.wikipedia.org/wiki/Formal_methods", "https://en.wikipedia.org/wiki/Digital_forensics"]}
 
@@ -56,7 +58,7 @@ dataset_groups:
     arxiv: {categories: [math.OC, math.NA, math.ST, stat.ML, stat.ME, cs.LG], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "openai/gsm8k", revision: "740312a", split: "train", text_field: "question", max_docs: 7500}
+        - {repo: "openai/gsm8k", revision: "740312a", config: "main", split: "train", text_fields: [question, answer], max_docs: 7473}
     google: {queries: ["convex optimization theory tutorial", "probability statistics mathematical foundations", "numerical optimization algorithms explained"]}
     web: {seed_urls: ["https://en.wikipedia.org/wiki/Mathematics", "https://mathworld.wolfram.com/", "https://en.wikipedia.org/wiki/Optimization_(mathematics)"]}
 
@@ -110,7 +112,7 @@ dataset_groups:
     arxiv: {categories: [cs.CL, cs.IR, eess.AS, stat.ML], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "sentence-transformers/msmarco", revision: "2a16a97", split: "train", text_field: "query", max_docs: 5000}
+        - {repo: "sentence-transformers/msmarco", revision: "2a16a97", config: "queries", split: "train", text_field: "query", max_docs: 5000}
     google: {queries: ["computational linguistics syntax semantics tutorial", "information retrieval ranking algorithms", "speech recognition language modeling fundamentals"]}
     web: {seed_urls: ["https://web.stanford.edu/~jurafsky/slp3/", "https://en.wikipedia.org/wiki/Information_retrieval", "https://en.wikipedia.org/wiki/Linguistics"]}
 
