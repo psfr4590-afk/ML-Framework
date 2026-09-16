@@ -44,12 +44,12 @@ def validate_dataset_contract(root: Path, groups_path: Path, profiles_path: Path
     policies = contract.get("source_kinds", {})
     _require(set(policies) == set(SOURCE_KINDS), "Source policy must cover every supported source kind")
 
+    mutable_revisions: list[str] = []
     for dataset_id in range(1, 11):
         profile = profile_by_id[dataset_id]
         group_id = str(profile.get("group_id", ""))
         _require(group_id in group_by_id, f"Dataset {dataset_id} references unknown group '{group_id}'")
         group = group_by_id[group_id]
-        _require(group.get("id") == group_id, f"Dataset {dataset_id} group identity mismatch")
         enabled = group.get("sources", {}) or {}
         _require(isinstance(enabled, dict), f"{group_id}.sources must be an object")
         exclusions = profile.get("exclusions", [])
@@ -63,10 +63,8 @@ def validate_dataset_contract(root: Path, groups_path: Path, profiles_path: Path
             section = group.get(kind, {}) or {}
             _require(isinstance(section, dict), f"{group_id}.{kind} must be an object")
             policy = policies[kind]
-            acquisition = policy.get("acquisition")
-            _require(acquisition, f"{kind} source policy is missing acquisition strategy")
-            identity_fields = policy.get("identity_fields", [])
-            _require(identity_fields, f"{kind} source policy is missing identity fields")
+            _require(policy.get("acquisition"), f"{kind} source policy is missing acquisition strategy")
+            _require(policy.get("identity_fields"), f"{kind} source policy is missing identity fields")
 
             if kind == "web":
                 seeds = section.get("seed_urls", [])
@@ -85,9 +83,11 @@ def validate_dataset_contract(root: Path, groups_path: Path, profiles_path: Path
                 _require(isinstance(datasets, list) and datasets, f"{group_id}.huggingface.datasets must be non-empty")
                 for item in datasets:
                     _require(isinstance(item, dict), f"{group_id}.huggingface dataset entry must be an object")
-                    for key in ("repo", "split", "text_field", "max_docs"):
+                    for key in ("repo", "revision", "split", "text_field", "max_docs"):
                         _require(item.get(key) not in (None, ""), f"{group_id}.huggingface entry missing {key}")
                     _require(int(item["max_docs"]) > 0, f"{group_id}.huggingface.max_docs must be positive")
+                    if str(item["revision"]) in {"main", "master", "HEAD"}:
+                        mutable_revisions.append(f"{group_id}:huggingface:{item['repo']}")
             elif kind == "google":
                 queries = section.get("queries", [])
                 _require(isinstance(queries, list) and queries, f"{group_id}.google.queries must be non-empty")
@@ -98,6 +98,8 @@ def validate_dataset_contract(root: Path, groups_path: Path, profiles_path: Path
         "profiles": 10,
         "source_kinds": list(SOURCE_KINDS),
         "executable_exclusion_tags": sorted(contract.get("exclusions", {})),
+        "mutable_revisions": mutable_revisions,
+        "production_revision_ready": not mutable_revisions,
     }
 
 
@@ -114,7 +116,8 @@ def compile_exclusion_patterns(root: Path, tags: list[str]) -> list[tuple[str, r
 def evaluate_document(root: Path, doc: Any, exclusions: list[str]) -> tuple[bool, list[str], float]:
     """Return keep/reject, matched exclusion tags, and the document quality score."""
     text = str(getattr(doc, "text", "") or "")
-    quality = float(getattr(doc, "meta", {}).get("quality_signal", 0.0) or 0.0)
+    meta = getattr(doc, "meta", {}) or {}
+    quality = float(meta.get("quality_signal", getattr(doc, "quality_score", 0.0)) or 0.0)
     contract = load_contract(root)
     quality_cfg = contract.get("quality", {})
     min_words = int(quality_cfg.get("min_text_words", 30))
