@@ -19,7 +19,7 @@ def _source_manifest(path: Path) -> None:
     path.write_text(json.dumps({"schema": 2, "dataset_group": "fixture", "retrieval_started_at": "t", "retrieval_completed_at": "t", "source_definition_files": {}, "sources": [{"kind": "local", "identifier": "fixture", "revision": "embedded", "license": "test", "raw_source_sha256": None, "dataset_group": "fixture"}], "rights_note": "test"}), encoding="utf-8")
 
 
-def test_training_provenance_binds_source_manifest(tmp_path):
+def test_training_provenance_requires_shard_manifest(tmp_path):
     output = tmp_path / "output"; output.mkdir(); _source_manifest(tmp_path / "source_manifest.json")
     shards = output / "shards"; shards.mkdir()
     cfg = {"_pipeline_config_sha256": "a" * 64, "pipeline": {"output_dir": str(output)}}
