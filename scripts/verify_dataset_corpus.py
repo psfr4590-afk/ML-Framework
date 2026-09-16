@@ -55,7 +55,7 @@ def main() -> int:
     reasons: dict[str, int] = {}
 
     with Path(args.input).open("r", encoding="utf-8") as handle:
-        for line_no, line in enumerate(handle, 1):
+        for _line_no, line in enumerate(handle, 1):
             if not line.strip():
                 continue
             rows += 1
