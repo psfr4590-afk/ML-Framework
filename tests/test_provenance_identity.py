@@ -42,6 +42,13 @@ def test_source_definition_hashes_include_seed_urls():
     assert paths["seed_urls"].is_file()
 
 
+def test_source_definition_paths_include_dataset_profile_catalog():
+    cfg = _load_config("pipeline_config.dataset.yaml")
+    paths = _source_definition_paths(cfg, ROOT)
+    assert paths["dataset_profiles"] == (ROOT / "config" / "dataset_profiles.yaml").resolve()
+    assert paths["dataset_profiles"].is_file()
+
+
 def test_source_definition_paths_bind_to_selected_config():
     cfg = _load_config("pipeline_config.smoke.yaml")
     paths = _source_definition_paths(cfg, ROOT)
@@ -95,6 +102,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
     assert data["retrieval_started_at"]
     assert data["retrieval_completed_at"]
     assert data["source_definition_files"]["pipeline_config"]["sha256"]
+    assert data["source_definition_files"]["dataset_profiles"]["sha256"]
     assert data["sources"]
     assert {source["kind"] for source in data["sources"]} == {"web", "github", "arxiv", "huggingface", "google"}
     assert {source["dataset_group"] for source in data["sources"]} == {"swe_cs_systems"}
@@ -143,6 +151,24 @@ def test_source_manifest_validation_rejects_changed_definition_hash(tmp_path):
     )
     data = json.loads(target.read_text(encoding="utf-8"))
     data["source_definition_files"]["dataset_groups"]["sha256"] = "0" * 64
+    target.write_text(json.dumps(data), encoding="utf-8")
+    assert not _source_manifest_is_valid(target, "swe_cs_systems", paths)
+
+
+def test_source_manifest_validation_rejects_changed_dataset_profile_catalog(tmp_path):
+    cfg = _load_config("pipeline_config.dataset.yaml")
+    paths = _source_definition_paths(cfg, ROOT)
+    target = tmp_path / "source_manifest.json"
+    _write_source_manifest(
+        target,
+        cfg,
+        paths,
+        selected_group_id="swe_cs_systems",
+        retrieval_started_at="2026-01-01T00:00:00+00:00",
+        retrieval_completed_at="2026-01-01T00:01:00+00:00",
+    )
+    data = json.loads(target.read_text(encoding="utf-8"))
+    data["source_definition_files"]["dataset_profiles"]["sha256"] = "0" * 64
     target.write_text(json.dumps(data), encoding="utf-8")
     assert not _source_manifest_is_valid(target, "swe_cs_systems", paths)
 
