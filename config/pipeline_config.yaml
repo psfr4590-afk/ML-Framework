@@ -1,6 +1,5 @@
 # Canonical safe starter configuration.
-# Dataset sessions use config/dataset_groups.yaml so Command Center-seeded datasets
-# resolve against the same production group definitions used by the dataset store.
+# Use config/pipeline_config.full.yaml for the full production-scale profile.
 pipeline:
   name: "pretrain-v1-starter"
   model_name: "pretrain-starter"
@@ -30,7 +29,7 @@ crawl:
   max_content_bytes: 1000000
   max_redirects: 2
   fail_on_malformed_jsonl: true
-  dataset_groups_file: "config/dataset_groups.yaml"
+  dataset_groups_file: "config/dataset_groups.smoke.yaml"
   source_weights_file: "config/source_weights.yaml"
   sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
   web:
