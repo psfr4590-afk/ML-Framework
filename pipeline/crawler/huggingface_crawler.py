@@ -45,9 +45,10 @@ class HuggingFaceCrawler(BaseCrawler):
                 continue
 
             dataset_id = str(definition.get("repo", "")).strip()
-            if not dataset_id:
+            revision = str(definition.get("revision", "")).strip()
+            if not dataset_id or not revision:
                 self.stats["skipped"] += 1
-                log.warning("Hugging Face dataset definition is missing repo")
+                log.warning("Hugging Face dataset definition requires repo and revision")
                 continue
 
             split = str(definition.get("split", "train"))
@@ -57,7 +58,7 @@ class HuggingFaceCrawler(BaseCrawler):
             if max_docs == 0:
                 continue
 
-            kwargs = {"split": split, "streaming": True}
+            kwargs = {"split": split, "streaming": True, "revision": revision}
             if config:
                 kwargs["name"] = str(config)
             if self.token:
@@ -77,7 +78,7 @@ class HuggingFaceCrawler(BaseCrawler):
                         continue
                     self.stats["fetched"] += 1
                     doc = Document(
-                        doc_id=f"hf:{dataset_id}:{split}:{index}",
+                        doc_id=f"hf:{dataset_id}:{revision}:{split}:{index}",
                         url=f"https://huggingface.co/datasets/{dataset_id}",
                         source="huggingface",
                         text=text,
@@ -87,10 +88,21 @@ class HuggingFaceCrawler(BaseCrawler):
                         domain="huggingface.co",
                         meta={
                             "dataset": dataset_id,
+                            "revision": revision,
                             "config": config,
                             "split": split,
                             "text_field": text_field,
                             "row_index": index,
+                            "source_identity": {
+                                "type": "huggingface_dataset_row",
+                                "repo": dataset_id,
+                                "revision": revision,
+                                "config": config,
+                                "split": split,
+                                "row_index": index,
+                            },
+                            "rights_status": "review_required",
+                            "license_status": "unknown",
                         },
                     )
                     if self.weight_lookup:
@@ -98,7 +110,7 @@ class HuggingFaceCrawler(BaseCrawler):
                     yield doc
             except Exception as exc:  # dataset backends raise varied provider-specific exceptions
                 self.stats["errors"] += 1
-                log.warning("Hugging Face dataset crawl failed for %s: %s", dataset_id, exc)
+                log.warning("Hugging Face dataset crawl failed for %s@%s: %s", dataset_id, revision, exc)
 
 
 __all__ = ["HuggingFaceCrawler"]
