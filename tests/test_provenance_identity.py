@@ -14,6 +14,19 @@ from pipeline.orchestrator import (
 
 ROOT = Path(__file__).resolve().parents[1]
 
+EXPECTED_GROUPS = {
+    "swe_cs_systems",
+    "ai_ml_cybersec_dataeng",
+    "sci_reasoning_forensics_formal",
+    "domain_finance_bio_robotics",
+    "math_statistics_optimization",
+    "physics_chemistry_materials",
+    "biomedical_health_science",
+    "law_compliance_governance",
+    "linguistics_information_retrieval",
+    "climate_energy_geospatial",
+}
+
 
 def _load_config(name: str) -> dict:
     path = ROOT / "config" / name
@@ -49,12 +62,19 @@ def test_dataset_session_config_binds_to_canonical_production_groups():
     }
     groups = yaml.safe_load(paths["dataset_groups"].read_text(encoding="utf-8"))["dataset_groups"]
     group_ids = {str(group["id"]) for group in groups}
-    assert group_ids == {
-        "swe_cs_systems",
-        "ai_ml_cybersec_dataeng",
-        "sci_reasoning_forensics_formal",
-        "domain_finance_bio_robotics",
-    }
+    assert group_ids == EXPECTED_GROUPS
+    assert len(groups) == 10
+
+
+def test_dataset_profiles_schema2_bind_numeric_ids_to_canonical_groups():
+    path = ROOT / "config" / "dataset_profiles.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert data["schema"] == 2
+    profiles = data["dataset_profiles"]
+    assert len(profiles) == 10
+    assert [item["dataset_id"] for item in profiles] == list(range(1, 11))
+    assert {item["group_id"] for item in profiles} == EXPECTED_GROUPS
+    assert len({item["group_id"] for item in profiles}) == len(profiles)
 
 
 def test_source_manifest_records_complete_release_metadata(tmp_path):
@@ -99,12 +119,7 @@ def test_source_manifest_all_groups_preserves_group_identity(tmp_path):
     data = json.loads(target.read_text(encoding="utf-8"))
     assert data["dataset_group"] == "all"
     groups = {source["dataset_group"] for source in data["sources"]}
-    assert groups == {
-        "swe_cs_systems",
-        "ai_ml_cybersec_dataeng",
-        "sci_reasoning_forensics_formal",
-        "domain_finance_bio_robotics",
-    }
+    assert groups == EXPECTED_GROUPS
     assert _source_manifest_is_valid(target, "all", paths)
 
 
