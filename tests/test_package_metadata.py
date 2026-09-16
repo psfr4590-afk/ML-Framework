@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 _RUNTIME_REQUIREMENTS = {
+    "sentence-transformers",
+    "faiss-cpu",
     "pyyaml",
     "requests",
     "beautifulsoup4",

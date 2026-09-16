@@ -146,7 +146,9 @@ def test_stream_flushes_final_partial_buffer(monkeypatch):
 
 
 def test_embedding_stream_with_faiss(monkeypatch):
+    faiss = pytest.importorskip("faiss")
     monkeypatch.setattr(mod, "ST_AVAILABLE", True)
+    monkeypatch.setattr(mod, "faiss", faiss)
     monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
 
     deduper = SemanticDeduplicator(

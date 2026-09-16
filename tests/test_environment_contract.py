@@ -100,13 +100,10 @@ def test_runtime_requirements_include_command_center_security_dependencies():
         assert package in requirements
 
 
-def test_semantic_acceleration_is_optional_for_termux():
+def test_semantic_acceleration_is_required_for_runtime():
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    optional = (ROOT / "requirements-optional.txt").read_text(encoding="utf-8")
-    assert "sentence-transformers" not in requirements
-    assert "faiss-cpu" not in requirements
-    assert "sentence-transformers" in optional
-    assert "faiss-cpu" in optional
+    assert "sentence-transformers" in requirements
+    assert "faiss-cpu" in requirements
 
 
 def test_native_bootstrap_has_platform_specific_build_profiles():
