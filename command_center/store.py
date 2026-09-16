@@ -90,13 +90,15 @@ class DatasetStore:
         return self.list()
 
     def update(self, did, **changes):
-        d = self.get(did)
-        if not d: raise KeyError(did)
-        d.update(changes); d["updated_at"] = now(); atomic_json(self.path(did) / "dataset.json", d); return d
+        with LOCK:
+            d = self.get(did)
+            if not d: raise KeyError(did)
+            d.update(changes); d["updated_at"] = now(); atomic_json(self.path(did) / "dataset.json", d); return d
 
     def event(self, did, event, data=None):
         item = {"ts": now(), "event": event, "data": data or {}}
-        with (self.path(did) / "events.jsonl").open("a", encoding="utf-8") as f: f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        with LOCK:
+            with (self.path(did) / "events.jsonl").open("a", encoding="utf-8") as f: f.write(json.dumps(item, ensure_ascii=False) + "\n")
         return item
 
     def tail_events(self, did, limit=150):
@@ -108,39 +110,41 @@ class DatasetStore:
         except (OSError, json.JSONDecodeError): return []
 
     def refresh_stats(self, did):
-        root = self.path(did); files = bytes_ = docs = words = 0
-        try:
-            for dirpath, dirnames, filenames in os.walk(root):
-                dirnames[:] = [d for d in dirnames if d not in (".git", ".runtime")]
-                files += len(filenames)
-                for filename in filenames:
-                    try: bytes_ += os.path.getsize(os.path.join(dirpath, filename))
-                    except OSError: pass
-        except OSError: pass
-        candidates = (root / "scratch" / "04_weighted.jsonl", root / "scratch" / "03_deduped.jsonl", root / "scratch" / "02_cleaned.jsonl", root / "scratch" / "01_crawled.jsonl")
-        for c in candidates:
-            if not c.exists(): continue
+        with LOCK:
+            root = self.path(did); files = bytes_ = docs = words = 0
             try:
-                with c.open(encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line: continue
-                        try:
-                            data = json.loads(line); docs += 1; text = str(data.get("text", "")); words += len(text.split()) if text else 0
-                        except (json.JSONDecodeError, ValueError): pass
-                break
+                for dirpath, dirnames, filenames in os.walk(root):
+                    dirnames[:] = [d for d in dirnames if d not in (".git", ".runtime")]
+                    files += len(filenames)
+                    for filename in filenames:
+                        try: bytes_ += os.path.getsize(os.path.join(dirpath, filename))
+                        except OSError: pass
             except OSError: pass
-        d = self.get(did)
-        if d:
-            d["stats"] = {**d.get("stats", {}), "files": files, "bytes": bytes_, "documents": docs, "words": words}; d["updated_at"] = now(); atomic_json(root / "dataset.json", d)
+            candidates = (root / "scratch" / "04_weighted.jsonl", root / "scratch" / "03_deduped.jsonl", root / "scratch" / "02_cleaned.jsonl", root / "scratch" / "01_crawled.jsonl")
+            for c in candidates:
+                if not c.exists(): continue
+                try:
+                    with c.open(encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line: continue
+                            try:
+                                data = json.loads(line); docs += 1; text = str(data.get("text", "")); words += len(text.split()) if text else 0
+                            except (json.JSONDecodeError, ValueError): pass
+                    break
+                except OSError: pass
+            d = self.get(did)
+            if d:
+                d["stats"] = {**d.get("stats", {}), "files": files, "bytes": bytes_, "documents": docs, "words": words}; d["updated_at"] = now(); atomic_json(root / "dataset.json", d)
 
     def ingest_path(self, did, source: Path):
-        source = source.resolve(); root = self.path(did); dest = root / "raw"
-        if not source.exists(): raise FileNotFoundError(source)
-        paths = [source] if source.is_file() else [p for p in source.rglob("*") if p.is_file()]
-        for p in paths:
-            rel = p.name if source.is_file() else p.relative_to(source).as_posix(); target = dest / rel; target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(p, target)
-        stages = self.get(did)["stages"]; stages["crawl"] = "complete"; self.update(did, status="COLLECTED", stages=stages); self.refresh_stats(did); self.event(did, "ingest.completed", {"files": len(paths)})
+        with LOCK:
+            source = source.resolve(); root = self.path(did); dest = root / "raw"
+            if not source.exists(): raise FileNotFoundError(source)
+            paths = [source] if source.is_file() else [p for p in source.rglob("*") if p.is_file()]
+            for p in paths:
+                rel = p.name if source.is_file() else p.relative_to(source).as_posix(); target = dest / rel; target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(p, target)
+            stages = self.get(did)["stages"]; stages["crawl"] = "complete"; self.update(did, status="COLLECTED", stages=stages); self.refresh_stats(did); self.event(did, "ingest.completed", {"files": len(paths)})
 
     def _verified_stage(self, stage, paths):
         paths = [p for p in paths if p is not None]
@@ -171,21 +175,27 @@ class DatasetStore:
         return "pending"
 
     def refresh_pipeline_state(self, did):
-        d = self.get(did)
-        if not d: return None
-        self.refresh_stats(did); d = self.get(did); root = self.path(did); out = root / "output"; scratch = root / "scratch"
-        checks = {"crawl": list(scratch.glob("01_crawled*.jsonl")), "clean": [p for p in [scratch / "02_cleaned.jsonl"] if p.exists()], "dedup": [p for p in [scratch / "03_deduped.jsonl"] if p.exists()], "weight": [p for p in [scratch / "04_weighted.jsonl"] if p.exists()], "tokenize": [p for p in [out / "tokenizer" / "tokenizer.json"] if p.exists()], "shard": list((out / "shards").glob("shard_*.bin")), "train": list((out / "checkpoints").glob("ckpt_final_*.pt")), "export": [p for p in [out / "gguf" / "export_manifest.json"] if p.exists()]}
-        states = {s: self._verified_stage(s, checks[s]) for s in STAGES}
-        for s, state in states.items():
-            if d["stages"].get(s) != "running": d["stages"][s] = state
-        if any(v == "corrupt" for v in states.values()): d["status"] = "CORRUPT"
-        elif any(v == "stale" for v in states.values()): d["status"] = "STALE"
-        elif states["export"] == "complete": d["status"] = "COMPLETE"
-        elif states["train"] == "complete": d["status"] = "TRAINED"
-        elif any(v == "running" for v in d["stages"].values()): d["status"] = "RUNNING"
-        elif any(v == "complete" for v in states.values()): d["status"] = "IN_PROGRESS"
-        else: d["status"] = "NEW"
-        atomic_json(root / "dataset.json", d); return d
+        with LOCK:
+            d = self.get(did)
+            if not d: return None
+            self.refresh_stats(did); d = self.get(did); root = self.path(did); out = root / "output"; scratch = root / "scratch"
+            checks = {"crawl": list(scratch.glob("01_crawled*.jsonl")), "clean": [p for p in [scratch / "02_cleaned.jsonl"] if p.exists()], "dedup": [p for p in [scratch / "03_deduped.jsonl"] if p.exists()], "weight": [p for p in [scratch / "04_weighted.jsonl"] if p.exists()], "tokenize": [p for p in [out / "tokenizer" / "tokenizer.json"] if p.exists()], "shard": list((out / "shards").glob("shard_*.bin")), "train": list((out / "checkpoints").glob("ckpt_final_*.pt")), "export": [p for p in [out / "gguf" / "export_manifest.json"] if p.exists()]}
+            states = {s: self._verified_stage(s, checks[s]) for s in STAGES}
+            stages = d.get("stages")
+            if not isinstance(stages, dict):
+                d["status"] = "CORRUPT"
+                d["stages"] = {s: "pending" for s in STAGES}
+            else:
+                for s, state in states.items():
+                    if stages.get(s) != "running": stages[s] = state
+                if any(v == "corrupt" for v in states.values()): d["status"] = "CORRUPT"
+                elif any(v == "stale" for v in states.values()): d["status"] = "STALE"
+                elif states["export"] == "complete": d["status"] = "COMPLETE"
+                elif states["train"] == "complete": d["status"] = "TRAINED"
+                elif any(v == "running" for v in stages.values()): d["status"] = "RUNNING"
+                elif any(v == "complete" for v in states.values()): d["status"] = "IN_PROGRESS"
+                else: d["status"] = "NEW"
+            atomic_json(root / "dataset.json", d); return d
 
     def crawl_stats(self, did): return self._json_or_empty(self.path(did) / "scratch" / "crawl_stats.json")
     def crawl_domains(self, did): return self._json_or_empty(self.path(did) / "scratch" / "crawl_domains.json")
