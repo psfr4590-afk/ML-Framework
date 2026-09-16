@@ -86,10 +86,8 @@ class DatasetStore:
         """Efficiently read last N events from JSONL file without loading entire file."""
         p = self.path(did) / "events.jsonl"
         if not p.exists(): return []
-        
         try:
             from collections import deque
-            # Use deque with maxlen to keep only the last N lines efficiently
             with p.open(encoding="utf-8", errors="replace") as f:
                 return list(deque((json.loads(x) for x in f if x.strip()), maxlen=limit))
         except (OSError, json.JSONDecodeError):
@@ -99,11 +97,8 @@ class DatasetStore:
         """Efficiently compute dataset statistics with streaming JSON parsing."""
         root = self.path(did)
         files = bytes_ = docs = words = 0
-        
-        # Count files and bytes using os.walk for efficiency
         try:
             for dirpath, dirnames, filenames in os.walk(root):
-                # Skip .git and .runtime directories
                 dirnames[:] = [d for d in dirnames if d not in (".git", ".runtime")]
                 files += len(filenames)
                 for filename in filenames:
@@ -115,7 +110,6 @@ class DatasetStore:
         except OSError:
             pass
 
-        # Stream parse JSONL files to count docs and words
         for c in (root / "scratch" / "04_weighted.jsonl", root / "scratch" / "03_deduped.jsonl", root / "scratch" / "02_cleaned.jsonl"):
             if c.exists():
                 try:
@@ -132,7 +126,6 @@ class DatasetStore:
                                     words += len(text.split())
                             except (json.JSONDecodeError, ValueError):
                                 pass
-                    # Only process the first valid file
                     break
                 except OSError:
                     pass
@@ -162,18 +155,14 @@ class DatasetStore:
             try:
                 data = json.loads(marker.read_text(encoding="utf-8")); files = data.get("files", [])
                 if not files: return "corrupt"
-                # Optimize: check file existence and size first, only verify SHA if needed
                 for item in files:
                     shard_path = marker.parent / item["name"]
-                    if not shard_path.is_file():
-                        return "corrupt"
+                    if not shard_path.is_file(): return "corrupt"
                     try:
                         actual_size = shard_path.stat().st_size
-                        if actual_size != int(item["size"]):
-                            return "corrupt"
+                        if actual_size != int(item["size"]): return "corrupt"
                     except OSError:
                         return "corrupt"
-                # Only verify SHA if size check passed
                 if all(sha256_file(marker.parent / item["name"]) == item["sha256"] for item in files):
                     return "complete"
                 return "corrupt"
@@ -197,11 +186,14 @@ class DatasetStore:
         if not d: return None
         self.refresh_stats(did); d = self.get(did); root = self.path(did); out = root / "output"; scratch = root / "scratch"
         checks = {
-            "crawl": list(scratch.glob("01_crawled*.jsonl")), "clean": [scratch / "02_cleaned.jsonl"],
-            "dedup": [scratch / "03_deduped.jsonl"], "weight": [scratch / "04_weighted.jsonl"],
-            "tokenize": [out / "tokenizer" / "tokenizer.json"], "shard": list((out / "shards").glob("shard_*.bin")),
+            "crawl": list(scratch.glob("01_crawled*.jsonl")),
+            "clean": [p for p in [scratch / "02_cleaned.jsonl"] if p.exists()],
+            "dedup": [p for p in [scratch / "03_deduped.jsonl"] if p.exists()],
+            "weight": [p for p in [scratch / "04_weighted.jsonl"] if p.exists()],
+            "tokenize": [p for p in [out / "tokenizer" / "tokenizer.json"] if p.exists()],
+            "shard": list((out / "shards").glob("shard_*.bin")),
             "train": list((out / "checkpoints").glob("ckpt_final_*.pt")),
-            "export": [out / "gguf" / "export_manifest.json"],
+            "export": [p for p in [out / "gguf" / "export_manifest.json"] if p.exists()],
         }
         states = {s: self._verified_stage(s, checks[s]) for s in STAGES}
         for s, state in states.items():
@@ -212,7 +204,7 @@ class DatasetStore:
         elif states["train"] == "complete": d["status"] = "TRAINED"
         elif any(v == "running" for v in d["stages"].values()): d["status"] = "RUNNING"
         elif any(v == "complete" for v in states.values()): d["status"] = "IN_PROGRESS"
-        else: d["status"] = d.get("status", "NEW")
+        else: d["status"] = "NEW"
         atomic_json(root / "dataset.json", d); return d
 
     def crawl_stats(self, did): return self._json_or_empty(self.path(did) / "scratch" / "crawl_stats.json")
