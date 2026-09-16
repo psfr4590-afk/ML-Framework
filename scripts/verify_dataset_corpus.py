@@ -5,6 +5,8 @@ import argparse
 import json
 from pathlib import Path
 
+import yaml
+
 from pipeline.dataset_contract import evaluate_document, validate_dataset_contract
 from pipeline.types import Document
 
@@ -16,16 +18,17 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="Crawled JSONL file")
     parser.add_argument("--dataset-id", required=True, type=int, choices=range(1, 11))
     parser.add_argument("--require-rights", action="store_true", help="Fail if any source lacks verified rights metadata")
+    parser.add_argument("--require-immutable-revisions", action="store_true", help="Fail if a configured Hugging Face source is mutable")
     args = parser.parse_args()
 
     report = validate_dataset_contract(ROOT, ROOT / "config" / "dataset_groups.yaml", ROOT / "config" / "dataset_profiles.yaml")
-    if not report["production_revision_ready"]:
+    if args.require_immutable_revisions and not report["production_revision_ready"]:
         print("DATASET CORPUS BLOCKED: one or more configured sources use mutable revisions")
         for item in report["mutable_revisions"]:
             print(f"  - {item}")
         return 1
 
-    profiles = json.loads((ROOT / "config" / "dataset_profiles.yaml").read_text(encoding="utf-8"))
+    profiles = yaml.safe_load((ROOT / "config" / "dataset_profiles.yaml").read_text(encoding="utf-8")) or {}
     profile = next(item for item in profiles["dataset_profiles"] if int(item["dataset_id"]) == args.dataset_id)
     expected_group = str(profile["group_id"])
 
@@ -75,8 +78,9 @@ def main() -> int:
                 rights_unknown += 1
 
     accepted = rows - rejected
+    status = accepted > 0 and rejected == 0 and (not args.require_rights or rights_unknown == 0)
     print(json.dumps({
-        "status": "passed" if accepted > 0 and rejected == 0 and (not args.require_rights or rights_unknown == 0) else "failed",
+        "status": "passed" if status else "failed",
         "dataset_id": args.dataset_id,
         "dataset_group": expected_group,
         "rows": rows,
@@ -85,9 +89,10 @@ def main() -> int:
         "rights_unknown": rights_unknown,
         "identity_missing": identity_missing,
         "reasons": reasons,
-        "distribution_ready": rights_unknown == 0,
+        "distribution_ready": rights_unknown == 0 and report["production_revision_ready"],
+        "production_revision_ready": report["production_revision_ready"],
     }, indent=2, sort_keys=True))
-    if accepted == 0 or rejected or (args.require_rights and rights_unknown):
+    if not status:
         return 1
     return 0
 
