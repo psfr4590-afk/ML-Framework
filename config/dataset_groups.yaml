@@ -9,7 +9,7 @@ dataset_groups:
     arxiv: {categories: [cs.SE, cs.OS, cs.DC, cs.AR, cs.DS, cs.PL], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "codeparrot/codeparrot-clean", revision: "5257f5f2da411e532b65cb44c8da2c37965e4096", split: "train", text_field: "content", max_docs: 12000}
+        - {repo: "codeparrot/codeparrot-clean", revision: "5257f5f2da411e532b65cb44c8da2c37965e4096", split: "train", text_field: "content", max_docs: 12000, required: true, require_license: true}
     web: {seed_urls: ["https://docs.python.org/3/", "https://en.wikipedia.org/wiki/Systems_engineering"]}
 
   - id: "ai_ml_cybersec_dataeng"
