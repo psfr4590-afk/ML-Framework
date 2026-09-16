@@ -27,16 +27,22 @@ def atomic_json(path, data):
 
 class DatasetStore:
     def __init__(self):
-        DATASETS.mkdir(parents=True, exist_ok=True)
+        # Bind the dataset root when the store is constructed. The module-level
+        # DATASETS setting is configuration, not mutable runtime state. Keeping
+        # a stable root prevents background runner threads from switching roots
+        # underneath an existing store when tests or an embedding application
+        # temporarily replace the module setting.
+        self._datasets = DATASETS
+        self._datasets.mkdir(parents=True, exist_ok=True)
         validate_profile_catalog()
 
     def path(self, did):
         did = int(did)
         if did <= 0: raise ValueError("dataset_id must be a positive integer")
-        return DATASETS / f"dataset_{did:03d}"
+        return self._datasets / f"dataset_{did:03d}"
 
     def output_path(self, did): return self.path(did) / "output"
-    def _ids(self): return sorted(int(p.name[8:]) for p in DATASETS.glob("dataset_*") if p.is_dir() and p.name[8:].isdigit())
+    def _ids(self): return sorted(int(p.name[8:]) for p in self._datasets.glob("dataset_*") if p.is_dir() and p.name[8:].isdigit())
 
     def next_id(self):
         profile_ids = [int(p["dataset_id"]) for p in validate_profile_catalog().values()]
