@@ -1,6 +1,6 @@
 # Dataset-session configuration.
-# This keeps the safe starter runtime profile while binding seeded Command Center
-# datasets to the canonical production dataset-group definitions.
+# Dataset-group definitions are authoritative for source selection; this runtime
+# profile binds seeded Command Center datasets to the canonical production groups.
 pipeline:
   name: "pretrain-v1-dataset-session"
   model_name: "pretrain-starter"
@@ -32,7 +32,9 @@ crawl:
   fail_on_malformed_jsonl: true
   dataset_groups_file: "config/dataset_groups.yaml"
   source_weights_file: "config/source_weights.yaml"
-  sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
+  # Kept aligned with the production group contract. Individual dataset groups
+  # remain authoritative when their own `sources` mapping is present.
+  sources: {web: true, github: true, arxiv: true, huggingface: true, google: true}
   web:
     seed_urls_file: "config/seed_urls.txt"
     seed_urls: ["https://docs.python.org/3/tutorial/"]
