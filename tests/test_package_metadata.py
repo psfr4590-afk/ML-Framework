@@ -32,6 +32,7 @@ _RUNTIME_REQUIREMENTS = {
     "pydantic",
     "httpx",
     "cryptography",
+    "pyopenssl",
 }
 
 _VERIFICATION_REQUIREMENTS = {"pytest", "pytest-cov", "ruff"}
