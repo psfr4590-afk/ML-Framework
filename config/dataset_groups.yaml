@@ -1,18 +1,15 @@
 dataset_groups:
   - id: "swe_cs_systems"
     name: "Software Engineering + Computer Science + Systems Engineering"
-    sources: {web: true, github: true, arxiv: true, huggingface: true, google: true}
-    github:
-      min_stars: 100
-      languages: [C, "C++", Rust, Go, Python, Zig, Java]
-      topics: [operating-systems, compilers, distributed-systems, databases, networking, systems-programming, software-architecture, algorithms, data-structures]
-      max_repos: 300
+    # Production acquisition is intentionally limited to curated, reproducible sources.
+    # GitHub search and Google search are excluded because unauthenticated provider
+    # quotas can silently collapse a session into partial data. Web and arXiv remain
+    # bounded, pre-seeded supplementary sources.
+    sources: {web: true, github: false, arxiv: true, huggingface: true, google: false}
     arxiv: {categories: [cs.SE, cs.OS, cs.DC, cs.AR, cs.DS, cs.PL], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "bigcode/the-stack-dedup", revision: "v1.2", split: "train", text_field: "content", max_docs: 15000}
-        - {repo: "codeparrot/github-code", revision: "v1.1", split: "train", text_field: "code", max_docs: 10000}
-    google: {queries: ["distributed systems consensus algorithms explained", "operating system kernel design principles", "software architecture patterns case study"]}
+        - {repo: "codeparrot/codeparrot-clean", revision: "5257f5f2da411e532b65cb44c8da2c37965e4096", split: "train", text_field: "content", max_docs: 12000}
     web: {seed_urls: ["https://docs.python.org/3/", "https://en.wikipedia.org/wiki/Systems_engineering"]}
 
   - id: "ai_ml_cybersec_dataeng"
