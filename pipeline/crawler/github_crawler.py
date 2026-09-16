@@ -101,7 +101,8 @@ class GitHubCrawler(BaseCrawler):
                 )
                 if self.weight_lookup:
                     doc = self._apply_weights(doc)
-                yield doc
+                if doc is not None:
+                    yield doc
 
 
 __all__ = ["GitHubCrawler"]
