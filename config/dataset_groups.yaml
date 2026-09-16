@@ -1,18 +1,15 @@
 dataset_groups:
   - id: "swe_cs_systems"
     name: "Software Engineering + Computer Science + Systems Engineering"
-    sources: {web: true, github: true, arxiv: true, huggingface: true, google: true}
-    github:
-      min_stars: 100
-      languages: [C, "C++", Rust, Go, Python, Zig, Java]
-      topics: [operating-systems, compilers, distributed-systems, databases, networking, systems-programming, software-architecture, algorithms, data-structures]
-      max_repos: 300
+    # Production acquisition is intentionally limited to curated, reproducible sources.
+    # GitHub search and Google search are excluded because unauthenticated provider
+    # quotas can silently collapse a session into partial data. Web and arXiv remain
+    # bounded, pre-seeded supplementary sources.
+    sources: {web: true, github: false, arxiv: true, huggingface: true, google: false}
     arxiv: {categories: [cs.SE, cs.OS, cs.DC, cs.AR, cs.DS, cs.PL], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "bigcode/the-stack-dedup", split: "train", text_field: "content", max_docs: 15000}
-        - {repo: "codeparrot/github-code", split: "train", text_field: "code", max_docs: 10000}
-    google: {queries: ["distributed systems consensus algorithms explained", "operating system kernel design principles", "software architecture patterns case study"]}
+        - {repo: "codeparrot/codeparrot-clean", revision: "5257f5f2da411e532b65cb44c8da2c37965e4096", split: "train", text_field: "content", max_docs: 12000, required: true, require_license: true}
     web: {seed_urls: ["https://docs.python.org/3/", "https://en.wikipedia.org/wiki/Systems_engineering"]}
 
   - id: "ai_ml_cybersec_dataeng"
@@ -22,8 +19,8 @@ dataset_groups:
     arxiv: {categories: [cs.LG, cs.AI, cs.CL, cs.CR, cs.DB], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "HuggingFaceFW/fineweb-edu", config: "sample-10BT", split: "train", text_field: "text", max_docs: 10000}
-        - {repo: "glaiveai/glaive-function-calling-v2", split: "train", text_field: "chat", max_docs: 5000}
+        - {repo: "HuggingFaceFW/fineweb-edu", revision: "87f0914", config: "sample-10BT", split: "train", text_field: "text", max_docs: 10000}
+        - {repo: "glaiveai/glaive-function-calling-v2", revision: "e7f4b64", split: "train", text_field: "chat", max_docs: 5000}
     google: {queries: ["machine learning system design interview", "common web application vulnerabilities explained", "data engineering pipeline best practices"]}
     web: {seed_urls: ["https://huggingface.co/blog", "https://owasp.org/www-project-top-ten/"]}
 
@@ -32,7 +29,9 @@ dataset_groups:
     sources: {web: true, github: true, arxiv: true, huggingface: true, google: true}
     github: {min_stars: 50, languages: [Python, Coq, Lean, Haskell, "C++"], topics: [formal-verification, theorem-proving, model-checking, digital-forensics, incident-response, reverse-engineering], max_repos: 200}
     arxiv: {categories: [cs.LO, cs.PL, cs.CR, math.ST, stat.ML, physics.data-an], max_results: 200}
-    huggingface: {datasets: [{repo: "qiaojin/PubMedQA", config: "pqa_labeled", split: "train", text_field: "question", max_docs: 5000}]}
+    huggingface:
+      datasets:
+        - {repo: "qiaojin/PubMedQA", revision: "9001f28", config: "pqa_labeled", split: "train", text_fields: [question, context, long_answer, final_decision], max_docs: 5000}
     google: {queries: ["formal verification theorem proving tutorial", "digital forensics investigation methodology", "scientific reasoning hypothesis testing methods"]}
     web: {seed_urls: ["https://en.wikipedia.org/wiki/Formal_methods", "https://en.wikipedia.org/wiki/Digital_forensics"]}
 
@@ -41,7 +40,7 @@ dataset_groups:
     sources: {web: true, github: true, arxiv: true, huggingface: true, google: true}
     github: {min_stars: 50, languages: [Python, "C++"], topics: [quantitative-finance, algorithmic-trading, bioinformatics, computational-biology, robotics, ros, control-systems], max_repos: 200}
     arxiv: {categories: [q-fin.GN, q-bio.QM, cs.RO, eess.SY], max_results: 200}
-    huggingface: {datasets: [{repo: "gbharti/finance-alpaca", split: "train", text_field: "text", max_docs: 5000}]}
+    huggingface: {datasets: [{repo: "gbharti/finance-alpaca", revision: "c88d3d5", split: "train", text_field: "text", max_docs: 5000}]}
     google: {queries: ["quantitative finance risk modeling introduction", "computational biology genomics pipeline overview", "robotics control systems fundamentals"]}
     web: {seed_urls: ["https://en.wikipedia.org/wiki/Computational_biology", "https://en.wikipedia.org/wiki/Robotics"]}
 
@@ -53,10 +52,10 @@ dataset_groups:
       languages: [Python, Julia, R, "C++", Fortran]
       topics: [optimization, numerical-analysis, scientific-computing, statistics, probability, linear-algebra, symbolic-math, convex-optimization]
       max_repos: 250
-    arxiv: {categories: [math.OC, math.NA, math.ST, stat.ML, stat.ME, cs.LG], max_results: 250}
+    arxiv: {categories: [math.OC, math.NA, math.ST, stat.ML, stat.ME, cs.LG], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "openai/gsm8k", split: "train", text_field: "question", max_docs: 7500}
+        - {repo: "openai/gsm8k", revision: "740312a", config: "main", split: "train", text_fields: [question, answer], max_docs: 7473}
     google: {queries: ["convex optimization theory tutorial", "probability statistics mathematical foundations", "numerical optimization algorithms explained"]}
     web: {seed_urls: ["https://en.wikipedia.org/wiki/Mathematics", "https://mathworld.wolfram.com/", "https://en.wikipedia.org/wiki/Optimization_(mathematics)"]}
 
@@ -68,7 +67,7 @@ dataset_groups:
       languages: [Python, Fortran, "C++", Julia]
       topics: [computational-physics, quantum-mechanics, molecular-dynamics, computational-chemistry, materials-science, spectroscopy, thermodynamics]
       max_repos: 250
-    arxiv: {categories: [physics, cond-mat, physics.chem-ph, physics.comp-ph, quant-ph, physics.ins-det], max_results: 250}
+    arxiv: {categories: [physics, cond-mat, physics.chem-ph, physics.comp-ph, quant-ph, physics.ins-det], max_results: 200}
     google: {queries: ["quantum mechanics mathematical foundations", "computational chemistry molecular simulation methods", "materials science phase diagrams and characterization"]}
     web: {seed_urls: ["https://en.wikipedia.org/wiki/Physics", "https://en.wikipedia.org/wiki/Chemistry", "https://en.wikipedia.org/wiki/Materials_science"]}
 
@@ -80,10 +79,10 @@ dataset_groups:
       languages: [Python, R, "C++", Julia]
       topics: [bioinformatics, genomics, computational-biology, biomedical-informatics, medical-imaging, proteomics, clinical-data]
       max_repos: 250
-    arxiv: {categories: [q-bio.GN, q-bio.QM, q-bio.BM, q-bio.MN, cs.CV, stat.AP], max_results: 250}
+    arxiv: {categories: [q-bio.GN, q-bio.QM, q-bio.BM, q-bio.MN, cs.CV, stat.AP], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "bigbio/pubmed_qa", split: "train", text_field: "question", max_docs: 5000}
+        - {repo: "bigbio/pubmed_qa", revision: "15578e8", split: "train", text_field: "question", max_docs: 5000}
     google: {queries: ["genomics bioinformatics pipeline methods", "biomedical imaging machine learning methods", "clinical research study design statistics"]}
     web: {seed_urls: ["https://www.ncbi.nlm.nih.gov/books/", "https://www.nih.gov/", "https://www.cdc.gov/"]}
 
@@ -107,10 +106,10 @@ dataset_groups:
       languages: [Python, Rust, C++, Java]
       topics: [natural-language-processing, computational-linguistics, information-retrieval, search, speech-recognition, text-mining, machine-translation]
       max_repos: 250
-    arxiv: {categories: [cs.CL, cs.IR, eess.AS, stat.ML], max_results: 250}
+    arxiv: {categories: [cs.CL, cs.IR, eess.AS, stat.ML], max_results: 200}
     huggingface:
       datasets:
-        - {repo: "sentence-transformers/msmarco", split: "train", text_field: "query", max_docs: 5000}
+        - {repo: "sentence-transformers/msmarco", revision: "2a16a97", config: "queries", split: "train", text_field: "query", max_docs: 5000}
     google: {queries: ["computational linguistics syntax semantics tutorial", "information retrieval ranking algorithms", "speech recognition language modeling fundamentals"]}
     web: {seed_urls: ["https://web.stanford.edu/~jurafsky/slp3/", "https://en.wikipedia.org/wiki/Information_retrieval", "https://en.wikipedia.org/wiki/Linguistics"]}
 
@@ -122,6 +121,6 @@ dataset_groups:
       languages: [Python, R, Julia, C++, Fortran]
       topics: [climate-science, remote-sensing, geospatial, gis, renewable-energy, power-systems, hydrology, earth-observation]
       max_repos: 250
-    arxiv: {categories: [physics.ao-ph, eess.SY, eess.SP, cs.SI, stat.AP], max_results: 250}
+    arxiv: {categories: [physics.ao-ph, eess.SY, eess.SP, cs.SI, stat.AP], max_results: 200}
     google: {queries: ["climate modeling methods and uncertainty", "renewable energy power systems fundamentals", "remote sensing geospatial analysis methods"]}
     web: {seed_urls: ["https://climate.nasa.gov/", "https://www.noaa.gov/", "https://www.usgs.gov/", "https://en.wikipedia.org/wiki/Geographic_information_system"]}

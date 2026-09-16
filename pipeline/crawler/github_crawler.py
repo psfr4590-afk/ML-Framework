@@ -67,22 +67,42 @@ class GitHubCrawler(BaseCrawler):
                 if not url or url in seen or int(repo.get("stargazers_count", 0)) < min_stars:
                     continue
                 seen.add(url)
+                full_name = str(repo.get("full_name", repo.get("id", url)))
+                default_branch = str(repo.get("default_branch", ""))
+                commit = self._request(f"repos/{full_name}/commits/{default_branch}") if default_branch else None
+                commit_sha = str((commit or {}).get("sha", ""))
+                license_info = repo.get("license") or {}
+                license_spdx = str(license_info.get("spdx_id", "")) if isinstance(license_info, dict) else ""
                 text = "\n".join(filter(None, [repo.get("name", ""), repo.get("description", ""), repo.get("topics") and "Topics: " + ", ".join(repo["topics"])]))
                 doc = Document(
-                    doc_id=f"github:{repo.get('full_name', repo.get('id', url))}",
+                    doc_id=f"github:{full_name}@{commit_sha or default_branch}",
                     url=url,
                     source="github",
                     text=text,
-                    title=repo.get("full_name", repo.get("name", "")),
+                    title=full_name,
                     language="en",
                     content_type="documentation",
                     domain="github.com",
                     stars=int(repo.get("stargazers_count", 0)),
-                    meta={"full_name": repo.get("full_name", ""), "default_branch": repo.get("default_branch", ""), "api_url": repo.get("url", "")},
+                    meta={
+                        "full_name": full_name,
+                        "default_branch": default_branch,
+                        "api_url": repo.get("url", ""),
+                        "source_identity": {
+                            "type": "github_repository",
+                            "full_name": full_name,
+                            "default_branch": default_branch,
+                            "commit_sha": commit_sha or None,
+                        },
+                        "license_status": "verified" if license_spdx and license_spdx != "NOASSERTION" else "unknown",
+                        "license": license_spdx or None,
+                        "rights_status": "verified" if license_spdx and license_spdx != "NOASSERTION" else "review_required",
+                    },
                 )
                 if self.weight_lookup:
                     doc = self._apply_weights(doc)
-                yield doc
+                if doc is not None:
+                    yield doc
 
 
 __all__ = ["GitHubCrawler"]

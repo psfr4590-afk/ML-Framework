@@ -83,7 +83,7 @@ shard:
 
 train:
   resume: true
-  allow_cpu_training: true
+  allow_cpu_training: false
   auto_size: true
   target_training_hours: null
   observed_tokens_per_sec: null

@@ -44,15 +44,23 @@ class ArxivCrawler(BaseCrawler):
                 if not url or not summary:
                     self.stats["skipped"] += 1
                     continue
+                arxiv_id = url.rsplit("/", 1)[-1]
+                version = arxiv_id.rsplit("v", 1)[-1] if "v" in arxiv_id and arxiv_id.rsplit("v", 1)[-1].isdigit() else "1"
                 doc = Document(
-                    doc_id=f"arxiv:{url.rsplit('/', 1)[-1]}", url=url, source="arxiv",
+                    doc_id=f"arxiv:{arxiv_id}", url=url, source="arxiv",
                     text=f"Title: {title}\n\n{summary}", title=title,
                     language="en", content_type="research", domain="arxiv.org",
-                    meta={"category": category},
+                    meta={
+                        "category": category,
+                        "source_identity": {"type": "arxiv_paper", "arxiv_id": arxiv_id, "version": version},
+                        "license_status": "unknown",
+                        "rights_status": "review_required",
+                    },
                 )
                 if self.weight_lookup:
                     doc = self._apply_weights(doc)
-                yield doc
+                if doc is not None:
+                    yield doc
 
 
 __all__ = ["ArxivCrawler"]
