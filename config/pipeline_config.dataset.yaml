@@ -7,7 +7,7 @@ pipeline:
   output_dir: "output"
   scratch_dir: "scratch"
   seed: 42
-  resume: false
+  resume: true
 
 stages:
   crawl: true
@@ -17,7 +17,7 @@ stages:
   tokenize: true
   shard: true
   train: true
-  export: false
+  export: true
 
 crawl:
   max_workers: 1
@@ -81,7 +81,7 @@ shard:
   seed: 42
 
 train:
-  resume: false
+  resume: true
   allow_cpu_training: true
   auto_size: true
   target_training_hours: null
