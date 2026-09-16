@@ -31,6 +31,15 @@ class HuggingFaceCrawler(BaseCrawler):
             return value.strip()
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
+    @classmethod
+    def _row_text_fields(cls, row: dict, text_fields: list[str]) -> str:
+        parts: list[str] = []
+        for field in text_fields:
+            value = cls._row_text(row, field)
+            if value:
+                parts.append(f"{field}: {value}")
+        return "\n\n".join(parts)
+
     def crawl(self) -> Iterator[Document]:
         datasets = self.cfg_hf.get("datasets", [])
         if isinstance(datasets, str):
@@ -54,6 +63,15 @@ class HuggingFaceCrawler(BaseCrawler):
             split = str(definition.get("split", "train"))
             config = definition.get("config")
             text_field = str(definition.get("text_field", "text"))
+            raw_text_fields = definition.get("text_fields", [])
+            if isinstance(raw_text_fields, str):
+                raw_text_fields = [raw_text_fields]
+            text_fields = [str(field).strip() for field in raw_text_fields if str(field).strip()]
+            if text_fields:
+                effective_text_field = "+".join(text_fields)
+            else:
+                text_fields = [text_field]
+                effective_text_field = text_field
             max_docs = max(0, int(definition.get("max_docs", 0)))
             if max_docs == 0:
                 continue
@@ -72,7 +90,7 @@ class HuggingFaceCrawler(BaseCrawler):
                     if not isinstance(row, dict):
                         self.stats["skipped"] += 1
                         continue
-                    text = self._row_text(row, text_field)
+                    text = self._row_text_fields(row, text_fields)
                     if not text:
                         self.stats["skipped"] += 1
                         continue
@@ -91,7 +109,8 @@ class HuggingFaceCrawler(BaseCrawler):
                             "revision": revision,
                             "config": config,
                             "split": split,
-                            "text_field": text_field,
+                            "text_field": effective_text_field,
+                            "text_fields": text_fields,
                             "row_index": index,
                             "source_identity": {
                                 "type": "huggingface_dataset_row",
