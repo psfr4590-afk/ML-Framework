@@ -18,7 +18,8 @@ def test_default_runner_and_docs_share_one_starter_profile():
     readme = _read("README.md")
     start_here = _read("docs/development/START_HERE.md")
 
-    assert 'default="config/pipeline_config.yaml"' in runner
+    assert 'DEFAULT_CONFIG = "config/pipeline_config.yaml"' in runner
+    assert 'parser.add_argument("--config", default=DEFAULT_CONFIG' in runner
     assert "python .\\run_pipeline.py --no-resume" in readme
     assert "python3 run_pipeline.py --no-resume" in readme
     assert "python .\\run_pipeline.py --no-resume" in start_here
