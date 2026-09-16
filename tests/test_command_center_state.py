@@ -1,5 +1,17 @@
 
 
+def test_refresh_pipeline_state_keeps_empty_dataset_pending(tmp_path, monkeypatch):
+    import command_center.store as store_module
+
+    monkeypatch.setattr(store_module, "DATASETS", tmp_path)
+    store = store_module.DatasetStore()
+    meta = store.create("empty-state", group_config={"id": "test", "name": "test", "sources": {}})
+
+    state = store.refresh_pipeline_state(meta["id"])
+    assert state["status"] == "NEW"
+    assert all(value == "pending" for value in state["stages"].values())
+
+
 def test_refresh_pipeline_state_rejects_existing_but_unverified_artifact(tmp_path, monkeypatch):
     import command_center.store as store_module
 
