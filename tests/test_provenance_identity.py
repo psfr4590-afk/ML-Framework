@@ -15,24 +15,28 @@ from pipeline.orchestrator import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _load_config(name: str) -> dict:
+    path = ROOT / "config" / name
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    cfg["_pipeline_config_path"] = str(path)
+    return cfg
+
+
 def test_source_definition_hashes_include_seed_urls():
-    cfg = yaml.safe_load((ROOT / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
+    cfg = _load_config("pipeline_config.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     assert "seed_urls" in paths
     assert paths["seed_urls"].is_file()
 
 
 def test_source_definition_paths_bind_to_selected_config():
-    cfg = yaml.safe_load((ROOT / "config" / "pipeline_config.smoke.yaml").read_text(encoding="utf-8"))
-    cfg["_pipeline_config_path"] = str(ROOT / "config" / "pipeline_config.smoke.yaml")
+    cfg = _load_config("pipeline_config.smoke.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     assert paths["pipeline_config"] == (ROOT / "config" / "pipeline_config.smoke.yaml").resolve()
 
 
 def test_source_manifest_records_complete_release_metadata(tmp_path):
-    cfg = yaml.safe_load((ROOT / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
-    cfg["_pipeline_config_path"] = str(ROOT / "config" / "pipeline_config.yaml")
-    cfg["crawl"]["dataset_groups_file"] = "config/dataset_groups.yaml"
+    cfg = _load_config("pipeline_config.full.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     target = tmp_path / "source_manifest.json"
     _write_source_manifest(
@@ -59,8 +63,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
 
 
 def test_source_manifest_all_groups_preserves_group_identity(tmp_path):
-    cfg = yaml.safe_load((ROOT / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
-    cfg["_pipeline_config_path"] = str(ROOT / "config" / "pipeline_config.yaml")
+    cfg = _load_config("pipeline_config.full.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     target = tmp_path / "source_manifest.json"
     _write_source_manifest(target, cfg, paths, selected_group_id="all")
@@ -83,8 +86,7 @@ def test_source_manifest_validation_rejects_incomplete_manifest(tmp_path):
 
 
 def test_source_manifest_validation_rejects_changed_definition_hash(tmp_path):
-    cfg = yaml.safe_load((ROOT / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
-    cfg["_pipeline_config_path"] = str(ROOT / "config" / "pipeline_config.yaml")
+    cfg = _load_config("pipeline_config.full.yaml")
     paths = _source_definition_paths(cfg, ROOT)
     target = tmp_path / "source_manifest.json"
     _write_source_manifest(target, cfg, paths, selected_group_id="swe_cs_systems")
