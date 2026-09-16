@@ -42,6 +42,22 @@ def test_refresh_pipeline_state_accepts_verified_jsonl_artifact(tmp_path, monkey
     assert state["stages"]["clean"] == "complete"
 
 
+def test_refresh_pipeline_state_marks_malformed_stage_state_corrupt(tmp_path, monkeypatch):
+    import command_center.store as store_module
+
+    monkeypatch.setattr(store_module, "DATASETS", tmp_path)
+    store = store_module.DatasetStore()
+    meta = store.create("malformed-state", group_config={"id": "test", "name": "test", "sources": {}})
+    path = store.path(meta["id"]) / "dataset.json"
+    data = store.get(meta["id"])
+    data["stages"] = None
+    path.write_text(__import__("json").dumps(data), encoding="utf-8")
+
+    state = store.refresh_pipeline_state(meta["id"])
+    assert state["status"] == "CORRUPT"
+    assert all(value == "pending" for value in state["stages"].values())
+
+
 def test_start_stage_rejects_second_start_during_thread_start(monkeypatch):
     import command_center.runner as runner
 
