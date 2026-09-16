@@ -83,8 +83,12 @@ def validate_dataset_contract(root: Path, groups_path: Path, profiles_path: Path
                 _require(isinstance(datasets, list) and datasets, f"{group_id}.huggingface.datasets must be non-empty")
                 for item in datasets:
                     _require(isinstance(item, dict), f"{group_id}.huggingface dataset entry must be an object")
-                    for key in ("repo", "revision", "split", "text_field", "max_docs"):
+                    for key in ("repo", "revision", "split", "max_docs"):
                         _require(item.get(key) not in (None, ""), f"{group_id}.huggingface entry missing {key}")
+                    has_text_field = item.get("text_field") not in (None, "")
+                    text_fields = item.get("text_fields")
+                    has_text_fields = isinstance(text_fields, list) and bool(text_fields) and all(str(field).strip() for field in text_fields)
+                    _require(has_text_field or has_text_fields, f"{group_id}.huggingface entry requires text_field or non-empty text_fields")
                     _require(int(item["max_docs"]) > 0, f"{group_id}.huggingface.max_docs must be positive")
                     if str(item["revision"]) in {"main", "master", "HEAD"}:
                         mutable_revisions.append(f"{group_id}:huggingface:{item['repo']}")
