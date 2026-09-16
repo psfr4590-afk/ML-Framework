@@ -270,18 +270,19 @@ def _pip_install(requirements: Path, *extra: str) -> int:
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
 
-def install(torch_channel: str = "cpu") -> int:
+def install(torch_channel: str = "cuda") -> int:
     if not _python_supported():
         print(f"Bootstrap install aborted: {_python_requirement_message()}", file=sys.stderr)
         return 2
-    result = _pip_install(REQUIREMENTS)
+    if torch_channel == "cpu":
+        result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
+    elif torch_channel == "cuda":
+        result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CUDA_TORCH_INDEX)
+    else:
+        result = _pip_install(TORCH_REQUIREMENTS)
     if result != 0:
         return result
-    if torch_channel == "cpu":
-        return _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
-    if torch_channel == "cuda":
-        return _pip_install(TORCH_REQUIREMENTS, "--index-url", CUDA_TORCH_INDEX)
-    return _pip_install(TORCH_REQUIREMENTS)
+    return _pip_install(REQUIREMENTS)
 
 
 def ensure_llamacpp() -> int:
@@ -300,8 +301,8 @@ def main() -> int:
     parser.add_argument(
         "--torch-channel",
         choices=("cpu", "cuda", "default"),
-        default="cpu",
-        help="PyTorch wheel source for --install (default: cpu; use cuda for the official cu128 wheel index)",
+        default="cuda",
+        help="PyTorch wheel source for --install (default: cuda; use cpu for the official CPU wheel index)",
     )
     parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()
