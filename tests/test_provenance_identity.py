@@ -35,6 +35,28 @@ def test_source_definition_paths_bind_to_selected_config():
     assert paths["pipeline_config"] == (ROOT / "config" / "pipeline_config.smoke.yaml").resolve()
 
 
+def test_dataset_session_config_binds_to_canonical_production_groups():
+    cfg = _load_config("pipeline_config.dataset.yaml")
+    paths = _source_definition_paths(cfg, ROOT)
+    assert paths["dataset_groups"] == (ROOT / "config" / "dataset_groups.yaml").resolve()
+    assert paths["dataset_groups"].is_file()
+    assert cfg["crawl"]["sources"] == {
+        "web": True,
+        "github": True,
+        "arxiv": True,
+        "huggingface": True,
+        "google": True,
+    }
+    groups = yaml.safe_load(paths["dataset_groups"].read_text(encoding="utf-8"))["dataset_groups"]
+    group_ids = {str(group["id"]) for group in groups}
+    assert group_ids == {
+        "swe_cs_systems",
+        "ai_ml_cybersec_dataeng",
+        "sci_reasoning_forensics_formal",
+        "domain_finance_bio_robotics",
+    }
+
+
 def test_source_manifest_records_complete_release_metadata(tmp_path):
     cfg = _load_config("pipeline_config.full.yaml")
     paths = _source_definition_paths(cfg, ROOT)
