@@ -20,6 +20,7 @@ def _run(did, stage):
     stages = dict(d["stages"])
     stages[stage] = "running"
     store.update(did, stages=stages, status="RUNNING")
+    store.event(did, "stage.started", {"stage": stage})
     env = os.environ.copy()
     env.update({"DATASET_ID": str(did), "DATASET_DIR": str(store.path(did)), "PROJECT_ROOT": str(ROOT)})
     try:
@@ -41,17 +42,34 @@ def _run(did, stage):
         current = store.get(did)
         stages = dict(current["stages"])
         stages[stage] = "complete" if code == 0 else "failed"
-        store.update(did, stages=stages, status="ERROR" if code else current.get("status", "RUNNING"))
+        if code == 0:
+            store.update(did, stages=stages, status=current.get("status", "RUNNING"))
+            store.refresh_pipeline_state(did)
+            refreshed = store.get(did) or current
+            store.event(did, "stage.completed", {
+                "stage": stage,
+                "status": refreshed.get("status"),
+                "stats": refreshed.get("stats", {}),
+            })
+        else:
+            store.update(did, stages=stages, status="ERROR")
+            store.refresh_stats(did)
+            store.event(did, "stage.failed", {"stage": stage, "exit_code": code})
     except OSError as exc:
         current = store.get(did)
         stages = dict(current["stages"])
         stages[stage] = "failed"
         store.update(did, stages=stages, status="ERROR")
+        store.refresh_stats(did)
         store.event(did, "stage.launch_failed", {"stage": stage, "error": str(exc)})
     finally:
         with LOCK:
             RUNS.pop(did, None)
-        store.refresh_pipeline_state(did)
+        # Reconcile artifacts after the process exits, but preserve an explicit
+        # failed stage rather than allowing refresh to hide it behind STALE/IN_PROGRESS.
+        final = store.get(did)
+        if final and final.get("stages", {}).get(stage) != "failed":
+            store.refresh_pipeline_state(did)
 
 
 def start_stage(did, stage):
