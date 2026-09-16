@@ -32,7 +32,7 @@ STAGE_IMPLEMENTATIONS = {
 }
 
 SOURCE_KINDS = ("web", "github", "arxiv", "huggingface", "google")
-REQUIRED_SOURCE_FIELDS = {"kind", "identifier", "revision", "license", "raw_source_sha256"}
+REQUIRED_SOURCE_FIELDS = {"kind", "identifier", "revision", "license", "raw_source_sha256", "dataset_group"}
 
 
 def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
@@ -124,17 +124,18 @@ def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
     return {name: path.resolve() for name, path in paths.items()}
 
 
-def _source_entry(kind: str, identifier: str, revision: str | None = None, license_name: str = "unknown") -> dict[str, Any]:
+def _source_entry(kind: str, identifier: str, dataset_group: str, revision: str | None = None, license_name: str = "unknown") -> dict[str, Any]:
     return {
         "kind": kind,
         "identifier": identifier,
         "revision": revision,
         "license": license_name,
         "raw_source_sha256": None,
+        "dataset_group": dataset_group,
     }
 
 
-def _manifest_sources(cfg: dict, source_paths: dict[str, Path]) -> list[dict[str, Any]]:
+def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None) -> list[dict[str, Any]]:
     crawl = cfg.get("crawl", {}) or {}
     dataset_path = source_paths.get("dataset_groups")
     if dataset_path and dataset_path.is_file():
@@ -142,8 +143,13 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path]) -> list[dict[str
     else:
         groups = [{"id": "default", "sources": crawl.get("sources", {})}]
 
+    if selected_group_id and selected_group_id != "all":
+        groups = [group for group in groups if str(group.get("id")) == selected_group_id]
+        if not groups:
+            raise ValueError(f"Unknown dataset group for source manifest: {selected_group_id}")
+
     sources: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     global_web = crawl.get("web", {}) or {}
     seed_path = source_paths.get("seed_urls")
     global_seeds = []
@@ -185,10 +191,10 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path]) -> list[dict[str
                 if not identifiers:
                     identifiers = [f"group:{group_id}:google"]
             for identifier in identifiers:
-                key = (kind, identifier)
+                key = (kind, identifier, group_id)
                 if key not in seen:
                     seen.add(key)
-                    sources.append(_source_entry(kind, identifier))
+                    sources.append(_source_entry(kind, identifier, group_id))
     return sources
 
 
@@ -196,6 +202,7 @@ def _write_source_manifest(
     path: Path,
     cfg: dict,
     source_paths: dict[str, Path],
+    selected_group_id: str | None = None,
     retrieval_started_at: str | None = None,
     retrieval_completed_at: str | None = None,
 ) -> None:
@@ -205,29 +212,54 @@ def _write_source_manifest(
         for name, value in source_paths.items()
     }
     manifest = {
-        "schema": 1,
+        "schema": 2,
+        "dataset_group": selected_group_id or "all",
         "retrieval_started_at": started,
         "retrieval_completed_at": retrieval_completed_at,
         "source_definition_files": files,
-        "sources": _manifest_sources(cfg, source_paths),
+        "sources": _manifest_sources(cfg, source_paths, selected_group_id),
         "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _source_manifest_is_valid(path: Path) -> bool:
+def _source_manifest_is_valid(
+    path: Path,
+    expected_group_id: str | None = None,
+    expected_source_definition_paths: dict[str, Path] | None = None,
+) -> bool:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        required = {"schema", "retrieval_started_at", "retrieval_completed_at", "sources", "rights_note"}
+        required = {"schema", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_files", "sources", "rights_note"}
         if not isinstance(data, dict) or not required <= set(data):
             return False
-        if int(data["schema"]) != 1 or not data["retrieval_started_at"] or not data["retrieval_completed_at"]:
+        if int(data["schema"]) != 2 or not data["retrieval_started_at"] or not data["retrieval_completed_at"]:
             return False
-        if not isinstance(data["sources"], list) or not data["sources"]:
+        manifest_group = str(data["dataset_group"])
+        if expected_group_id is not None and manifest_group != expected_group_id:
             return False
-        for source in data["sources"]:
+        definition_files = data["source_definition_files"]
+        if not isinstance(definition_files, dict) or not definition_files:
+            return False
+        for item in definition_files.values():
+            if not isinstance(item, dict) or not item.get("path") or not item.get("sha256"):
+                return False
+            digest = item["sha256"]
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest.lower()):
+                return False
+        if expected_source_definition_paths is not None:
+            for name, current_path in expected_source_definition_paths.items():
+                entry = definition_files.get(name)
+                if entry is None or entry.get("sha256") != _file_hash(current_path):
+                    return False
+        sources = data["sources"]
+        if not isinstance(sources, list) or not sources:
+            return False
+        for source in sources:
             if not isinstance(source, dict) or not REQUIRED_SOURCE_FIELDS <= set(source):
+                return False
+            if manifest_group != "all" and source.get("dataset_group") != manifest_group:
                 return False
             digest = source["raw_source_sha256"]
             if digest is not None and (not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest.lower())):
@@ -331,23 +363,27 @@ class Pipeline:
     def stage_crawl(self, only_group: str | None = None) -> Path:
         cfg = dict(self.cfg.get("crawl", {}))
         groups = self._load_dataset_groups()
+        selected_group_id = only_group
         if self.dataset_id is not None:
             group = self._session_group()
             groups = [group] if group else []
+            selected_group_id = str(group.get("id")) if group else None
         if only_group:
             groups = [g for g in groups if g.get("id") == only_group]
             if not groups:
                 raise ValueError(f"Unknown dataset group id: {only_group}")
         out = self._scratch / (f"01_crawled__{only_group}.jsonl" if self.dataset_id is None and only_group else "01_crawled.jsonl")
+        selected_group = groups[0] if len(groups) == 1 else None
         provenance = self._provenance(
             "crawl",
             extra={
                 "source_weights_sha256": _file_hash(self._weights_path),
                 "dataset_groups_sha256": _file_hash(self._dataset_groups_path),
-                "dataset_group": only_group,
+                "dataset_group": selected_group_id or "all",
+                "dataset_group_sha256": _hash_value(selected_group) if selected_group else None,
             },
         )
-        if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(self._source_manifest_path):
+        if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(self._source_manifest_path, selected_group_id or "all", self._source_definition_paths):
             return out
 
         retrieval_started = datetime.now(timezone.utc).isoformat()
@@ -355,6 +391,7 @@ class Pipeline:
             self._source_manifest_path,
             self.cfg,
             self._source_definition_paths,
+            selected_group_id=selected_group_id or "all",
             retrieval_started_at=retrieval_started,
             retrieval_completed_at=None,
         )
@@ -388,6 +425,7 @@ class Pipeline:
             self._source_manifest_path,
             self.cfg,
             self._source_definition_paths,
+            selected_group_id=selected_group_id or "all",
             retrieval_started_at=retrieval_started,
             retrieval_completed_at=datetime.now(timezone.utc).isoformat(),
         )
