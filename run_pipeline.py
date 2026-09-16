@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical CLI entry point for the Model Lab pipeline."""
+"""Canonical CLI entry point for the Model Lab end-to-end training flow."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,8 @@ if str(ROOT) not in sys.path:
 
 STAGES = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
 VERSION = "1.3.0"
+DEFAULT_CONFIG = "config/pipeline_config.yaml"
+DATASET_SESSION_CONFIG = "config/pipeline_config.dataset.yaml"
 
 
 def _load_cli_dataset_groups(config_path: Path) -> list[dict]:
@@ -68,7 +70,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = _build_parser()
     parser.add_argument("--version", action="version", version=f"Model Lab {VERSION}")
-    parser.add_argument("--config", default="config/pipeline_config.yaml", help="pipeline config (default: %(default)s)")
+    parser.add_argument("--config", default=DEFAULT_CONFIG, help="pipeline config (default: %(default)s)")
     parser.add_argument("--stages", default="all", help="comma-separated stages or 'all' (default: all; uses config stage enablement)")
     parser.add_argument("--no-resume", action="store_true", help="disable all artifact and checkpoint resume for this run")
     parser.add_argument("--dataset-group", default=None, help="dataset group ID to run")
@@ -145,6 +147,13 @@ def main() -> int:
     if not config.is_file():
         print(f"Config not found: {config}")
         return 1
+
+    if args.dataset_id is not None and args.config == DEFAULT_CONFIG:
+        session_config = ROOT / DATASET_SESSION_CONFIG
+        if not session_config.is_file():
+            print(f"Dataset session config not found: {session_config}")
+            return 1
+        config = session_config
 
     if args.list_groups:
         print("Configured dataset groups:")
