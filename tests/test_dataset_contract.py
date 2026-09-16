@@ -25,7 +25,7 @@ def test_all_ten_dataset_contracts_validate():
 def test_huggingface_revision_is_required(tmp_path):
     groups = tmp_path / "groups.yaml"
     profiles = tmp_path / "profiles.yaml"
-    source = GROUPS.read_text(encoding="utf-8").replace('revision: "v1.2"', "", 1)
+    source = GROUPS.read_text(encoding="utf-8").replace('revision: "v1.2"', 'revision: ""', 1)
     groups.write_text(source, encoding="utf-8")
     profiles.write_text(PROFILES.read_text(encoding="utf-8"), encoding="utf-8")
     with pytest.raises(ValueError, match="missing revision"):
