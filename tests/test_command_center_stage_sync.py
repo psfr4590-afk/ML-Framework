@@ -25,31 +25,32 @@ def test_refresh_stats_counts_crawl_documents_before_clean(tmp_path, monkeypatch
 def test_stage_lifecycle_records_start_and_completion_events(monkeypatch, tmp_path):
     import command_center.runner as runner
     import command_center.store as store_module
+    from pipeline.integrity import write_manifest
 
     monkeypatch.setattr(store_module, "DATASETS", tmp_path)
     test_store = store_module.DatasetStore()
     meta = test_store.create("event-state", group_config={"id": "test", "name": "test", "sources": {}})
+    root = test_store.path(meta["id"])
+    artifact = root / "scratch" / "01_crawled.jsonl"
+    artifact.write_text('{"text":"one two"}\n', encoding="utf-8")
+    write_manifest(artifact, kind="crawl", rows=1)
+
     monkeypatch.setattr(runner, "store", test_store)
     monkeypatch.setattr(runner, "ROOT", tmp_path)
-
-    script = tmp_path / "run_pipeline.py"
-    script.write_text(
-        "import json, os\n"
-        "from pathlib import Path\n"
-        "from pipeline.integrity import write_manifest\n"
-        "p = Path(os.environ['DATASET_DIR']) / 'scratch' / '01_crawled.jsonl'\n"
-        "p.parent.mkdir(parents=True, exist_ok=True)\n"
-        "p.write_text(json.dumps({'text': 'one two'}) + '\\n', encoding='utf-8')\n"
-        "write_manifest(p, kind='crawl', rows=1)\n",
-        encoding="utf-8",
-    )
 
     class Credentials:
         @staticmethod
         def environment():
             return {}
 
+    class Process:
+        stdout = ()
+
+        def wait(self):
+            return 0
+
     monkeypatch.setattr(runner, "credentials", Credentials())
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: Process())
     runner.RUNS.clear()
     assert runner.start_stage(meta["id"], "crawl")["started"] is True
 
