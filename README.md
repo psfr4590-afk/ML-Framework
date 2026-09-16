@@ -98,7 +98,7 @@ python3 run_pipeline.py --no-resume
 
 The larger profile is preserved as `config/pipeline_config.full.yaml` and must be selected explicitly for large runs.
 
-The bootstrapper installs framework dependencies first, then installs PyTorch from the official CPU wheel index by default. This keeps the canonical first run from silently pulling a large host-specific CUDA bundle onto a low-resource machine. Hosts that intentionally want the default PyPI PyTorch wheel can use `python bootstrap.py --install --torch-channel default`.
+The bootstrapper installs framework dependencies first, then installs PyTorch from the official CUDA wheel index by default. CPU-only hosts can explicitly use `python bootstrap.py --install --torch-channel cpu`, while `--torch-channel default` uses the standard PyPI PyTorch channel.
 
 After the starter run succeeds, inspect the host before doing expensive work:
 
@@ -112,73 +112,93 @@ or:
 python3 run_pipeline.py --doctor --hardware-report
 ```
 
-On Windows, `python .\launch.py` starts the localhost command center and desktop control surface after the environment is ready. The desktop target window is **1760x990**, with a usable minimum of 1280x720. Headless users can use `python run_command_center.py --no-browser` instead.
+## What happens during a run
 
-For a non-destructive release check:
+The normal pipeline is intentionally linear:
+
+`crawl → clean → dedup → weight → tokenize → shard → train → export`
+
+Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused. This prevents an old or differently prepared dataset from leaking into tokenization, sharding, or training.
+
+Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring the model weights and accidentally replaying a different token sequence. Checkpoints without the required deterministic state or matching provenance are rejected rather than silently resumed.
+
+Final export is stricter still. The checkpoint must carry the canonical pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity. The current tokenizer, weighted-corpus manifest, and shard manifest must belong to the same pipeline configuration. A mismatch stops export before an artifact can be presented as a valid model.
+
+The starter profile uses a small real crawl and only two training steps. It is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and then explicitly choose an appropriate larger configuration.
+
+## Windows launch
+
+After the first-run path is healthy:
 
 ```powershell
-python .\scripts\verify_release.py
+python .\launch.py
 ```
 
-The release verifier explicitly distinguishes automated checks from target-machine checks. A skipped hardware check is not reported as a fake pass.
+`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend. The UI is designed for a 1760×990 display.
 
-## Installation and packaging roles
+Model Lab navigates the real pipeline and dataset sessions. It does not implement a second copy of the crawler, cleaner, deduplicator, tokenizer, sharder, trainer, or exporter.
 
-The bootstrapper is the canonical full-runtime installer. It deliberately owns PyTorch installation so the project can choose a CPU wheel by default and avoid imposing a host-specific CUDA build on every user.
+## Backend-only mode
 
-The repository also contains standard Python package metadata in `pyproject.toml`. This supports packaging and installation tooling for the Python modules. The package metadata intentionally does not declare PyTorch, because PyTorch is installed separately by the bootstrapper. If you install the package directly with `pip install .`, install the host-appropriate PyTorch requirement separately, or use `bootstrap.py --install` for the supported end-to-end setup.
+```powershell
+python .\run_command_center.py --no-browser
+```
 
-The `mlab` console command is the packaged equivalent of the pipeline CLI:
+Without `--no-browser`, the backend opens the localhost command center in the default browser after its health endpoint is ready. The command center binds to localhost by default.
+
+## Production verification
+
+The standard release check is:
 
 ```bash
-mlab --help
+python scripts/verify_release.py
 ```
 
-For a first run, prefer `run_pipeline.py` through the canonical bootstrap workflow above so repository-local configuration and artifacts remain explicit.
+This runs compilation, the full test suite, and the required project/runtime doctor. It does not claim that machine-specific native export prerequisites were checked. Use `--bootstrap-native` when the release check must also clone/build and verify the supported llama.cpp toolchain.
 
-## Hardware-aware training
+Security/release dependency auditing is explicit:
 
-Training can use an explicit preset, or Model Lab can choose a conservative profile based on the detected hardware. Auto-sizing changes the model preset, sequence length, microbatch geometry, evaluation budget, checkpoint cadence, and total step budget together rather than relying on a parameter-only memory estimate.
-
-Enable it in `config/pipeline_config.full.yaml` for a larger run, or keep the starter defaults for the first run:
-
-```yaml
-train:
-  auto_size: true
-  model_preset: "85M"   # fallback/manual value when auto_size is false
-  allow_cpu_training: false
+```bash
+python -m pip install -r requirements-security.txt
+python scripts/security_gate.py
 ```
 
-For a prepared shard set, inspect the recommendation before starting a long run:
+The security gate checks tracked source for common secret patterns, verifies installed dependency consistency with `pip check`, and runs `pip-audit`. It is a gate, not a decorative report. A missing audit tool or failing audit is a failure.
 
-```powershell
-python .\scripts\recommend_model.py --shard-dir .\output\shards
+GitHub Actions runs the same security gate on pushes and pull requests and provides a separate production release workflow for native export verification. The CI path also runs the bootstrap doctor on a clean checkout, so the canonical onboarding path is exercised rather than merely documented.
+
+## Production export requirement
+
+Final GGUF export requires a current llama.cpp checkout containing
+`convert_hf_to_gguf.py`. Quantized exports also require the built `llama-quantize`
+executable. The exporter refuses to claim success when either tool is missing or when the training provenance chain is incomplete or inconsistent.
+
+## Termux / Android native toolchain
+
+Model Lab supports a headless Termux runtime for the pipeline and native GGUF
+export. The Tk desktop UI is intentionally not a dependency of the portable
+pipeline test suite.
+
+To prepare the native llama.cpp toolchain after the first-run validation:
+
+```bash
+bash scripts/bootstrap_llama_cpp.sh
+python scripts/verify_release.py --bootstrap-native
 ```
 
-The recommender reports the hardware tier and selected profile. It does not invent a wall-clock estimate unless observed throughput is supplied.
+The native bootstrap uses a reduced Android-safe build profile when running under
+Termux and builds `llama-quantize`, the native artifact required for quantized
+export. The Python-side GGUF converter remains part of the pinned llama.cpp
+checkout. The desktop/native verification path can additionally build and verify
+`llama-cli` where that target is supported.
 
-## Bounded verification profile
+If semantic-dedup acceleration is desired and the host supports it:
 
-`config/pipeline_config.smoke.yaml` is retained as a dedicated maintainer/verification profile. It is intentionally separate from the canonical starter profile so documentation, tests, and newcomer instructions do not have two competing definitions of "first run".
+```bash
+python3 -m pip install -r requirements-optional.txt
+```
 
-The verification profile is also a real, bounded pipeline run. It is useful for validating the end-to-end artifact chain in automation or when explicitly testing the smoke configuration, but it is not required for normal first-run use.
+`sentence-transformers` and FAISS are optional. Without them, Model Lab uses a
+deterministic local token-gram fallback so the pipeline remains operational.
 
-## Command center
-
-The FastAPI command center is localhost-only by default. It exposes dataset lifecycle, ingestion, stage control, credential management, crawler telemetry, and system information through the `/api/*` surface. The desktop launcher can start the backend and UI together; `run_command_center.py --no-browser` starts the backend without opening a browser.
-
-## Security and generated data
-
-Credentials belong in the runtime credential store or environment variables, never in Git. Dataset outputs, checkpoints, caches, scratch data, logs, and native build products are runtime artifacts and are intentionally excluded from the public source tree.
-
-The crawler is bounded and security-conscious: it applies URL validation, request timeouts, retries, politeness delays, robots handling where configured, content-size limits, and local/private-network refusal rules.
-
-See [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md) before using the full seeded corpus. Public availability of a source does not by itself establish permission to use or redistribute its contents for training.
-
-## Verification boundary
-
-Automated CI covers Python compilation and the repository test suite. Environment-dependent gates remain explicit: CUDA availability, native llama.cpp binaries, network access, and human-visible Windows/Tkinter acceptance depend on the target machine. The documented desktop target is 1760x990 with a usable minimum of 1280x720. This distinction is intentional.
-
-## License
-
-See `LICENSE` for the project license.
+`python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is the exception: it is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
