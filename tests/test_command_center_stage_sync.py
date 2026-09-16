@@ -56,8 +56,9 @@ def test_stage_lifecycle_records_start_and_completion_events(monkeypatch, tmp_pa
 
     deadline = time.time() + 5
     while time.time() < deadline:
-        state = test_store.get(meta["id"])
-        if state["stages"].get("crawl") != "running":
+        events = test_store.tail_events(meta["id"], limit=10)
+        names = [event["event"] for event in events]
+        if "stage.started" in names and "stage.completed" in names:
             break
         time.sleep(0.01)
 
