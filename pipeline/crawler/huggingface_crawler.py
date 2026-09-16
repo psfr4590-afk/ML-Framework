@@ -126,8 +126,9 @@ class HuggingFaceCrawler(BaseCrawler):
                     )
                     if self.weight_lookup:
                         doc = self._apply_weights(doc)
-                    if doc is not None:
-                        yield doc
+                    else:
+                        doc = self._record_retrieval_identity(doc)
+                    yield doc
             except Exception as exc:  # dataset backends raise varied provider-specific exceptions
                 self.stats["errors"] += 1
                 log.warning("Hugging Face dataset crawl failed for %s@%s: %s", dataset_id, revision, exc)
