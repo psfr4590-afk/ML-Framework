@@ -47,6 +47,11 @@ exclusions:
       - "\\badd to cart\\b"
       - "\\bsubscribe now\\b"
       - "\\bsponsored content\\b"
+  entertainment:
+    patterns:
+      - "\\b(?:movie|film|tv|television) review\\b"
+      - "\\bcelebrity gossip\\b"
+      - "\\b(?:music|gaming) news\\b"
   offensive-instructions:
     patterns:
       - "\\bexploit payload\\b"
@@ -89,6 +94,23 @@ exclusions:
     patterns:
       - "\\bclimate change is a hoax\\b"
       - "\\bscientists proved climate change is fake\\b"
+  unsupported-health-claims:
+    patterns:
+      - "\\bmiracle cure\\b"
+      - "\\bdetox(?:es|ify|ification)?\\b.*\\bcure\\b"
+      - "\\bcures? cancer\\b"
+      - "\\bvaccines? (?:cause|causes) (?:autism|infertility)\\b"
+  unverified-claims:
+    patterns:
+      - "\\bunverified claim\\b"
+      - "\\bunverified claims\\b"
+      - "\\bunconfirmed report\\b"
+      - "\\bunconfirmed reports\\b"
+  sensational-content:
+    patterns:
+      - "\\bshocking revelation\\b"
+      - "\\byou won't believe\\b"
+      - "\\bexplosive new details\\b"
   low-quality-social-content:
     patterns:
       - "\\bviral post\\b"
