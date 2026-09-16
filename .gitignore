@@ -35,5 +35,7 @@ models/
 .idea/
 .DS_Store
 Thumbs.db
-third_party/llama.cpp/build/
-third_party/llama.cpp/build-model-lab/
+
+# Generated native/release verification artifacts
+release-evidence/
+third_party/llama.cpp/
