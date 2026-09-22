@@ -123,7 +123,7 @@ def test_embedding_run_uses_model_embeddings(monkeypatch):
 def test_stream_rejects_invalid_buffer_size(monkeypatch):
     monkeypatch.setattr(mod, "ST_AVAILABLE", False)
 
-    deduper = SemanticDeduplicator({"similarity_threshold": 0.8})
+    deduper = SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.8})
 
     with pytest.raises(ValueError, match="buffer_size"):
         list(deduper.stream(iter([doc(1, "alpha")]), buffer_size=0))
@@ -132,7 +132,7 @@ def test_stream_rejects_invalid_buffer_size(monkeypatch):
 def test_stream_flushes_final_partial_buffer(monkeypatch):
     monkeypatch.setattr(mod, "ST_AVAILABLE", False)
 
-    deduper = SemanticDeduplicator({"similarity_threshold": 0.8})
+    deduper = SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.8})
 
     docs = iter(
         [
