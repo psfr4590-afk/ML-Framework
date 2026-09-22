@@ -54,6 +54,15 @@ def _torch_state() -> tuple[bool, str]:
         return True, f"torch {torch.__version__}; CUDA reported available but device details failed: {exc}"
 
 
+def _semantic_dedup_state() -> tuple[bool, str]:
+    try:
+        importlib.import_module("sentence_transformers")
+        importlib.import_module("faiss")
+    except Exception as exc:
+        return False, f"semantic dedup dependencies unavailable: {type(exc).__name__}: {exc}"
+    return True, "sentence-transformers and faiss-cpu are installed"
+
+
 def _llamacpp_state(root: Path) -> tuple[bool, str]:
     target = root / "third_party" / "llama.cpp"
     converter = target / "convert_hf_to_gguf.py"
@@ -107,6 +116,9 @@ def run_doctor(root: str | Path) -> tuple[bool, list[dict]]:
         checks.append(_check("pipeline imports", True, "pipeline.orchestrator imported successfully"))
     except Exception as exc:
         checks.append(_check("pipeline imports", False, f"{type(exc).__name__}: {exc}"))
+
+    semantic_ok, semantic_detail = _semantic_dedup_state()
+    checks.append(_check("semantic dedup dependencies", semantic_ok, semantic_detail))
 
     torch_ok, torch_detail = _torch_state()
     checks.append(_check("PyTorch", torch_ok, torch_detail))
