@@ -65,7 +65,7 @@ ML-Framework/
 
 ## Seeded dataset groups
 
-Four dataset groups are preconfigured:
+Ten dataset groups are preconfigured:
 
 - `swe_cs_systems` — software engineering, computer science, and systems
 - `ai_ml_cybersec_dataeng` — AI/ML, cybersecurity, and data engineering
@@ -192,13 +192,6 @@ export. The Python-side GGUF converter remains part of the pinned llama.cpp
 checkout. The desktop/native verification path can additionally build and verify
 `llama-cli` where that target is supported.
 
-If semantic-dedup acceleration is desired and the host supports it:
-
-```bash
-python3 -m pip install -r requirements-optional.txt
-```
-
-`sentence-transformers` and FAISS are optional. Without them, Model Lab uses a
-deterministic local token-gram fallback so the pipeline remains operational.
+`sentence-transformers` and `faiss-cpu` are required runtime dependencies because semantic deduplication is a required pipeline capability. They are installed by both the package metadata and the canonical requirements file. The configured embedding model is still kept local by default; set `allow_model_download: true` only when an explicit model download is acceptable.
 
 `python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is the exception: it is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
