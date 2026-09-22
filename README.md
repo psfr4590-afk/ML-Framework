@@ -70,7 +70,13 @@ Ten dataset groups are preconfigured:
 - `swe_cs_systems` — software engineering, computer science, and systems
 - `ai_ml_cybersec_dataeng` — AI/ML, cybersecurity, and data engineering
 - `sci_reasoning_forensics_formal` — scientific reasoning, forensics, and formal methods
-- `domain_finance_bio_robotics` — finance, biology, robotics, and related domains
+- `domain_finance_bio_robotics` — finance, biology, and robotics
+- `math_statistics_optimization` — mathematics, statistics, and optimization
+- `physics_chemistry_materials` — physics, chemistry, and materials science
+- `biomedical_health_science` — biomedical science, bioinformatics, and health research
+- `law_compliance_governance` — law, compliance, and digital governance
+- `linguistics_information_retrieval` — linguistics, NLP, and information retrieval
+- `climate_energy_geospatial` — climate science, energy systems, and geospatial analysis
 
 General web seeds live in `config/seed_urls.txt`.
 
