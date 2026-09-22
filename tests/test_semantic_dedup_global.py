@@ -11,7 +11,7 @@ def doc(i, text, weight):
 def test_fallback_stream_dedup_crosses_buffer_boundary(monkeypatch):
     import pipeline.embedder.semantic_dedup as mod
     monkeypatch.setattr(mod, "ST_AVAILABLE", False)
-    d = SemanticDeduplicator({"similarity_threshold": 0.5})
+    d = SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.5})
     docs = iter([
         doc(1, "alpha beta gamma delta", 1.0),
         doc(2, "totally different corpus material", 1.0),
