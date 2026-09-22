@@ -33,7 +33,7 @@ APPROVED_HOSTS = {
     "www.congress.gov", "eur-lex.europa.eu", "www.oecd.org", "aclanthology.org", "www.nltk.org",
     "spacy.io", "www.elastic.co", "www.ling.upenn.edu", "www.cl.cam.ac.uk", "www.isca-archive.org",
     "climate.nasa.gov", "www.noaa.gov", "www.usgs.gov", "www.epa.gov", "www.energy.gov",
-    "www.eia.gov", "www.ipcc.ch", "www.copernicus.eu", "earthdata.nasa.gov",
+    "www.eia.gov", "www.ipcc.ch", "www.copernicus.eu", "earthdata.nasa.gov", "docs.docker.com",
 }
 
 
