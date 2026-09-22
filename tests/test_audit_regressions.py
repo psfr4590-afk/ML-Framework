@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 import re
 import tomllib
 
+import pytest
 import yaml
 
 from pipeline.integrity import artifact_valid, write_manifest
@@ -166,5 +167,6 @@ def test_semantic_dedup_auto_mode_fails_if_required_package_is_missing(monkeypat
     monkeypatch.setattr(module, "ST_AVAILABLE", False)
     monkeypatch.setattr(module, "FAISS_AVAILABLE", True)
     deduper = module.SemanticDeduplicator({"mode": "auto"})
-    with __import__("pytest").raises(RuntimeError, match="sentence-transformers"):
-        deduper.run([__import__("pipeline.types", fromlist=["Document"]).Document(doc_id="1", text="test")])
+    from pipeline.types import Document
+    with pytest.raises(RuntimeError, match="sentence-transformers"):
+        deduper.run([Document(doc_id="1", text="test")])
