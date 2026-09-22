@@ -144,3 +144,18 @@ def test_no_stale_optional_dependency_file_is_referenced():
     for path in (ROOT / "README.md", ROOT / "docs/development/START_HERE.md"):
         text = path.read_text(encoding="utf-8")
         assert "requirements-optional.txt" not in text
+
+
+def test_doctor_treats_semantic_dedup_dependencies_as_required():
+    from pipeline.doctor import _semantic_dedup_state
+    ok, detail = _semantic_dedup_state()
+    assert ok, detail
+
+
+def test_semantic_dedup_required_dependencies_are_not_hidden_behind_optional_extras():
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert "sentence-transformers>=6.0.1" in pyproject
+    assert "faiss-cpu>=1.15.0" in pyproject
+    assert "sentence-transformers>=6.0.1" in requirements
+    assert "faiss-cpu>=1.15.0" in requirements
