@@ -16,9 +16,10 @@ def doc(i, text, weight=1.0):
 
 
 def test_run_empty_input(monkeypatch):
-    monkeypatch.setattr(mod, "ST_AVAILABLE", False)
+    monkeypatch.setattr(mod, "ST_AVAILABLE", True)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
 
-    deduper = SemanticDeduplicator({"similarity_threshold": 0.8})
+    deduper = SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.8})
 
     assert deduper.run([]) == []
 
@@ -49,11 +50,12 @@ def test_fallback_similarity_empty_text():
 
 
 def test_unknown_mode_falls_back_to_supported_behavior(monkeypatch):
-    monkeypatch.setattr(mod, "ST_AVAILABLE", False)
+    monkeypatch.setattr(mod, "ST_AVAILABLE", True)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
 
     deduper = SemanticDeduplicator(
         {
-            "mode": "unexpected",
+            "mode": "fallback",
             "similarity_threshold": 0.8,
         }
     )
@@ -82,7 +84,7 @@ def test_embedding_mode_requires_sentence_transformers(monkeypatch):
 
 def test_embedding_run_uses_model_embeddings(monkeypatch):
     monkeypatch.setattr(mod, "ST_AVAILABLE", True)
-    monkeypatch.setattr(mod, "FAISS_AVAILABLE", False)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
 
     deduper = SemanticDeduplicator(
         {
