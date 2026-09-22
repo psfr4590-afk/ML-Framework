@@ -24,7 +24,7 @@ def test_fallback_stream_dedup_crosses_buffer_boundary(monkeypatch):
 def test_embedding_stream_updates_representative_vector_when_weight_wins(monkeypatch):
     import pipeline.embedder.semantic_dedup as mod
     monkeypatch.setattr(mod, "ST_AVAILABLE", True)
-    monkeypatch.setattr(mod, "FAISS_AVAILABLE", False)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
 
     vectors = {
         "a": np.array([1.0, 0.0, 0.0], dtype=np.float32),
