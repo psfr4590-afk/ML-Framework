@@ -68,7 +68,7 @@ def test_every_canonical_dataset_group_has_meaningful_high_quality_web_seeds():
     assert len(groups) == 10
     for group in groups:
         urls = group["web"]["seed_urls"]
-        assert len(urls) >= 8, group["id"]
+        assert len(urls) >= 10, group["id"]
         assert len(urls) == len(set(urls)), group["id"]
         for url in urls:
             parsed = urlparse(url)
