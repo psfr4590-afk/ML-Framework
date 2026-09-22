@@ -159,3 +159,12 @@ def test_semantic_dedup_required_dependencies_are_not_hidden_behind_optional_ext
     assert "faiss-cpu>=1.15.0" in pyproject
     assert "sentence-transformers>=6.0.1" in requirements
     assert "faiss-cpu>=1.15.0" in requirements
+
+
+def test_semantic_dedup_auto_mode_fails_if_required_package_is_missing(monkeypatch):
+    import pipeline.embedder.semantic_dedup as module
+    monkeypatch.setattr(module, "ST_AVAILABLE", False)
+    monkeypatch.setattr(module, "FAISS_AVAILABLE", True)
+    deduper = module.SemanticDeduplicator({"mode": "auto"})
+    with __import__("pytest").raises(RuntimeError, match="sentence-transformers"):
+        deduper.run([__import__("pipeline.types", fromlist=["Document"]).Document(doc_id="1", text="test")])
