@@ -13,11 +13,13 @@ Memory: all-MiniLM-L6-v2 is 384-dim float32 = ~1.5KB/doc.
         If you hit limits, switch index_type to ivf in config.
 
 Offline behavior:
+  - sentence-transformers and faiss-cpu are required runtime dependencies.
   - mode=auto (default) never downloads a model. It uses embeddings only when
     the configured model is already available locally; otherwise it falls back
-    to dependency-light token-gram similarity.
-  - mode=fallback always uses the dependency-light implementation.
-  - mode=embedding requires sentence-transformers and a locally available model
+    to deterministic token-gram similarity.
+  - mode=fallback explicitly selects the deterministic token-gram implementation
+    for tests or deliberately degraded operation.
+  - mode=embedding requires the required packages and a locally available model
     unless allow_model_download=true is explicitly configured.
 """
 
@@ -160,6 +162,16 @@ class SemanticDeduplicator:
     def _ensure_embedding_or_fallback(self) -> bool:
         if self._mode == "fallback":
             return False
+        if not ST_AVAILABLE or not FAISS_AVAILABLE:
+            missing = []
+            if not ST_AVAILABLE:
+                missing.append("sentence-transformers")
+            if not FAISS_AVAILABLE:
+                missing.append("faiss-cpu")
+            raise RuntimeError(
+                "Semantic dedup dependencies are required but unavailable: "
+                + ", ".join(missing)
+            )
         try:
             self._load_model()
             return True
@@ -168,10 +180,9 @@ class SemanticDeduplicator:
                 raise RuntimeError(
                     "Semantic dedup embedding mode requires a locally available "
                     f"model ({self._model_path or self._model_name}). "
-                    "Install sentence-transformers and cache/provide the model, "
-                    "or set allow_model_download=true explicitly."
+                    "Cache/provide the model, or set allow_model_download=true explicitly."
                 ) from exc
-            log.warning("Semantic embedding unavailable; using offline fallback: %s", exc)
+            log.warning("Semantic embedding model unavailable; using deterministic offline fallback: %s", exc)
             return False
 
     def _embed(self, texts: list[str]) -> np.ndarray:

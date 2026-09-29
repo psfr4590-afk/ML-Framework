@@ -180,7 +180,7 @@ def test_semantic_dedup_has_dependency_free_fallback(monkeypatch):
     from pipeline.types import Document
 
     monkeypatch.setattr(module, "ST_AVAILABLE", False)
-    deduper = module.SemanticDeduplicator({"similarity_threshold": 0.8})
+    deduper = module.SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.8})
     docs = [
         Document(doc_id="a", text="alpha beta gamma delta", final_weight=1.0),
         Document(doc_id="b", text="alpha beta gamma delta", final_weight=0.5),

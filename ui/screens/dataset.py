@@ -4,7 +4,7 @@ from tkinter import messagebox,simpledialog,filedialog
 from ..core import navigation
 class DatasetScreen(tk.Frame):
  def __init__(self,parent):
-  super().__init__(parent,bg=BG); self.root=frame(self,"Datasets","Independent dataset sessions. Dataset 001–004 are seeded from dataset_groups.yaml; additional sessions may be created."); self.root.pack(fill="both",expand=True); bar=toolbar(self.root);bar.pack(fill="x",pady=(0,10));button(bar,"↻ Refresh",self.refresh).pack(side="left");button(bar,"＋ Create",self.create,"primary").pack(side="left",padx=7);button(bar,"Ingest Files",self.ingest).pack(side="left");self.box=card(self.root,"Dataset sessions");self.box.pack(fill="both",expand=True);self.refresh()
+  super().__init__(parent,bg=BG); self.root=frame(self,"Datasets","Independent dataset sessions. Dataset 001–010 are seeded from dataset_groups.yaml; additional sessions may be created."); self.root.pack(fill="both",expand=True); bar=toolbar(self.root);bar.pack(fill="x",pady=(0,10));button(bar,"↻ Refresh",self.refresh).pack(side="left");button(bar,"＋ Create",self.create,"primary").pack(side="left",padx=7);button(bar,"Ingest Files",self.ingest).pack(side="left");self.box=card(self.root,"Dataset sessions");self.box.pack(fill="both",expand=True);self.refresh()
  def refresh(self):
   for w in self.box.winfo_children():w.destroy()
   try:ds=registry.dataset().list();state.set("datasets",ds)
