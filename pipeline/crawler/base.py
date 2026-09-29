@@ -47,6 +47,7 @@ class BaseCrawler(abc.ABC):
         doc.domain_weight = dw
         doc.content_type_weight = ctw
         doc.quality_score = qs
+        doc.meta["quality_signal"] = qs
         if doc.content_type == "source_code" and doc.code_language:
             ctw *= self.weight_lookup.code_language_weight(doc.code_language)
         doc.content_type_weight = ctw

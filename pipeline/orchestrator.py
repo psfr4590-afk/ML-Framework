@@ -51,6 +51,7 @@ def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
         handler._model_lab_file = str(log_file)
+        handler._model_lab_file = str(log_file)
         root.addHandler(handler)
 
 
@@ -117,6 +118,7 @@ def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
         "pipeline_config": pipeline_config,
         "source_weights": root / str(crawl.get("source_weights_file", "config/source_weights.yaml")),
         "dataset_groups": root / str(crawl.get("dataset_groups_file", "config/dataset_groups.yaml")),
+        "dataset_profiles": root / str(crawl.get("dataset_profiles_file", "config/dataset_profiles.yaml")),
     }
     web = crawl.get("web", {})
     if web.get("seed_urls_file"):
@@ -142,24 +144,17 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
         groups = list((yaml.safe_load(dataset_path.read_text(encoding="utf-8")) or {}).get("dataset_groups", []))
     else:
         groups = [{"id": "default", "sources": crawl.get("sources", {})}]
-
     if selected_group_id and selected_group_id != "all":
         groups = [group for group in groups if str(group.get("id")) == selected_group_id]
         if not groups:
             raise ValueError(f"Unknown dataset group for source manifest: {selected_group_id}")
-
     sources: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     global_web = crawl.get("web", {}) or {}
     seed_path = source_paths.get("seed_urls")
     global_seeds = []
     if seed_path and seed_path.is_file():
-        global_seeds = [
-            line.strip()
-            for line in seed_path.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
-
+        global_seeds = [line.strip() for line in seed_path.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")]
     for group in groups:
         group_id = str(group.get("id", "default"))
         enabled = group.get("sources", crawl.get("sources", {})) or {}
@@ -169,27 +164,17 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
             section = group.get(kind, {}) or {}
             if kind == "web":
                 seeds = section.get("seed_urls") or global_web.get("seed_urls") or global_seeds
-                identifiers = [str(url) for url in seeds]
-                if not identifiers:
-                    identifiers = [f"group:{group_id}:web"]
+                identifiers = [str(url) for url in seeds] or [f"group:{group_id}:web"]
             elif kind == "github":
                 identifiers = [f"group:{group_id}:github"]
             elif kind == "arxiv":
                 identifiers = [f"group:{group_id}:arxiv"]
             elif kind == "huggingface":
                 datasets = section.get("datasets", []) or []
-                identifiers = [
-                    f"{item.get('repo')}:{item.get('config', '')}:{item.get('split', 'train')}"
-                    for item in datasets
-                    if isinstance(item, dict) and item.get("repo")
-                ]
-                if not identifiers:
-                    identifiers = [f"group:{group_id}:huggingface"]
+                identifiers = [f"{item.get('repo')}:{item.get('config', '')}:{item.get('split', 'train')}" for item in datasets if isinstance(item, dict) and item.get("repo")] or [f"group:{group_id}:huggingface"]
             else:
                 queries = section.get("queries", []) or []
-                identifiers = [str(query) for query in queries]
-                if not identifiers:
-                    identifiers = [f"group:{group_id}:google"]
+                identifiers = [str(query) for query in queries] or [f"group:{group_id}:google"]
             for identifier in identifiers:
                 key = (kind, identifier, group_id)
                 if key not in seen:
@@ -198,19 +183,9 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
     return sources
 
 
-def _write_source_manifest(
-    path: Path,
-    cfg: dict,
-    source_paths: dict[str, Path],
-    selected_group_id: str | None = None,
-    retrieval_started_at: str | None = None,
-    retrieval_completed_at: str | None = None,
-) -> None:
+def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None) -> None:
     started = retrieval_started_at or datetime.now(timezone.utc).isoformat()
-    files = {
-        name: {"path": str(value.relative_to(PROJECT_ROOT)), "sha256": _file_hash(value)}
-        for name, value in source_paths.items()
-    }
+    files = {name: {"path": str(value.relative_to(PROJECT_ROOT)), "sha256": _file_hash(value)} for name, value in source_paths.items()}
     manifest = {
         "schema": 2,
         "dataset_group": selected_group_id or "all",
@@ -224,11 +199,7 @@ def _write_source_manifest(
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _source_manifest_is_valid(
-    path: Path,
-    expected_group_id: str | None = None,
-    expected_source_definition_paths: dict[str, Path] | None = None,
-) -> bool:
+def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, expected_source_definition_paths: dict[str, Path] | None = None) -> bool:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         required = {"schema", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_files", "sources", "rights_note"}
@@ -319,13 +290,7 @@ class Pipeline:
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
     def _provenance(self, stage: str, input_path: Path | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        data: dict[str, Any] = {
-            "schema": 2,
-            "stage": stage,
-            "pipeline_config_sha256": self._config_sha256,
-            "source_definition_sha256": _hash_value(self._source_definition_hashes),
-            "implementation_sha256": _implementation_sha256(stage),
-        }
+        data: dict[str, Any] = {"schema": 2, "stage": stage, "pipeline_config_sha256": self._config_sha256, "source_definition_sha256": _hash_value(self._source_definition_hashes), "implementation_sha256": _implementation_sha256(stage)}
         if input_path is not None:
             data["input_sha256"] = sha256_file(input_path)
         if extra:
@@ -374,36 +339,13 @@ class Pipeline:
                 raise ValueError(f"Unknown dataset group id: {only_group}")
         out = self._scratch / (f"01_crawled__{only_group}.jsonl" if self.dataset_id is None and only_group else "01_crawled.jsonl")
         selected_group = groups[0] if len(groups) == 1 else None
-        provenance = self._provenance(
-            "crawl",
-            extra={
-                "source_weights_sha256": _file_hash(self._weights_path),
-                "dataset_groups_sha256": _file_hash(self._dataset_groups_path),
-                "dataset_group": selected_group_id or "all",
-                "dataset_group_sha256": _hash_value(selected_group) if selected_group else None,
-            },
-        )
+        provenance = self._provenance("crawl", extra={"source_weights_sha256": _file_hash(self._weights_path), "dataset_groups_sha256": _file_hash(self._dataset_groups_path), "dataset_group": selected_group_id or "all", "dataset_group_sha256": _hash_value(selected_group) if selected_group else None})
         if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(self._source_manifest_path, selected_group_id or "all", self._source_definition_paths):
             return out
-
         retrieval_started = datetime.now(timezone.utc).isoformat()
-        _write_source_manifest(
-            self._source_manifest_path,
-            self.cfg,
-            self._source_definition_paths,
-            selected_group_id=selected_group_id or "all",
-            retrieval_started_at=retrieval_started,
-            retrieval_completed_at=None,
-        )
-
+        _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths, selected_group_id=selected_group_id or "all", retrieval_started_at=retrieval_started, retrieval_completed_at=None)
         def stream() -> Iterator[Document]:
-            crawler_specs = (
-                ("web", "pipeline.crawler.web_crawler", "WebCrawler", True),
-                ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True),
-                ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True),
-                ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", True),
-                ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False),
-            )
+            crawler_specs = (("web", "pipeline.crawler.web_crawler", "WebCrawler", True), ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True), ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True), ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", True), ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False))
             for group in groups:
                 merged = dict(cfg)
                 for key in ("web", "github", "arxiv", "huggingface", "google"):
@@ -417,18 +359,10 @@ class Pipeline:
                     for doc in crawler.crawl():
                         doc.meta["dataset_group"] = gid
                         yield doc
-
         count = atomic_jsonl_write(out, lambda: (doc.to_jsonl() for doc in stream()))
         if count == 0:
             raise RuntimeError(f"Crawl produced no documents: {out}")
-        _write_source_manifest(
-            self._source_manifest_path,
-            self.cfg,
-            self._source_definition_paths,
-            selected_group_id=selected_group_id or "all",
-            retrieval_started_at=retrieval_started,
-            retrieval_completed_at=datetime.now(timezone.utc).isoformat(),
-        )
+        _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths, selected_group_id=selected_group_id or "all", retrieval_started_at=retrieval_started, retrieval_completed_at=datetime.now(timezone.utc).isoformat())
         write_manifest(out, kind="crawl", rows=count, provenance=provenance)
         log.info("Wrote %d docs → %s", count, out)
         return out
