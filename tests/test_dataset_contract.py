@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from pipeline.dataset_contract import evaluate_document, validate_dataset_contract
 from pipeline.types import Document
@@ -25,8 +26,15 @@ def test_all_ten_dataset_contracts_validate():
 def test_huggingface_revision_is_required(tmp_path):
     groups = tmp_path / "groups.yaml"
     profiles = tmp_path / "profiles.yaml"
-    source = GROUPS.read_text(encoding="utf-8").replace('revision: "v1.2"', 'revision: ""', 1)
-    groups.write_text(source, encoding="utf-8")
+    data = yaml.safe_load(GROUPS.read_text(encoding="utf-8"))
+    for group in data["dataset_groups"]:
+        for dataset in group.get("huggingface", {}).get("datasets", []):
+            dataset["revision"] = ""
+            break
+        else:
+            continue
+        break
+    groups.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     profiles.write_text(PROFILES.read_text(encoding="utf-8"), encoding="utf-8")
     with pytest.raises(ValueError, match="missing revision"):
         validate_dataset_contract(ROOT, groups, profiles)
