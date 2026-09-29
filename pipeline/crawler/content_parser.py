@@ -12,7 +12,7 @@ import csv
 import io
 import json
 import mimetypes
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
