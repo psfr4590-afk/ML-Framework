@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.crawler.content_parser import ContentParseError, parse_content
+from pipeline.crawler.content_parser import parse_content
 from ui.services.log_service import LogService
 
 
@@ -23,6 +23,7 @@ def test_log_service_rejects_arbitrary_file(tmp_path: Path):
 
 def test_log_service_rejects_symlink(tmp_path: Path):
     allowed = Path("datasets")
+    allowed.mkdir(parents=True, exist_ok=True)
     target = tmp_path / "target.log"
     target.write_text("secret", encoding="utf-8")
     link = allowed / "security-test.log"
