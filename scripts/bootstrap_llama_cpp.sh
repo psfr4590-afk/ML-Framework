@@ -28,7 +28,8 @@ if [[ "$(uname -o 2>/dev/null || true)" == "Android" || -n "${TERMUX_VERSION:-}"
   echo "Detected Termux/Android; using minimal llama.cpp build profile."
   BUILD_DIR="build-model-lab"
   cmake -S . -B "$BUILD_DIR" "${BUILD_ARGS[@]}"
-  cmake --build "$BUILD_DIR" --config Release --parallel --target llama-quantize
+  # Keep the Android build serialized to reduce memory pressure during compilation.
+  cmake --build "$BUILD_DIR" --config Release --parallel 1 --target llama-quantize
   quantizer="$(find "$BUILD_DIR" -type f -name 'llama-quantize*' -print -quit)"
   test -n "$quantizer" || { echo "llama-quantize was not built" >&2; exit 1; }
   echo "llama.cpp ready at $TARGET"
