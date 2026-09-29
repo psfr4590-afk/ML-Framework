@@ -12,6 +12,7 @@ def test_service_delegates_dataset_operations(monkeypatch):
     monkeypatch.setattr(service.store, "ensure_seed_datasets", lambda: calls.append(("init",)) or "seeded")
     monkeypatch.setattr(service.store, "create", lambda *args, **kwargs: calls.append(("create", args, kwargs)) or "created")
     monkeypatch.setattr(service.store, "ingest_path", lambda *args: calls.append(("ingest", args)) or "ingested")
+    monkeypatch.setattr(service, "validate_import_source", lambda path: Path(path))
 
     assert service.init() == "seeded"
     assert service.add("demo", "desc", "group") == "created"
@@ -61,3 +62,8 @@ def test_service_delegates_crawl_queries(monkeypatch):
     assert service.crawl_stats(3) == ("stats", 3)
     assert service.crawl_domains(3) == ("domains", 3)
     assert service.crawl_log(3, 12) == ("log", 3, 12)
+
+
+def test_service_rejects_ingest_outside_managed_import_root():
+    with pytest.raises(ValueError, match="inside the configured imports directory"):
+        service.ingest(7, Path("/etc/passwd"))
