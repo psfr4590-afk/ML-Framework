@@ -20,6 +20,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 - [ ] Pinned llama.cpp bootstrap completed and commit is `b95502b...`
 - [ ] `convert_hf_to_gguf.py` exists in the pinned checkout
 - [ ] `llama-quantize` exists when quantized export is enabled
+- [x] Termux/Android native quantizer smoke evidence recorded for 2026-09-29: Android 16/aarch64 executable starts successfully
 - [ ] Deterministic network-free release fixture completes
 - [ ] Tokenizer and shard contracts pass
 - [ ] Reduced training run writes a checkpoint and integrity manifest
