@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import load_groups
+from .security import IMPORT_ROOT, validate_import_source
 from .runner import start_stage
 from .secrets import credentials
 from .store import store
@@ -11,6 +12,7 @@ STAGES = ("crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "ex
 
 
 def init():
+    IMPORT_ROOT.mkdir(parents=True, exist_ok=True)
     return store.ensure_seed_datasets()
 
 
@@ -19,7 +21,11 @@ def add(name, description="", group_id=None):
 
 
 def ingest(did, path):
-    return store.ingest_path(did, Path(path))
+    # HTTP/UI ingestion is deliberately confined to the operator-managed import
+    # directory. A localhost API is not a magic security boundary: another local
+    # process can still forge requests and otherwise turn this endpoint into an
+    # arbitrary-file reader.
+    return store.ingest_path(did, validate_import_source(path))
 
 
 def stage(did, name):
