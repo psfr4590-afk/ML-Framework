@@ -23,7 +23,8 @@ This document is the current production-readiness contract for `main`. It distin
 | Native llama.cpp inference | Required for RC/release | `scripts/verify_release.py --bootstrap-native` |
 | Release dependency evidence | Implemented | freeze + SBOM |
 | Current exact-commit CI result | **Pending evidence** | must be recorded for RC commit |
-| Current native release result | **Pending evidence** | must be recorded for RC commit/target |
+| Termux native quantizer execution | **Verified tool-level evidence** | Android 16/aarch64; pinned llama.cpp `b95502b...`; `llama-quantize --help` executed successfully on 2026-09-29 |
+| Current native release result | **Pending evidence** | complete `verify_release.py --bootstrap-native` and end-to-end export/inference must be recorded for the RC commit/target |
 | Target-hardware validation | **Pending evidence** | must be executed on intended deployment hardware |
 | Production training/convergence | **Operational evidence** | separate from RC smoke |
 
@@ -57,6 +58,13 @@ The native gate is intentionally separate from ordinary CI because it requires t
 - dataset and model cards
 - GGUF SHA-256 validation
 - llama.cpp inference result
+
+The 2026-09-29 Termux evidence proves the native quantizer can be built and
+executed on Android 16/aarch64. It does not satisfy the full native release gate:
+the Termux Python environment used for that check was outside the repository's
+declared Python 3.11-3.13 support range and did not provide the required
+`faiss-cpu>=1.15.0,<2` dependency. Therefore the native tool evidence and the
+complete Model Lab release gate remain intentionally separate.
 
 ## Release boundary
 
