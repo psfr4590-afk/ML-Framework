@@ -3,6 +3,7 @@
 # so the installer can choose a host-appropriate wheel without pulling a
 # potentially enormous CUDA bundle onto a low-resource machine.
 pyyaml>=6.0,<7
+defusedxml>=0.7.1,<1
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
 lxml>=6.1,<7
