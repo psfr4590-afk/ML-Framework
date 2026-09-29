@@ -2,7 +2,7 @@
   "format": "model-lab-build-manifest",
   "version": "1.3.0",
   "source_of_truth": "main",
-  "purpose": "Describe the public production build surface without embedding runtime artifacts or machine-specific checksums.",
+  "purpose": "Describe the public release-candidate build surface without embedding runtime artifacts or machine-specific checksums.",
   "tracked_layers": {
     "entrypoints": [
       "launch.py",
@@ -30,7 +30,12 @@
     "desktop_surface": ["ui"],
     "configuration": ["config"],
     "release_tooling": ["scripts"],
-    "verification": ["tests", ".github/workflows/ci.yml"]
+    "verification": [
+      "tests",
+      ".github/workflows/ci.yml",
+      ".github/workflows/security.yml",
+      ".github/workflows/release.yml"
+    ]
   },
   "runtime_exclusions": [
     "datasets/",
@@ -54,8 +59,26 @@
     "export": "GGUF model artifacts plus export manifest"
   },
   "verification": {
-    "automated": ["compileall", "pytest", "configuration contracts", "artifact integrity"],
-    "target_machine": ["CUDA", "Tkinter", "native llama.cpp", "network access"],
+    "automated": [
+      "compileall",
+      "pytest",
+      "configuration contracts",
+      "artifact integrity",
+      "security gate"
+    ],
+    "release": [
+      "dependency freeze",
+      "SBOM",
+      "native llama.cpp bootstrap",
+      "GGUF integrity",
+      "native inference"
+    ],
+    "target_machine": [
+      "CUDA",
+      "Tkinter",
+      "native llama.cpp",
+      "network access"
+    ],
     "release_rule": "Environment-dependent capabilities are reported explicitly and are never converted into unconditional passes."
   }
 }
