@@ -47,11 +47,19 @@ class GoogleCrawler(BaseCrawler):
                 doc = Document(
                     doc_id=f"google:{url}", url=url, source="google", text=text,
                     title=item.get("title", ""), language="en", content_type="documentation",
-                    domain="google.com", meta={"query": query, "displayLink": item.get("displayLink", "")},
+                    domain="google.com",
+                    meta={
+                        "query": query,
+                        "displayLink": item.get("displayLink", ""),
+                        "source_identity": {"type": "search_result", "result_url": url, "query": query},
+                        "license_status": "unknown",
+                        "rights_status": "review_required",
+                    },
                 )
                 if self.weight_lookup:
                     doc = self._apply_weights(doc)
-                yield doc
+                if doc is not None:
+                    yield doc
 
 
 __all__ = ["GoogleCrawler"]

@@ -161,6 +161,14 @@ def main() -> int:
             print(f"  {group.get('id', ''):<32} {group.get('name', '')}")
         return 0
 
+    if args.dataset_id is not None:
+        from pipeline.dataset_identity import validate_session_identity
+        try:
+            validate_session_identity(ROOT, args.dataset_id)
+        except (FileNotFoundError, OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, RuntimeError) as exc:
+            print(f"Dataset identity validation failed: {exc}")
+            return 1
+
     requested, stages = _parse_requested_stages(args.stages)
     if stages is None and requested != "all":
         unknown = [item.strip() for item in requested.split(",") if item.strip() and item.strip() not in STAGES]
