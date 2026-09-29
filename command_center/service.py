@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from .config import load_groups
 from .security import IMPORT_ROOT, validate_import_source
 from .runner import start_stage
