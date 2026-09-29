@@ -51,8 +51,8 @@ Before release:
 3. Run `run_pipeline.py --doctor` on the target machine.
 4. Verify optional native/CUDA capabilities separately.
 5. Confirm no credentials or generated runtime artifacts are staged.
-6. Review the build manifest and release verification report.
-7. Verify the public README and `START_HERE.md` describe the actual current entrypoints.
+6. Review `docs/release/BUILD_MANIFEST.json`, `docs/release/RELEASE_CHECKLIST.md`, and `docs/release/RELEASE_READINESS_PLAN.md`.
+7. Verify the public `README.md` and `docs/development/START_HERE.md` describe the actual current entrypoints.
 
 ## Source-of-truth rule
 
