@@ -71,7 +71,7 @@ Historical verification reports remain useful as audit history but do not overri
 
 ## Native dependency
 
-llama.cpp is not vendored in the public repository. The supported native revision is bootstrapped separately when GGUF conversion, quantization, or native inference verification is required.
+llama.cpp is not vendored in the public repository. The supported native revision is bootstrapped separately when GGUF conversion, quantization, or native inference verification is required. On 2026-09-29, the pinned revision was independently built and executed on Android 16/aarch64 through the `llama-quantize` target. The resulting executable was located at `third_party/llama.cpp/build-model-lab/bin/llama-quantize` and successfully started its help output. This is recorded as native-toolchain evidence only; the complete Python release gate remains separate.
 
 ## Repository hygiene
 
