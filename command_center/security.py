@@ -26,23 +26,27 @@ def is_within(path: str | Path, root: str | Path) -> bool:
 
 
 def validate_import_source(path: str | Path) -> Path:
-    source = resolved(path)
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError("symlink ingest sources are not permitted")
+    source = raw.resolve(strict=False)
     root = IMPORT_ROOT.resolve(strict=False)
     if not is_within(source, root):
         raise ValueError("ingest source must be inside the configured imports directory")
     if not source.exists():
         raise FileNotFoundError(source)
-    if source.is_symlink():
-        raise ValueError("symlink ingest sources are not permitted")
     return source
 
 
 def validate_log_path(path: str | Path) -> Path:
-    candidate = resolved(path)
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError("symlink log paths are not permitted")
+    candidate = raw.resolve(strict=False)
     allowed_roots = (ROOT / "datasets", ROOT / ".runtime")
     if not any(is_within(candidate, root) for root in allowed_roots):
         raise ValueError("log path is outside the command-center log roots")
-    if candidate.is_symlink() or not candidate.is_file():
+    if not candidate.is_file():
         raise ValueError("log path must be a regular file")
     if "log" not in candidate.name.lower():
         raise ValueError("requested file is not a log")
