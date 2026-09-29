@@ -108,6 +108,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
     expected_kinds = {kind for kind, enabled in group.get("sources", {}).items() if enabled}
     assert {source["kind"] for source in data["sources"]} == expected_kinds
     assert {"github", "google"} - expected_kinds == {"github", "google"}
+    assert expected_kinds == {"web", "arxiv", "huggingface"}
     assert {source["dataset_group"] for source in data["sources"]} == {"swe_cs_systems"}
     assert all({"kind", "identifier", "revision", "license", "raw_source_sha256", "dataset_group"} <= set(source) for source in data["sources"])
     assert _source_manifest_is_valid(target)
