@@ -104,7 +104,9 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
     assert data["source_definition_files"]["pipeline_config"]["sha256"]
     assert data["source_definition_files"]["dataset_profiles"]["sha256"]
     assert data["sources"]
-    assert {source["kind"] for source in data["sources"]} == {"web", "github", "arxiv", "huggingface", "google"}
+    group = next(item for item in yaml.safe_load((ROOT / "config/dataset_groups.yaml").read_text(encoding="utf-8"))["dataset_groups"] if item["id"] == "swe_cs_systems")
+    expected_kinds = {kind for kind, enabled in group.get("sources", {}).items() if enabled}
+    assert {source["kind"] for source in data["sources"]} == expected_kinds
     assert {source["dataset_group"] for source in data["sources"]} == {"swe_cs_systems"}
     assert all({"kind", "identifier", "revision", "license", "raw_source_sha256", "dataset_group"} <= set(source) for source in data["sources"])
     assert _source_manifest_is_valid(target)
