@@ -1,4 +1,3 @@
-from pathlib import Path
 from ..core.config import ROOT
 from command_center.security import validate_log_path, validate_tail_lines
 
