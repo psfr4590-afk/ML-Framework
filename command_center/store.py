@@ -10,6 +10,7 @@ from threading import RLock
 from pipeline.integrity import artifact_valid, sha256_file
 
 from .config import DATASETS, group_by_id, profile_by_group_id, validate_profile_catalog
+from .security import MAX_INGEST_BYTES, MAX_INGEST_FILES, reject_symlink_tree
 
 LOCK = RLock()
 STAGES = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
@@ -145,12 +146,40 @@ class DatasetStore:
 
     def ingest_path(self, did, source: Path):
         with LOCK:
-            source = source.resolve(); root = self.path(did); dest = root / "raw"
-            if not source.exists(): raise FileNotFoundError(source)
+            source = Path(source).resolve(strict=False)
+            root = self.path(did)
+            dest = root / "raw"
+            if not source.exists():
+                raise FileNotFoundError(source)
+            if source.is_symlink():
+                raise ValueError("symlink ingest sources are not permitted")
+            if source == root or source == dest or source.is_relative_to(root):
+                raise ValueError("ingest source cannot be inside the destination dataset")
+            reject_symlink_tree(source)
             paths = [source] if source.is_file() else [p for p in source.rglob("*") if p.is_file()]
+            if len(paths) > MAX_INGEST_FILES:
+                raise ValueError(f"ingest contains too many files; limit is {MAX_INGEST_FILES}")
+            total_bytes = 0
             for p in paths:
-                rel = p.name if source.is_file() else p.relative_to(source).as_posix(); target = dest / rel; target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(p, target)
-            stages = self.get(did)["stages"]; stages["crawl"] = "complete"; self.update(did, status="COLLECTED", stages=stages); self.refresh_stats(did); self.event(did, "ingest.completed", {"files": len(paths)})
+                try:
+                    size = p.stat().st_size
+                except OSError as exc:
+                    raise ValueError(f"cannot inspect ingest source: {p}") from exc
+                total_bytes += size
+                if total_bytes > MAX_INGEST_BYTES:
+                    raise ValueError(f"ingest exceeds the {MAX_INGEST_BYTES} byte limit")
+            for p in paths:
+                rel = p.name if source.is_file() else p.relative_to(source).as_posix()
+                target = (dest / rel).resolve(strict=False)
+                if not target.is_relative_to(dest.resolve()):
+                    raise ValueError("ingest destination escapes the dataset raw directory")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(p, target, follow_symlinks=False)
+            stages = self.get(did)["stages"]
+            stages["crawl"] = "complete"
+            self.update(did, status="COLLECTED", stages=stages)
+            self.refresh_stats(did)
+            self.event(did, "ingest.completed", {"files": len(paths), "bytes": total_bytes})
 
     def _verified_stage(self, stage, paths):
         paths = [p for p in paths if p is not None]
