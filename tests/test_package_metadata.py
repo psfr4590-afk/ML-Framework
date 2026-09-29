@@ -9,6 +9,7 @@ _RUNTIME_REQUIREMENTS = {
     "sentence-transformers",
     "faiss-cpu",
     "pyyaml",
+    "defusedxml",
     "requests",
     "beautifulsoup4",
     "lxml",

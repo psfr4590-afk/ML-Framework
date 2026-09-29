@@ -5,6 +5,7 @@ import platform
 import sys
 
 from fastapi import FastAPI, HTTPException, Request
+from pydantic import Field
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -12,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .runner import stop
 from .service import add, credential_delete, credential_list, credential_set, credential_test, groups, ingest, init, stage, status
 from .store import store
+from .security import MAX_REQUEST_BYTES, validate_tail_lines
 
 LOCAL_ORIGINS = {"http://127.0.0.1", "http://localhost", "http://[::1]"}
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "testclient", "testserver"}
@@ -24,6 +26,13 @@ class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/api/"):
+            content_length = request.headers.get("content-length")
+            if content_length:
+                try:
+                    if int(content_length) > MAX_REQUEST_BYTES:
+                        return JSONResponse(status_code=413, content={"error": {"code": "REQUEST_TOO_LARGE", "message": "Request body exceeds the command-center limit"}})
+                except ValueError:
+                    return JSONResponse(status_code=400, content={"error": {"code": "INVALID_CONTENT_LENGTH", "message": "Invalid Content-Length"}})
             client_host = request.client.host if request.client else None
             if client_host not in LOCAL_CLIENT_HOSTS:
                 message = "Command center is localhost-only."
@@ -48,23 +57,23 @@ app.add_middleware(LocalhostOnlyMiddleware)
 
 
 class CredentialSet(BaseModel):
-    name: str
-    secret: str
-    provider: str = "custom"
-    kind: str = "token"
-    env_var: str = ""
-    description: str = ""
-    identity: str = ""
+    name: str = Field(min_length=1, max_length=128)
+    secret: str = Field(min_length=1, max_length=65536)
+    provider: str = Field(default="custom", max_length=128)
+    kind: str = Field(default="token", max_length=64)
+    env_var: str = Field(default="", max_length=128)
+    description: str = Field(default="", max_length=4096)
+    identity: str = Field(default="", max_length=4096)
 
 
 class DatasetCreate(BaseModel):
-    name: str
-    description: str = ""
-    group_id: str | None = None
+    name: str = Field(min_length=1, max_length=256)
+    description: str = Field(default="", max_length=4096)
+    group_id: str | None = Field(default=None, max_length=128)
 
 
 class DatasetIngest(BaseModel):
-    path: str
+    path: str = Field(min_length=1, max_length=4096)
 
 
 def _safe_error(exc: Exception, code: str = "REQUEST_FAILED") -> HTTPException:
@@ -152,4 +161,4 @@ def crawl_stats(did: int): return store.crawl_stats(did)
 @app.get("/api/datasets/{did}/crawl/domains")
 def crawl_domains(did: int): return store.crawl_domains(did)
 @app.get("/api/datasets/{did}/crawl/log")
-def crawl_log(did: int, tail: int = 80): return store.crawl_log(did, tail)
+def crawl_log(did: int, tail: int = 80): return store.crawl_log(did, validate_tail_lines(tail))

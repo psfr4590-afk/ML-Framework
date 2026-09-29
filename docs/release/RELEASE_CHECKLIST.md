@@ -12,6 +12,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 - [ ] `python -m pytest -q` passes with the declared coverage threshold
 - [ ] `python run_pipeline.py --doctor` has no required failures
 - [ ] Security gate passes: secret scan, `pip check`, `pip-audit`
+- [ ] CodeQL security-extended analysis passes for the exact RC commit
 - [ ] No unintended generated artifacts, credentials, caches, or native build products are tracked
 
 ## 2. Native release gate

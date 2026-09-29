@@ -143,9 +143,6 @@ def _convert_to_f16(converter: Path, hf_dir: Path, gguf_dir: Path) -> Path:
 
 def _find_quantizer(llamacpp_dir: Path) -> Path:
     names = ["llama-quantize", "llama-quantize.exe"]
-    for name in names:
-        found = shutil.which(name)
-        if found: return Path(found)
     for base in (llamacpp_dir / "build", llamacpp_dir / "bin", llamacpp_dir):
         if base.is_dir():
             for name in names:
