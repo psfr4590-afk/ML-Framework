@@ -21,7 +21,7 @@ APPROVED_HOSTS = {
     "postgresql.org", "www.postgresql.org", "sqlite.org", "kubernetes.io", "www.rfc-editor.org",
     "git-scm.com", "go.dev", "pytorch.org", "scikit-learn.org", "jax.readthedocs.io",
     "huggingface.co", "mlflow.org", "airflow.apache.org", "owasp.org", "csrc.nist.gov",
-    "physics.nist.gov", "www.cisa.gov", "lean-lang.org", "coq.inria.fr", "www.nist.gov", "www.swgde.org",
+    "physics.nist.gov", "chemistry.nist.gov", "www.cisa.gov", "lean-lang.org", "coq.inria.fr", "www.nist.gov", "www.swgde.org",
     "plato.stanford.edu", "www.nature.com", "www.acm.org", "www.cs.cmu.edu", "www.cs.cornell.edu",
     "www.sec.gov", "fred.stlouisfed.org", "www.bis.org", "www.ncbi.nlm.nih.gov", "www.ebi.ac.uk",
     "docs.ros.org", "www.genome.gov", "www.annualreviews.org", "openstax.org", "dlmf.nist.gov",
