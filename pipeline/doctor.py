@@ -84,10 +84,10 @@ def _llamacpp_state(root: Path) -> tuple[bool, str]:
         return False, f"unable to inspect llama.cpp revision: {exc}"
     if not actual.startswith(LLAMACPP_COMMIT):
         return False, f"llama.cpp revision mismatch: expected {LLAMACPP_COMMIT}..., found {actual or 'unknown'}"
-    quant = [p for p in target.rglob("llama-quantize*") if p.is_file()]
+    quant = [p for p in target.rglob("llama-quantize*") if p.is_file() and os.access(p, os.X_OK)]
     if not quant:
-        return False, f"llama.cpp {LLAMACPP_TAG} ({LLAMACPP_COMMIT}...) converter present; llama-quantize executable not found"
-    return True, f"llama.cpp {LLAMACPP_TAG} ({LLAMACPP_COMMIT}...) ready; converter and quantizer found ({quant[0]})"
+        return False, f"llama.cpp {LLAMACPP_TAG} ({LLAMACPP_COMMIT}...) converter present; executable llama-quantize not found"
+    return True, f"llama.cpp {LLAMACPP_TAG} ({LLAMACPP_COMMIT}...) ready; converter and executable quantizer found ({quant[0]})"
 
 
 def _config_state(root: Path) -> tuple[bool, str]:
