@@ -7,7 +7,7 @@ The repository is currently being prepared as a **release candidate (RC)**. The 
 ## RC status
 
 **Current branch:** `main`  
-**Current commit:** `1aadc8ea1df65721ae63be85681dc8a370f73700`  
+**Current commit:** the current `main` HEAD; record the exact SHA in the RC evidence.  
 **Package version:** `1.3.0`  
 **PRs #22 and #24:** merged
 
