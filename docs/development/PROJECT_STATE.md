@@ -2,7 +2,7 @@
 
 **Version:** 1.3.0  
 **Release posture:** Release-candidate preparation  
-**Source of truth:** `main` at `1aadc8ea1df65721ae63be85681dc8a370f73700`
+**Source of truth:** the current public `main` branch
 
 ## Identity
 
