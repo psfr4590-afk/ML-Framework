@@ -4,6 +4,8 @@
 
 The repository is currently being prepared as a **release candidate (RC)**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. The RC gate is intentionally evidence-driven: a clean CI result and the native release verification must be executed for the exact release candidate commit before a production release is claimed.
 
+**Termux native-toolchain evidence (2026-09-29):** on Android 16 / aarch64, the pinned llama.cpp checkout at `b95502b...` was configured and built successfully through the `llama-quantize` target. The resulting Android ELF executable was started successfully and its help output enumerated the supported quantization types. This verifies the native quantizer itself on that target; it does **not** replace the complete Python release gate or an end-to-end Model Lab export/inference run.
+
 ## RC status
 
 **Current branch:** `main`  
@@ -229,7 +231,7 @@ bash scripts/bootstrap_llama_cpp.sh
 python scripts/verify_release.py --bootstrap-native
 ```
 
-The native bootstrap uses a reduced Android-safe build profile under Termux. The Python-side GGUF converter remains part of the pinned llama.cpp checkout.
+The native bootstrap uses a reduced Android-safe build profile under Termux and builds only the required `llama-quantize` target. The Termux build is serialized to reduce memory pressure during compilation. The Python-side GGUF converter remains part of the pinned llama.cpp checkout. The current Termux evidence was produced with the native binary at `third_party/llama.cpp/build-model-lab/bin/llama-quantize`.
 
 `sentence-transformers` and `faiss-cpu` are required runtime dependencies because semantic deduplication is a required pipeline capability. The default embedding model remains local-only; set `allow_model_download: true` only when an explicit model download is acceptable.
 
