@@ -2,7 +2,24 @@
 
 **ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: an end-to-end, local-first system for building training datasets, training a model, and exporting it for local inference.
 
-This project is the result of a deliberately hardened build process. The goal is not another demo notebook or a collection of disconnected ML scripts. It is a reproducible path from seeded data sources to a locally usable trained model.
+The repository is currently being prepared as a **release candidate (RC)**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. The RC gate is intentionally evidence-driven: a clean CI result and the native release verification must be executed for the exact release candidate commit before a production release is claimed.
+
+## RC status
+
+**Current branch:** `main`  
+**Current commit:** `1aadc8ea1df65721ae63be85681dc8a370f73700`  
+**Package version:** `1.3.0`  
+**PRs #22 and #24:** merged
+
+The repository has completed the current hardening and regression-repair work represented by those merges. The remaining release evidence is execution-dependent, not a missing implementation contract:
+
+- current-`main` CI and security results must be recorded for the exact RC commit;
+- `python scripts/verify_release.py --bootstrap-native` must complete successfully;
+- the resulting GGUF must pass native llama.cpp inference validation;
+- the final release evidence must retain dependency freeze, SBOM, provenance, export, integrity, and inference records;
+- production training remains a separate operational run and is not implied by the bounded RC smoke test.
+
+A green static test suite alone is not a production-release claim.
 
 ## What it does
 
@@ -23,7 +40,9 @@ The repository includes:
 - GGUF export for local inference
 - a localhost FastAPI command center and desktop control surface
 - contract, regression, structure, and machine-environment tests
-- release verification tooling
+- security and dependency auditing
+- deterministic release verification and native GGUF/inference validation tooling
+- release evidence generation, including dependency freeze and SBOM output
 
 ## Repository map
 
@@ -52,13 +71,14 @@ ML-Framework/
 
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Start Here](docs/development/START_HERE.md)
-- [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md)
 - [Project State](docs/development/PROJECT_STATE.md)
+- [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md)
 - [Source of Truth](docs/development/SYNC_SOURCE_OF_TRUTH.md)
 - [Release Checklist](docs/release/RELEASE_CHECKLIST.md)
 - [Release Readiness](docs/release/RELEASE_READINESS_PLAN.md)
 - [Release Verification](docs/release/RELEASE_VERIFICATION_REPORT.md)
 - [Build Manifest](docs/release/BUILD_MANIFEST.json)
+- [Static Pipeline Audit](docs/release/static_pipeline_audit.md)
 - [Audit Report](docs/verification/AUDIT_REPORT.md)
 - [Verification](docs/verification/VERIFICATION.md)
 - [Verification Checklist](docs/verification/VERIFICATION_CHECKLIST.md)
@@ -82,7 +102,7 @@ General web seeds live in `config/seed_urls.txt`.
 
 ## Quick start
 
-There is exactly one canonical first-run path. From the project root, install with the bootstrapper, verify the environment, then run the default starter profile. Do not make a first-run decision about profiles or training scale. Humanity has suffered enough configuration menus.
+There is exactly one canonical first-run path. From the project root, install with the bootstrapper, verify the environment, then run the default starter profile.
 
 ### Windows PowerShell
 
@@ -124,13 +144,13 @@ The normal pipeline is intentionally linear:
 
 `crawl → clean → dedup → weight → tokenize → shard → train → export`
 
-Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused. This prevents an old or differently prepared dataset from leaking into tokenization, sharding, or training.
+Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused.
 
-Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring the model weights and accidentally replaying a different token sequence. Checkpoints without the required deterministic state or matching provenance are rejected rather than silently resumed.
+Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring model weights.
 
-Final export is stricter still. The checkpoint must carry the canonical pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity. The current tokenizer, weighted-corpus manifest, and shard manifest must belong to the same pipeline configuration. A mismatch stops export before an artifact can be presented as a valid model.
+Final export verifies the checkpoint, tokenizer, weighted corpus, shard manifest, source manifest, pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity before conversion. A mismatch stops export rather than allowing an inconsistent artifact to be presented as a valid model.
 
-The starter profile uses a small real crawl and only two training steps. It is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and then explicitly choose an appropriate larger configuration.
+The starter profile is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and explicitly choose an appropriate larger configuration.
 
 ## Windows launch
 
@@ -140,7 +160,7 @@ After the first-run path is healthy:
 python .\launch.py
 ```
 
-`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend. The UI is designed for a 1760×990 display.
+`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend.
 
 Model Lab navigates the real pipeline and dataset sessions. It does not implement a second copy of the crawler, cleaner, deduplicator, tokenizer, sharder, trainer, or exporter.
 
@@ -152,52 +172,71 @@ python .\run_command_center.py --no-browser
 
 Without `--no-browser`, the backend opens the localhost command center in the default browser after its health endpoint is ready. The command center binds to localhost by default.
 
-## Production verification
+## Release verification
 
-The standard release check is:
+Static verification:
 
 ```bash
 python scripts/verify_release.py
 ```
 
-This runs compilation, the full test suite, and the required project/runtime doctor. It does not claim that machine-specific native export prerequisites were checked. Use `--bootstrap-native` when the release check must also clone/build and verify the supported llama.cpp toolchain.
+This runs compilation, Ruff, the full test suite with coverage reporting, and the required project/runtime doctor. It deliberately does **not** claim native GGUF verification.
 
-Security/release dependency auditing is explicit:
+Full native RC/release verification:
+
+```bash
+python scripts/verify_release.py --bootstrap-native
+```
+
+The native gate additionally reconciles the pinned llama.cpp toolchain and runs a deterministic, network-free fixture through tokenization, sharding, training, GGUF export, export-card generation, GGUF integrity verification, and native llama.cpp inference.
+
+A successful RC candidate should have this command pass before release approval.
+
+## Security and release evidence
 
 ```bash
 python -m pip install -r requirements-security.txt
 python scripts/security_gate.py
+python scripts/generate_release_evidence.py
 ```
 
-The security gate checks tracked source for common secret patterns, verifies installed dependency consistency with `pip check`, and runs `pip-audit`. It is a gate, not a decorative report. A missing audit tool or failing audit is a failure.
+The security gate checks tracked source for common secret patterns, dependency consistency with `pip check`, and dependency vulnerabilities with `pip-audit`.
 
-GitHub Actions runs the same security gate on pushes and pull requests and provides a separate production release workflow for native export verification. The CI path also runs the bootstrap doctor on a clean checkout, so the canonical onboarding path is exercised rather than merely documented.
+The release evidence generator records the resolved dependency environment and SBOM. The release workflow combines those records with the native release verification and uploads the resulting evidence artifact.
+
+## GitHub Actions
+
+The repository contains separate CI, security, and release workflows.
+
+- CI covers Linux and Windows Python 3.11 environments, bootstrap doctor, dependency consistency, Ruff, compilation, tests/coverage, and the Windows PowerShell bootstrap contract.
+- Security runs the repository security gate on `main` pushes and pull requests and can also be dispatched manually.
+- Release runs the security gate, generates dependency/SBOM evidence, executes `verify_release.py --bootstrap-native`, and uploads release evidence. It is configured for manual dispatch and version tags.
+
+GitHub's `workflow_dispatch` trigger is intentionally present on the release workflow so the complete release gate can be run against the default branch before an RC is promoted. citeturn0search0turn0search3
 
 ## Production export requirement
 
-Final GGUF export requires a current llama.cpp checkout containing
-`convert_hf_to_gguf.py`. Quantized exports also require the built `llama-quantize`
-executable. The exporter refuses to claim success when either tool is missing or when the training provenance chain is incomplete or inconsistent.
+Final GGUF export requires the pinned llama.cpp checkout containing `convert_hf_to_gguf.py`. Quantized exports also require the built `llama-quantize` executable. The exporter refuses to claim success when required tools are missing or when the training provenance chain is incomplete or inconsistent.
 
 ## Termux / Android native toolchain
 
-Model Lab supports a headless Termux runtime for the pipeline and native GGUF
-export. The Tk desktop UI is intentionally not a dependency of the portable
-pipeline test suite.
+Model Lab supports a headless Termux runtime for the pipeline and native GGUF export. The Tk desktop UI is intentionally not a dependency of the portable pipeline test suite.
 
-To prepare the native llama.cpp toolchain after the first-run validation:
+To prepare the native llama.cpp toolchain after first-run validation:
 
 ```bash
 bash scripts/bootstrap_llama_cpp.sh
 python scripts/verify_release.py --bootstrap-native
 ```
 
-The native bootstrap uses a reduced Android-safe build profile when running under
-Termux and builds `llama-quantize`, the native artifact required for quantized
-export. The Python-side GGUF converter remains part of the pinned llama.cpp
-checkout. The desktop/native verification path can additionally build and verify
-`llama-cli` where that target is supported.
+The native bootstrap uses a reduced Android-safe build profile under Termux. The Python-side GGUF converter remains part of the pinned llama.cpp checkout.
 
-`sentence-transformers` and `faiss-cpu` are required runtime dependencies because semantic deduplication is a required pipeline capability. They are installed by both the package metadata and the canonical requirements file. The configured embedding model is still kept local by default; set `allow_model_download: true` only when an explicit model download is acceptable.
+`sentence-transformers` and `faiss-cpu` are required runtime dependencies because semantic deduplication is a required pipeline capability. The default embedding model remains local-only; set `allow_model_download: true` only when an explicit model download is acceptable.
 
-`python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is the exception: it is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
+`python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
+
+## Release boundary
+
+The repository does **not** claim that a production dataset has been crawled, that a useful model has converged, that external-source training rights have been legally certified, or that target-hardware native inference has passed merely because the source tree is healthy.
+
+Those are runtime and operational facts. The release process requires evidence for them rather than substituting documentation, historical test counts, or placeholder artifacts.
