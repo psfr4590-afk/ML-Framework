@@ -160,7 +160,7 @@ After the first-run path is healthy:
 python .\launch.py
 ```
 
-`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend.
+`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend. The current desktop UI is documented for a 1760x990 target display; this is a machine/UI verification boundary, not a claim that every host has that display geometry.
 
 Model Lab navigates the real pipeline and dataset sessions. It does not implement a second copy of the crawler, cleaner, deduplicator, tokenizer, sharder, trainer, or exporter.
 
