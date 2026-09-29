@@ -1,52 +1,66 @@
-# Model Lab Production Release Checklist
+# Model Lab Release Candidate / Production Release Checklist
 
-A release is not considered trusted merely because unit tests are green. Every item below is an evidence gate.
+A release candidate is a source-tree candidate plus reproducible evidence. A production release requires the additional target-environment gates.
 
-## Automated and environment gates
+## 1. Repository and automated gates
 
-- [ ] `python -m compileall -q .`
-- [ ] `python -m pytest -q`
+- [ ] Exact RC commit is identified and recorded
+- [ ] Linux CI passes for the exact RC commit
+- [ ] Windows CI passes for the exact RC commit
+- [ ] Windows PowerShell bootstrap contract passes
+- [ ] `python -m compileall -q .` passes
+- [ ] `python -m pytest -q` passes with the declared coverage threshold
 - [ ] `python run_pipeline.py --doctor` has no required failures
+- [ ] Security gate passes: secret scan, `pip check`, `pip-audit`
+- [ ] No unintended generated artifacts, credentials, caches, or native build products are tracked
+
+## 2. Native release gate
+
 - [ ] Pinned llama.cpp bootstrap completed and commit is `b95502b...`
 - [ ] `convert_hf_to_gguf.py` exists in the pinned checkout
 - [ ] `llama-quantize` exists when quantized export is enabled
-- [ ] Small real corpus successfully produces clean/deduped/weighted JSONL
-- [ ] Tokenizer vocabulary exactly matches `train.vocab_size`
-- [ ] Train/validation shards pass manifest hash verification
-- [ ] Reduced training run writes a checkpoint and its integrity manifest
-- [ ] Checkpoint can be reloaded successfully
+- [ ] Deterministic network-free release fixture completes
+- [ ] Tokenizer and shard contracts pass
+- [ ] Reduced training run writes a checkpoint and integrity manifest
+- [ ] Checkpoint reload succeeds
 - [ ] GGUF F16 export succeeds
 - [ ] Requested quantized GGUF export succeeds
-- [ ] Export manifest hashes match the files on disk
-- [ ] Dataset and model cards are generated for every export
-- [ ] Export manifest records dataset/model card paths and SHA-256 hashes
-- [ ] llama.cpp can load the final GGUF and generate at least one token
-- [ ] Interrupted stage resumes only from verified artifacts
-- [ ] Changed source/config invalidates the affected artifact rather than silently reusing it
+- [ ] Export manifest hashes match files on disk
+- [ ] Dataset and model cards are generated and hashed
+- [ ] `scripts/verify_gguf.py` passes
+- [ ] llama.cpp native inference validation passes
 
-## Dataset and security gates
+## 3. Provenance, security, and reproducibility
 
-- [ ] Every production source has a retained source manifest with URL/identifier, retrieval time, revision, license/usage terms, and raw-source SHA-256
+- [ ] Every production source has a retained source manifest with identifier, retrieval time, revision, license/usage terms, and raw-source SHA-256 where available
 - [ ] Attribution and redistribution requirements have been reviewed before publishing a dataset or model
 - [ ] Sources without established training rights are excluded
-- [ ] Removal/takedown changes are applied by rebuilding the affected artifact chain, not by editing generated corpora in place
-- [ ] Crawler boundary tests cover loopback, private/link-local/multicast IPv4 and IPv6, encoded IP forms, and redirects to non-public destinations
-- [ ] Untrusted document/archive parsing is bounded by size and extraction limits and avoids unsafe deserialization
-- [ ] Credential storage has been checked for secret redaction and appropriate local file/OS protections
-- [ ] Command-center endpoints have been reviewed for localhost binding and unauthorized remote access
-- [ ] Dependency vulnerability/license scanning has been completed for the release environment
-- [ ] A software bill of materials is retained for distributed builds when required by the deployment context
+- [ ] Crawler boundary/security tests pass
+- [ ] Untrusted document/archive parsing limits are enforced
+- [ ] Credential storage and redaction controls are verified
+- [ ] Command-center localhost binding and access controls are verified
+- [ ] Dependency vulnerability/license scanning is complete for the release environment
+- [ ] Dependency freeze and SBOM are retained
 
-## Reproducibility and artifact lineage
+## 4. Artifact lineage
 
 - [ ] Full Git commit SHA is recorded
 - [ ] Pipeline configuration SHA-256 is recorded
-- [ ] Dependency lock/constraints fingerprint is recorded when a locked environment is used
-- [ ] Seed/source manifest SHA-256 is recorded
+- [ ] Source manifest SHA-256 is recorded
 - [ ] Shard manifest SHA-256 is recorded
 - [ ] Model configuration and random seeds are recorded
-- [ ] Hardware and driver information is recorded for training runs
+- [ ] Hardware and driver information are recorded for training runs
 - [ ] Deterministic-mode settings are recorded when deterministic output is promised
 - [ ] Final GGUF SHA-256 is recorded
 
-Each completed gate should include its execution environment, result, and relevant artifact or log evidence. Current automated CI status is separate from target-machine native verification.
+## 5. Production-only gates
+
+These are not satisfied by the bounded RC smoke test:
+
+- [ ] Target deployment hardware passes native export/inference
+- [ ] Intended production training run completes successfully
+- [ ] Training loss/convergence and evaluation evidence are recorded
+- [ ] Production dataset provenance/rights review is complete
+- [ ] Release artifact is rebuilt from the exact approved source/config/dependency state
+
+Every completed gate should include its execution environment, result, and relevant artifact or log evidence. Historical reports do not satisfy current gates.
