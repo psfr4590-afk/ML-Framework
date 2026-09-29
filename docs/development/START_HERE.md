@@ -129,10 +129,17 @@ python scripts/verify_release.py --bootstrap-native
 ```
 
 The native bootstrap uses a reduced Android-safe build profile when running under
-Termux and builds `llama-quantize`, the native artifact required for quantized
-export. The Python-side GGUF converter remains part of the pinned llama.cpp
+Termux and builds only `llama-quantize`, the native artifact required for
+quantized export. The Termux build is serialized to reduce memory pressure during
+compilation. The Python-side GGUF converter remains part of the pinned llama.cpp
 checkout. The desktop/native verification path can additionally build and verify
 `llama-cli` where that target is supported.
+
+On 2026-09-29, the Termux path was independently exercised on Android 16/aarch64:
+the pinned checkout reached the `llama-quantize` target, produced an Android ELF
+executable at `third_party/llama.cpp/build-model-lab/bin/llama-quantize`, and the
+binary successfully executed its help command. This is native-tool evidence, not
+a claim that the complete Python release gate has passed on Termux.
 
 `sentence-transformers` and `faiss-cpu` are required runtime dependencies for semantic deduplication and are installed by the canonical bootstrap path. The default embedding model remains local-only; set `allow_model_download: true` explicitly if the model may be downloaded.
 
