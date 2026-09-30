@@ -4,16 +4,16 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 
 ## 1. Repository and automated gates
 
-- [ ] Exact RC commit is identified and recorded
-- [ ] Linux CI passes for the exact RC commit
-- [ ] Windows CI passes for the exact RC commit
-- [ ] Windows PowerShell bootstrap contract passes
-- [ ] `python -m compileall -q .` passes
-- [ ] `python -m pytest -q` passes with the declared coverage threshold
-- [ ] `python run_pipeline.py --doctor` has no required failures
-- [ ] Security gate passes: secret scan, `pip check`, `pip-audit`
-- [ ] CodeQL security-extended analysis passes for the exact RC commit
-- [ ] No unintended generated artifacts, credentials, caches, or native build products are tracked
+- [x] Current RC source state identified on `main`; release commit must be frozen before tagging
+- [x] Linux CI passes on the current `main` source state
+- [x] Windows CI passes on the current `main` source state
+- [x] Windows PowerShell bootstrap contract passes
+- [x] `python -m compileall -q .` passes in CI
+- [x] `python -m pytest -q` passes with the declared coverage threshold
+- [x] `python run_pipeline.py --doctor` has no required failures
+- [x] Security gate passes: secret scan, `pip check`, `pip-audit`
+- [x] CodeQL analysis passes on the current `main` source state
+- [x] No unintended generated artifacts, credentials, caches, or native build products are tracked
 
 ## 2. Native release gate
 

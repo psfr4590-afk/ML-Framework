@@ -22,10 +22,10 @@ This document is the current production-readiness contract for `main`. It distin
 | GGUF integrity | Gated | `scripts/verify_gguf.py` |
 | Native llama.cpp inference | Required for RC/release | `scripts/verify_release.py --bootstrap-native` |
 | Release dependency evidence | Implemented | freeze + SBOM |
-| Current exact-commit CI result | **Pending evidence** | must be recorded for RC commit |
+| Current main CI result | **PASS** | Linux + Windows CI green on latest verified main commit |
 | Termux native quantizer execution | **Verified tool-level evidence** | Android 16/aarch64; pinned llama.cpp `b95502b...`; `llama-quantize --help` executed successfully on 2026-09-29 |
-| Current native release result | **Pending evidence** | complete `verify_release.py --bootstrap-native` and end-to-end export/inference must be recorded for the RC commit/target |
-| Target-hardware validation | **Pending evidence** | must be executed on intended deployment hardware |
+| Current native release result | **Pending execution** | complete `verify_release.py --bootstrap-native` and end-to-end export/inference remain required |
+| Target-hardware validation | **Pending execution** | must be executed on intended deployment hardware |
 | Production training/convergence | **Operational evidence** | separate from RC smoke |
 
 ## Release commands

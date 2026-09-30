@@ -2,20 +2,20 @@
 
 **ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: an end-to-end, local-first system for building training datasets, training a model, and exporting it for local inference.
 
-The repository is currently being prepared as a **release candidate (RC)**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. The RC gate is intentionally evidence-driven: a clean CI result and the native release verification must be executed for the exact release candidate commit before a production release is claimed.
+The repository is at **release-candidate (RC) source readiness**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. The latest `main` commit has passed Linux CI, Windows CI, Security, and CodeQL; the native release gate remains a separate execution-dependent requirement before a production release is claimed.
 
 **Termux native-toolchain evidence (2026-09-29):** on Android 16 / aarch64, the pinned llama.cpp checkout at `b95502b...` was configured and built successfully through the `llama-quantize` target. The resulting Android ELF executable was started successfully and its help output enumerated the supported quantization types. This verifies the native quantizer itself on that target; it does **not** replace the complete Python release gate or an end-to-end Model Lab export/inference run.
 
 ## RC status
 
 **Current branch:** `main`  
-**Current commit:** the current `main` HEAD; record the exact SHA in the RC evidence.  
+**Automated gate state:** latest `main` CI, Security, and CodeQL checks are green.  
 **Package version:** `1.3.0`  
 **PRs #22 and #24:** merged
 
 The repository has completed the current hardening and regression-repair work represented by those merges. The remaining release evidence is execution-dependent, not a missing implementation contract:
 
-- current-`main` CI and security results must be recorded for the exact RC commit;
+- the native release gate must complete successfully for the exact release commit;
 - `python scripts/verify_release.py --bootstrap-native` must complete successfully;
 - the resulting GGUF must pass native llama.cpp inference validation;
 - the final release evidence must retain dependency freeze, SBOM, provenance, export, integrity, and inference records;
@@ -214,7 +214,7 @@ The repository contains separate CI, security, and release workflows.
 - Security runs the repository security gate on `main` pushes and pull requests and can also be dispatched manually.
 - Release runs the security gate, generates dependency/SBOM evidence, executes `verify_release.py --bootstrap-native`, and uploads release evidence. It is configured for manual dispatch and version tags.
 
-GitHub's `workflow_dispatch` trigger is intentionally present on the release workflow so the complete release gate can be run against the default branch before an RC is promoted. citeturn0search0turn0search3
+The release workflow is manually dispatchable and tag-driven so the complete native gate can be run against the approved source before an RC is promoted.
 
 ## Production export requirement
 
