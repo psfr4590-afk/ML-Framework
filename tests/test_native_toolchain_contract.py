@@ -28,6 +28,7 @@ def test_native_doctor_rejects_wrong_revision(monkeypatch, tmp_path):
     (target / ".git").mkdir()
     (target / "convert_hf_to_gguf.py").write_text("# fixture\n", encoding="utf-8")
     (target / "llama-quantize").write_text("fixture", encoding="utf-8")
+    (target / "llama-quantize").chmod(0o755)
 
     monkeypatch.setattr(
         doctor.subprocess,
