@@ -7,8 +7,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from command_center import security
-from pipeline import config_validation, doctor, integrity, model_sizer
+from command_center import security, config as cc_config, web as cc_web
+from pipeline import config_validation, doctor, integrity, model_sizer, orchestrator
+from pipeline.embedder import semantic_dedup
+from pipeline.trainer import train as train_mod
+from pipeline.types import Document
 from pipeline.trainer.model import (
     Block,
     CausalSelfAttention,
@@ -277,7 +280,7 @@ def test_doctor_helpers(monkeypatch, tmp_path):
     monkeypatch.setattr(doctor.importlib, "import_module", lambda name: (_ for _ in ()).throw(ImportError("nope")))
     assert doctor._torch_state()[0] is False
     assert doctor._semantic_dedup_state()[0] is False
-    monkeypatch.setattr(doctor.importlib, "import_module", lambda name: object())
+    monkeypatch.setattr(doctor.importlib, "import_module", lambda name: SimpleNamespace(__version__="test", cuda=SimpleNamespace(is_available=lambda: False)))
     assert doctor._semantic_dedup_state()[0]
     target = tmp_path / "third_party" / "llama.cpp"
     target.mkdir(parents=True)
@@ -326,6 +329,7 @@ def test_trainer_validation_and_prune(tmp_path):
     assert trainer.log_path.parent.is_dir()
     with pytest.raises(RuntimeError):
         trainer.run()
+    trainer.ckpt_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         p = trainer.ckpt_dir / f"ckpt_{i:07d}.pt"
         p.write_bytes(b"x")
@@ -339,3 +343,181 @@ def test_provenance_requires_manifests(tmp_path):
     cfg = {"_pipeline_config_sha256": "abc", "pipeline": {"output_dir": str(tmp_path)}}
     with pytest.raises(RuntimeError):
         _provenance(cfg, model_cfg, tmp_path / "shards")
+
+def test_integrity_validate_checkpoint_and_atomic_cleanup(tmp_path):
+    cfg = ModelConfig(vocab_size=8, seq_len=4, n_layers=1, n_heads=1, n_kv_heads=1, d_model=8, d_ffn=8)
+    model = LlamaModel(cfg)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cpu", enabled=False)
+    path = save_checkpoint(model, opt, scaler, 2, 0.5, {"seed": 1}, tmp_path)
+    assert integrity.validate_checkpoint(path, expected_config=cfg.to_dict())["step"] == 2
+    with pytest.raises(RuntimeError):
+        integrity.validate_checkpoint(path, expected_config={**cfg.to_dict(), "seq_len": 9})
+    mp = integrity.manifest_path(path)
+    meta = json.loads(mp.read_text(encoding="utf-8"))
+    meta["kind"] = "wrong"
+    mp.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        integrity.validate_checkpoint(path)
+
+def test_integrity_checkpoint_state_failures(tmp_path):
+    cfg = ModelConfig(vocab_size=8, seq_len=4, n_layers=1, n_heads=1, n_kv_heads=1, d_model=8, d_ffn=8)
+    model = LlamaModel(cfg)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cpu", enabled=False)
+    path = save_checkpoint(model, opt, scaler, 1, 0.5, {}, tmp_path)
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload["model_cfg"]["seq_len"] = 5
+    torch.save(payload, path)
+    integrity.write_manifest(path, kind="checkpoint")
+    with pytest.raises(RuntimeError):
+        integrity.validate_checkpoint(path)
+    payload["model_cfg"] = cfg.to_dict()
+    payload["model"] = []
+    torch.save(payload, path)
+    integrity.write_manifest(path, kind="checkpoint")
+    with pytest.raises(RuntimeError):
+        integrity.validate_checkpoint(path)
+
+def test_config_catalog_branches(monkeypatch):
+    groups = [{"id": "a"}, {"id": "b"}]
+    profiles = [{"dataset_id": 1, "group_id": "a"}, {"dataset_id": 2, "group_id": "b"}]
+    monkeypatch.setattr(cc_config, "load_groups", lambda: groups)
+    monkeypatch.setattr(cc_config, "load_profiles", lambda: profiles)
+    assert cc_config.validate_profile_catalog() == {1: profiles[0], 2: profiles[1]}
+    assert cc_config.profile_by_id(2) == profiles[1]
+    assert cc_config.profile_by_group_id("a") == profiles[0]
+    assert cc_config.group_by_id("b") == groups[1]
+    for bad in [
+        [{"dataset_id": "x", "group_id": "a"}],
+        [{"dataset_id": 0, "group_id": "a"}],
+        [{"dataset_id": 1, "group_id": "missing"}],
+        [{"dataset_id": 1, "group_id": "a"}, {"dataset_id": 1, "group_id": "b"}],
+        [{"dataset_id": 1, "group_id": "a"}, {"dataset_id": 3, "group_id": "b"}],
+        [{"dataset_id": 1, "group_id": "a"}, {"dataset_id": 2, "group_id": "a"}],
+    ]:
+        monkeypatch.setattr(cc_config, "load_profiles", lambda bad=bad: bad)
+        with pytest.raises(ValueError):
+            cc_config.validate_profile_catalog()
+
+def test_command_center_web_contracts(monkeypatch):
+    assert "M²S Model Training Pipeline" in cc_web.index().body.decode()
+    system = cc_web.system()
+    assert system["security"]["api_access"] == "localhost-only"
+    assert cc_web._safe_error(FileNotFoundError("x")).status_code == 404
+    assert cc_web._safe_error(ValueError("x")).status_code == 400
+    assert cc_web._safe_error(RuntimeError("x")).status_code == 500
+    assert cc_web._safe_error(ValueError("x"), code="BAD").detail["code"] == "BAD"
+    monkeypatch.setattr(cc_web, "status", lambda did=None: {"id": did} if did is not None else {"items": []})
+    monkeypatch.setattr(cc_web.store, "tail_events", lambda did: [{"event": did}])
+    assert cc_web.dataset(4)["events"] == [{"event": 4}]
+    monkeypatch.setattr(cc_web, "status", lambda did=None: None)
+    with pytest.raises(HTTPException):
+        cc_web.dataset(4)
+    monkeypatch.setattr(cc_web, "add", lambda *a: {"created": a[0]})
+    assert cc_web.create(cc_web.DatasetCreate(name="n"))["created"] == "n"
+    monkeypatch.setattr(cc_web, "add", lambda *a: (_ for _ in ()).throw(ValueError("bad")))
+    with pytest.raises(HTTPException):
+        cc_web.create(cc_web.DatasetCreate(name="n"))
+    monkeypatch.setattr(cc_web, "groups", lambda: ["g"])
+    assert cc_web.api_groups() == ["g"]
+    monkeypatch.setattr(cc_web, "credential_list", lambda: ["c"])
+    assert cc_web.creds() == ["c"]
+    monkeypatch.setattr(cc_web, "credential_set", lambda *a: {"name": a[0]})
+    assert cc_web.set_cred(cc_web.CredentialSet(name="n", secret="s"))["name"] == "n"
+    monkeypatch.setattr(cc_web, "credential_delete", lambda name: name)
+    assert cc_web.del_cred("n") == {"deleted": "n"}
+
+def test_command_center_middleware_security():
+    from starlette.requests import Request
+    import asyncio
+    async def call_next(request):
+        return cc_web.JSONResponse(status_code=200, content={"ok": True})
+    async def run(headers, method="GET", path="/api/system", host="127.0.0.1"):
+        scope = {"type": "http", "method": method, "path": path, "headers": [(k.encode(), v.encode()) for k, v in headers.items()], "client": (host, 1234), "scheme": "http", "server": ("127.0.0.1", 80), "query_string": b"", "root_path": "", "http_version": "1.1"}
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return await cc_web.LocalhostOnlyMiddleware(cc_web.app).dispatch(Request(scope, receive), call_next)
+    assert asyncio.run(run({"content-length": str(cc_web.MAX_REQUEST_BYTES + 1)})).status_code == 413
+    assert asyncio.run(run({"content-length": "bad"})).status_code == 400
+    assert asyncio.run(run({}, host="10.0.0.2")).status_code == 403
+    assert asyncio.run(run({"origin": "https://evil.test", cc_web.CONTROL_HEADER: "1"}, method="POST")).status_code == 403
+    assert asyncio.run(run({}, method="POST")).status_code == 403
+    assert asyncio.run(run({cc_web.CONTROL_HEADER: "1"}, method="POST")).status_code == 200
+    assert asyncio.run(run({}, path="/health")).status_code == 200
+
+def test_semantic_dedup_fallback_and_embedding_paths(monkeypatch):
+    docs = [
+        Document("1", text="alpha beta gamma", final_weight=1.0),
+        Document("2", text="alpha beta gamma", final_weight=2.0),
+        Document("3", text="unique words here", final_weight=1.0),
+    ]
+    d = semantic_dedup.SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.8})
+    assert d.run([]) == []
+    kept = d.run(docs)
+    assert [x.doc_id for x in kept] == ["2", "3"]
+    assert list(d.stream(iter(docs), buffer_size=2))[0].doc_id == "2"
+    with pytest.raises(ValueError):
+        list(d.stream(iter(docs), buffer_size=0))
+    assert semantic_dedup.SemanticDeduplicator._fallback_similarity("", "x") == 0.0
+    assert semantic_dedup._cosine_brute(np.eye(2, dtype=np.float32), np.array([1.0, 0.0], dtype=np.float32), 1)[1][0] == 0
+    monkeypatch.setattr(semantic_dedup, "ST_AVAILABLE", False)
+    with pytest.raises(RuntimeError, match="dependencies"):
+        semantic_dedup.SemanticDeduplicator({"mode": "embedding"})._ensure_embedding_or_fallback()
+    monkeypatch.setattr(semantic_dedup, "ST_AVAILABLE", True)
+    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", True)
+    class FakeModel:
+        def get_sentence_embedding_dimension(self): return 2
+        def encode(self, chunks, **kwargs): return np.array([[1, 0] for _ in chunks], dtype=np.float32)
+    monkeypatch.setattr(semantic_dedup, "SentenceTransformer", lambda *a, **k: FakeModel())
+    emb = semantic_dedup.SemanticDeduplicator({"mode": "embedding", "model_path": "local"})
+    emb._load_model()
+    assert emb._dim == 2
+    assert emb._embed(["abc"])[0].tolist() == [1.0, 0.0]
+    assert emb._build_index(np.eye(2, dtype=np.float32)) is not None
+
+def test_orchestrator_helpers_and_manifest_validation(tmp_path, monkeypatch):
+    cfg = {"crawl": {"sources": {"web": True, "github": True, "arxiv": False, "huggingface": True}, "web": {"seed_urls": ["https://a"]}}}
+    groups_path = tmp_path / "groups.yaml"
+    groups_path.write_text("dataset_groups:\n  - id: g1\n    sources: {web: true, github: true, huggingface: true}\n    huggingface:\n      datasets: [{repo: org/data, config: c, split: train}]\n    google:\n      queries: [ml]\n", encoding="utf-8")
+    paths = {"dataset_groups": groups_path}
+    sources = orchestrator._manifest_sources(cfg, paths)
+    assert any(x["kind"] == "huggingface" for x in sources)
+    with pytest.raises(ValueError):
+        orchestrator._manifest_sources(cfg, paths, "missing")
+    assert orchestrator._source_entry("web", "u", "g")["license"] == "unknown"
+    root = tmp_path
+    for name in ["pipeline_config.yaml", "source_weights.yaml", "dataset_groups.yaml", "dataset_profiles.yaml"]:
+        (root / name).write_text(name, encoding="utf-8")
+    sp = orchestrator._source_definition_paths({"crawl": {}}, root)
+    assert set(sp) == {"pipeline_config", "source_weights", "dataset_groups", "dataset_profiles"}
+    out = tmp_path / "manifest.json"
+    monkeypatch.setattr(orchestrator, "PROJECT_ROOT", tmp_path)
+    orchestrator._write_source_manifest(out, cfg, sp, selected_group_id="all", retrieval_started_at="s", retrieval_completed_at="e")
+    assert orchestrator._source_manifest_is_valid(out, "all", sp)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    data["sources"][0]["raw_source_sha256"] = "bad"
+    out.write_text(json.dumps(data), encoding="utf-8")
+    assert not orchestrator._source_manifest_is_valid(out)
+
+def test_orchestrator_jsonl_and_pipeline_run_dispatch(tmp_path, monkeypatch):
+    good = tmp_path / "good.jsonl"
+    good.write_text(json.dumps(Document("1", text="hello").to_jsonl()) + "\n\n", encoding="utf-8")
+    assert [d.doc_id for d in orchestrator._jsonl_read(good)] == ["1"]
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text('"not an object"\n', encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        list(orchestrator._jsonl_read(bad))
+    p = object.__new__(orchestrator.Pipeline)
+    p.cfg = {"stages": {"clean": True}, "pipeline": {}}
+    p._scratch = tmp_path
+    p._resume = False
+    calls = []
+    monkeypatch.setattr(p, "stage_clean", lambda path: calls.append(("clean", path)) or tmp_path / "clean")
+    assert p.run("clean") == {"clean": tmp_path / "clean"}
+    assert calls == [("clean", tmp_path / "01_crawled.jsonl")]
+    with pytest.raises(ValueError):
+        p.run("unknown")
+    p.cfg = {"stages": {}}
+    with pytest.raises(ValueError):
+        p.run("all")
