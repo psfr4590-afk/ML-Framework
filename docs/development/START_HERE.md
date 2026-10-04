@@ -1,10 +1,10 @@
 # Model Lab
 
-**Model Lab** is the package name for the **M²S Model Training Pipeline** command center.
+Model Lab is the command center and pipeline package for the M²S Model Training Pipeline.
 
 ## First run
 
-There is exactly one canonical first-run path. From the extracted project root, install with the bootstrapper, run the environment preflight, then run the default starter profile.
+Use the bootstrapper, then the appropriate doctor, then the bounded starter profile.
 
 ### Windows PowerShell
 
@@ -22,125 +22,84 @@ python3 bootstrap.py --doctor
 python3 run_pipeline.py --no-resume
 ```
 
-`bootstrap.py --install` installs the framework dependencies first, then installs PyTorch from the official CUDA wheel index by default. CPU-only hosts can explicitly use `--torch-channel cpu`, while `--torch-channel default` uses the standard PyPI PyTorch channel.
+The bootstrapper installs framework dependencies and selects the PyTorch channel. CUDA is the default channel; CPU-only hosts can explicitly select `--torch-channel cpu`.
 
-The default `config/pipeline_config.yaml` is the canonical starter profile. It is deliberately bounded and CPU-safe, and it exercises the real pipeline and artifact chain without starting a long production training job. A newcomer does not need to choose a profile for the first run.
+The canonical starter profile is `config/pipeline_config.yaml`. It is bounded and CPU-safe. The larger `config/pipeline_config.full.yaml` profile must be selected explicitly.
 
-If the starter run succeeds, inspect the project and host before expensive work:
-
-```powershell
-python .\run_pipeline.py --doctor --hardware-report
-```
-
-or:
+After the starter run:
 
 ```bash
 python3 run_pipeline.py --doctor --hardware-report
-```
-
-`bootstrap.py --doctor` and `run_pipeline.py --doctor` have different jobs. The bootstrap doctor checks installation and host prerequisites. The pipeline doctor checks project/runtime readiness. Neither doctor runs pipeline stages. The hardware report adds conservative training guidance for the current host.
-
-Useful read-only inspection commands are also available:
-
-```powershell
-python .\run_pipeline.py --list-stages
-python .\run_pipeline.py --list-groups
-```
-
-or:
-
-```bash
 python3 run_pipeline.py --list-stages
 python3 run_pipeline.py --list-groups
 ```
 
-## What happens during a run
+Use the PowerShell equivalent on Windows.
 
-The normal pipeline is intentionally linear:
+## Doctor boundaries
+
+`bootstrap.py --doctor` checks installation and host prerequisites.
+
+`run_pipeline.py --doctor` checks project/runtime readiness.
+
+`--hardware-report` adds conservative host-specific training guidance.
+
+Neither doctor runs pipeline stages.
+
+## Pipeline
+
+The normal pipeline is:
 
 `crawl → clean → dedup → weight → tokenize → shard → train → export`
 
-Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused. This prevents an old or differently prepared dataset from leaking into tokenization, sharding, or training.
+Stage artifacts are validated using hashes and provenance before resume. Training checkpoints include deterministic state and provenance identities. Export rejects mismatched checkpoint, tokenizer, corpus, shard, source-manifest, or configuration identities.
 
-Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring the model weights and accidentally replaying a different token sequence. Checkpoints without the required deterministic state or matching provenance are rejected rather than silently resumed.
+The starter run is a correctness check, not a useful production training run.
 
-Final export is stricter still. The checkpoint must carry the canonical pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity. The current tokenizer, weighted-corpus manifest, and shard manifest must belong to the same pipeline configuration. A mismatch stops export before an artifact can be presented as a valid model.
-
-The starter profile uses a small real crawl and only two training steps. It is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and then explicitly choose an appropriate larger configuration.
-
-## Windows launch
-
-After the first-run path is healthy:
+## Desktop and backend
 
 ```powershell
 python .\launch.py
-```
-
-`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend. The UI is designed for a 1760×990 display.
-
-Model Lab navigates the real pipeline and dataset sessions. It does not implement a second copy of the crawler, cleaner, deduplicator, tokenizer, sharder, trainer, or exporter.
-
-## Backend-only mode
-
-```powershell
 python .\run_command_center.py --no-browser
 ```
 
-Without `--no-browser`, the backend opens the localhost command center in the default browser after its health endpoint is ready. The command center binds to localhost by default.
+The desktop launcher starts the existing UI. The UI uses the localhost FastAPI command center and does not implement a second pipeline.
 
-## Production verification
+The 1760×990 display value is a desktop verification target, not a universal hardware requirement.
 
-The standard release check is:
+## Release verification
+
+Static verification:
 
 ```bash
 python scripts/verify_release.py
 ```
 
-This runs compilation, the full test suite, and the required project/runtime doctor. It does not claim that machine-specific native export prerequisites were checked. Use `--bootstrap-native` when the release check must also clone/build and verify the supported llama.cpp toolchain.
+Full native verification:
 
-Security/release dependency auditing is explicit:
+```bash
+python scripts/verify_release.py --bootstrap-native
+```
+
+The static check covers compilation, Ruff, pytest/coverage, and the required doctor. The native check additionally bootstraps the pinned llama.cpp toolchain and runs the deterministic local release fixture through export and native inference.
+
+The repository enforces **90% aggregate pytest coverage**.
+
+## Security
 
 ```bash
 python -m pip install -r requirements-security.txt
 python scripts/security_gate.py
 ```
 
-The security gate checks tracked source for common secret patterns, verifies installed dependency consistency with `pip check`, and runs `pip-audit`. It is a gate, not a decorative report. A missing audit tool or failing audit is a failure.
+The security gate checks tracked source, dependency consistency, and dependency vulnerabilities.
 
-GitHub Actions runs the same security gate on pushes and pull requests and provides a separate production release workflow for native export verification. The CI path also runs the bootstrap doctor on a clean checkout, so the canonical onboarding path is exercised rather than merely documented.
+## Native/Termux boundary
 
-## Production export requirement
+The native llama.cpp checkout is bootstrapped separately. GGUF conversion requires `convert_hf_to_gguf.py`; quantized export additionally requires `llama-quantize`.
 
-Final GGUF export requires a current llama.cpp checkout containing
-`convert_hf_to_gguf.py`. Quantized exports also require the built `llama-quantize`
-executable. The exporter refuses to claim success when either tool is missing or when the training provenance chain is incomplete or inconsistent.
+The historical Android 16/aarch64 quantizer check demonstrates native tool execution on that target. It does not establish that the current source commit has passed the complete native release gate.
 
-## Termux / Android native toolchain
+## Documentation rule
 
-Model Lab supports a headless Termux runtime for the pipeline and native GGUF
-export. The Tk desktop UI is intentionally not a dependency of the portable
-pipeline test suite.
-
-To prepare the native llama.cpp toolchain after the first-run validation:
-
-```bash
-bash scripts/bootstrap_llama_cpp.sh
-python scripts/verify_release.py --bootstrap-native
-```
-
-The native bootstrap uses a reduced Android-safe build profile when running under
-Termux and builds only `llama-quantize`, the native artifact required for
-quantized export. The Termux build is serialized to reduce memory pressure during
-compilation. The Python-side GGUF converter remains part of the pinned llama.cpp
-checkout. The desktop/native verification path can additionally build and verify
-`llama-cli` where that target is supported.
-
-On 2026-09-29, the Termux path was independently exercised on Android 16/aarch64:
-the pinned checkout reached the `llama-quantize` target, produced an Android ELF
-executable at `third_party/llama.cpp/build-model-lab/bin/llama-quantize`, and the
-binary successfully executed its help command. This is native-tool evidence, not
-a claim that the complete Python release gate has passed on Termux.
-
-`sentence-transformers` and `faiss-cpu` are required runtime dependencies for semantic deduplication and are installed by the canonical bootstrap path. The default embedding model remains local-only; set `allow_model_download: true` explicitly if the model may be downloaded.
-
-`python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is the exception: it is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
+When this page disagrees with code or workflow configuration, update the page. Do not preserve a stale command merely because it appeared in an older release note.
