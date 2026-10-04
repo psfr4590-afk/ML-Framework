@@ -176,7 +176,7 @@ def test_model_sizer_all_tiers_and_token_estimates(tmp_path, monkeypatch):
 
 def test_model_sizer_platform_and_gpu_failure_paths(monkeypatch):
     monkeypatch.setattr(model_sizer.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(model_sizer.os, "sysconf", lambda key: 8)
+    monkeypatch.setattr(model_sizer.os, "sysconf", lambda key: 8, raising=False)
     assert model_sizer._available_ram_gb() > 0
     monkeypatch.setattr(model_sizer.platform, "system", lambda: "Windows")
     class Kernel32:
@@ -677,7 +677,7 @@ def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
 
 def test_model_sizer_ram_and_profile_failure_paths(monkeypatch):
     monkeypatch.setattr(model_sizer.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(model_sizer.os, "sysconf", lambda key: (_ for _ in ()).throw(OSError("no sysconf")))
+    monkeypatch.setattr(model_sizer.os, "sysconf", lambda key: (_ for _ in ()).throw(OSError("no sysconf")), raising=False)
     assert model_sizer._available_ram_gb() is None
     monkeypatch.setattr(model_sizer, "_available_ram_gb", lambda: None)
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(
