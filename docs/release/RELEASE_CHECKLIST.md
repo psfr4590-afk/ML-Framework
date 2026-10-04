@@ -9,7 +9,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 - [x] Windows CI passes on the current `main` source state
 - [x] Windows PowerShell bootstrap contract passes
 - [x] `python -m compileall -q .` passes in CI
-- [x] `python -m pytest -q` passes with the declared coverage threshold
+- [x] `python -m pytest -q` passes with the enforced >=75% coverage threshold
 - [x] `python run_pipeline.py --doctor` has no required failures
 - [x] Security gate passes: secret scan, `pip check`, `pip-audit`
 - [x] CodeQL analysis passes on the current `main` source state
