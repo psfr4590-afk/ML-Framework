@@ -41,7 +41,7 @@ jobs:
       - name: Dependency and SBOM evidence
         run: python scripts/generate_release_evidence.py
       - name: Production release verification
-        run: python scripts/verify_release.py --bootstrap-native
+        run: python scripts/verify_target_hardware.py
       - name: Build distributable package
         run: python -m build --outdir dist
       - name: Upload distributable package
