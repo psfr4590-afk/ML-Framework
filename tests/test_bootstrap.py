@@ -5,13 +5,13 @@ import bootstrap
 
 def test_python_requirement_message_is_current() -> None:
     message = bootstrap._python_requirement_message()
-    assert "Python 3.11-3.13 required" in message
+    assert "Python 3.11-3.14 required" in message
     assert "lxml 5.x" not in message
 
 
 def test_python_requirement_message_does_not_claim_old_lxml_reason() -> None:
     message = bootstrap._python_requirement_message()
-    assert "Python 3.14+ is not supported" in message
+    assert "Python 3.15+ is not supported" in message
     assert "dependency compatibility" in message
 
 
