@@ -26,7 +26,17 @@ REQUIREMENTS = ROOT / "requirements.txt"
 TORCH_REQUIREMENTS = ROOT / "requirements-torch.txt"
 MIN_PYTHON = (3, 11)
 MAX_PYTHON_EXCLUSIVE = (3, 14)
-REQUIRED = (\n    "yaml",\n    "requests",\n    "bs4",\n    "lxml",\n    "numpy",\n    "tokenizers",\n    "torch",\n    "sentence_transformers",\n    "faiss",\n)
+REQUIRED = (
+    "yaml",
+    "requests",
+    "bs4",
+    "lxml",
+    "numpy",
+    "tokenizers",
+    "torch",
+    "sentence_transformers",
+    "faiss",
+)
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
