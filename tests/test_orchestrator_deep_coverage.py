@@ -50,7 +50,9 @@ def test_orchestrator_source_manifest_validation_matrix(tmp_path, monkeypatch):
     monkeypatch.setattr(orchestrator, "PROJECT_ROOT", tmp_path)
     source = tmp_path / "source.yaml"
     source.write_text("x", encoding="utf-8")
-    paths = {"pipeline_config": source}
+    groups = tmp_path / "groups.yaml"
+    groups.write_text(json.dumps({"dataset_groups": [{"id": "g1", "sources": {"web": True}}]}), encoding="utf-8")
+    paths = {"pipeline_config": source, "dataset_groups": groups}
     cfg = {"crawl": {"sources": {"web": True}, "web": {"seed_urls": ["https://a"]}}}
     out = tmp_path / "manifest.json"
     orchestrator._write_source_manifest(
@@ -84,13 +86,9 @@ def test_orchestrator_source_manifest_validation_matrix(tmp_path, monkeypatch):
 def test_orchestrator_crawl_groups_and_failure_paths(tmp_path, monkeypatch):
     p = _bare_pipeline(tmp_path)
     groups = [
-        {
-            "id": "g1",
-            "sources": {"web": True, "github": True, "arxiv": True, "huggingface": True, "google": True},
-            "web": {"seed_urls": ["https://g1"]},
-            "github": {}, "arxiv": {}, "huggingface": {}, "google": {},
-        },
-        {"id": "g2", "sources": {"web": False, "github": False, "arxiv": False, "huggingface": False, "google": False}},
+        {"id": "g1", "sources": {"web": True, "github": True, "arxiv": True, "huggingface": True, "google": True},
+         "web": {"seed_urls": ["https://g1"]}, "github": {}, "arxiv": {}, "huggingface": {}, "google": {}},
+        {"id": "g2", "sources": {k: False for k in orchestrator.SOURCE_KINDS}},
     ]
     p._load_dataset_groups = lambda: groups
     crawler_calls = []
@@ -166,10 +164,7 @@ def test_orchestrator_shard_resume_rebuild_and_run_dispatch(tmp_path, monkeypatc
 
     provenance = {"stage": "shard"}
     p._provenance = lambda *args, **kwargs: provenance
-    marker.write_text(json.dumps({
-        "provenance": provenance,
-        "files": [{"name": shard.name, "size": 1, "sha256": orchestrator.sha256_file(shard)}],
-    }), encoding="utf-8")
+    marker.write_text(json.dumps({"provenance": provenance, "files": [{"name": shard.name, "size": 1, "sha256": orchestrator.sha256_file(shard)}]}), encoding="utf-8")
     p._resume = True
     assert p.stage_shard(corpus, tokenizer) == shard_dir
 
