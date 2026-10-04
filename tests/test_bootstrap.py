@@ -68,3 +68,8 @@ def test_hardware_profile_json_is_stable() -> None:
         "gpu_vram_gib": 4.0,
         "nvidia_smi_available": True,
     }
+
+
+def test_bootstrap_required_runtime_dependencies_include_semantic_dedup() -> None:
+    assert "sentence_transformers" in bootstrap.REQUIRED
+    assert "faiss" in bootstrap.REQUIRED
