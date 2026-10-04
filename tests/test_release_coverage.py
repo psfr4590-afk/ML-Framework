@@ -711,10 +711,11 @@ def test_semantic_embedding_run_stream_and_model_fallback(monkeypatch):
     monkeypatch.setattr(semantic_dedup, "ST_AVAILABLE", True)
     monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", False)
     monkeypatch.setattr(semantic_dedup, "SentenceTransformer", lambda *a, **k: FakeModel())
-    d = semantic_dedup.SemanticDeduplicator({"mode": "auto", "similarity_threshold": 0.9})
+    d = semantic_dedup.SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.9})
     docs = [Document("a", text="same one", final_weight=1), Document("b", text="same two", final_weight=0), Document("c", text="other", final_weight=1)]
     assert [x.doc_id for x in d.run(docs)] == ["a", "c"]
     assert [x.doc_id for x in d.stream(iter(docs), buffer_size=2)] == ["a", "c"]
+    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", True)
     d2 = semantic_dedup.SemanticDeduplicator({"mode": "auto"})
     monkeypatch.setattr(d2, "_load_model", lambda: (_ for _ in ()).throw(OSError("offline")))
     assert d2._ensure_embedding_or_fallback() is False
@@ -745,7 +746,7 @@ def test_orchestrator_stage_methods_with_contract_mocks(tmp_path, monkeypatch):
     p._provenance = lambda stage, input_path=None, extra=None: {"stage": stage}
     monkeypatch.setattr(orchestrator, "artifact_valid", lambda *a, **k: True)
     monkeypatch.setattr(orchestrator, "_jsonl_read", lambda path: iter([Document("1", text="hello")]))
-    monkeypatch.setattr(orchestrator, "_jsonl_write", lambda docs, path, **kw: (path.write_text(next(docs).to_jsonl()+"\n", encoding="utf-8") or 1))
+    monkeypatch.setattr(orchestrator, "_jsonl_write", lambda docs, path, **kw: (path.write_text(json.dumps(next(docs).to_jsonl())+"\n", encoding="utf-8") or 1))
     class Cleaner:
         def __init__(self, path): pass
         def clean(self, text, doc_id=None): return SimpleNamespace(kept=True, text=text+"!", action="keep", score=1.0)
@@ -835,7 +836,7 @@ def test_trainer_run_one_step_with_fakes(monkeypatch, tmp_path):
     monkeypatch.setattr(torch.amp, "GradScaler", FakeScaler)
     monkeypatch.setattr("pipeline.trainer.train.ModelConfig.from_preset", lambda name: ModelConfig(vocab_size=8, seq_len=4, n_layers=1, n_heads=1, n_kv_heads=1, d_model=2, d_ffn=4))
     monkeypatch.setattr("pipeline.trainer.train._provenance", lambda *a, **k: {"p": 1})
-    monkeypatch.setattr("pipeline.trainer.train.save_checkpoint", lambda *a, **k: Path(k["out_dir"]) / "ckpt.pt")
+    monkeypatch.setattr("pipeline.trainer.train.save_checkpoint", lambda *a, **k: Path(a[6]) / "ckpt.pt")
     monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", lambda *a, **k: torch.tensor(0.0))
     cfg={"pipeline":{"output_dir":str(tmp_path)},"train":{"allow_cpu_training":True,"auto_size":False,"model_preset":"85M","vocab_size":8,"seq_len":4,"total_steps":1,"warmup_steps":1,"batch_size":1,"grad_accum_steps":1,"eval_every_steps":1,"checkpoint_every_steps":1,"keep_checkpoints":1,"eval_batches":1,"resume":False,"shard_dir":str(tmp_path/"shards")},"shard":{"sequence_length":4},"_pipeline_config_sha256":"x"}
     (tmp_path/"shards").mkdir()
