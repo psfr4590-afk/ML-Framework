@@ -1,7 +1,42 @@
 # Model Lab Verification
 
-Model Lab verification is divided into automated contract tests, Python compilation, target-machine environment checks, and human-visible desktop smoke checks.
+Verification has three distinct layers:
 
-Run `python -m pytest -q` for the automated suite. On the target Windows machine, also run `python -m pytest -q .\tests\model_lab\test_machine_environment.py`.
+1. **Automated repository checks**: compilation, lint, pytest/coverage, configuration, artifact integrity, and security.
+2. **Target-environment checks**: CUDA, native llama.cpp, required executables, host readiness, and deployment hardware.
+3. **Human-visible checks**: desktop launch, display fit, navigation, controls, and observable UI behavior.
 
-The release procedure is documented in `docs/verification/VERIFICATION_CHECKLIST.md` and `scripts/run_release_verification.ps1`.
+## Automated
+
+Run:
+
+```bash
+python -m pytest -q
+python scripts/verify_release.py
+```
+
+The repository enforces a **90% aggregate pytest coverage threshold**.
+
+## Target environment
+
+For a native release, run:
+
+```bash
+python scripts/verify_release.py --bootstrap-native
+```
+
+For target-hardware evidence, the release workflow uses:
+
+```bash
+python scripts/verify_target_hardware.py
+```
+
+These commands produce evidence only when they are actually executed.
+
+## Human-visible desktop
+
+Use the target Windows environment to verify launch, display fit, navigation, pipeline controls, credential handling, stop behavior, and the relevant Command Center surfaces.
+
+Do not convert an unexecuted desktop check into PASS.
+
+Current status belongs to GitHub Actions and retained release evidence, not to this static page.
