@@ -630,3 +630,214 @@ def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
     }
     with pytest.raises(RuntimeError, match="Training provenance"):
         Trainer(cfg).run()
+
+
+def test_model_sizer_ram_and_profile_failure_paths(monkeypatch):
+    monkeypatch.setattr(model_sizer.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(model_sizer.os, "sysconf", lambda key: (_ for _ in ()).throw(OSError("no sysconf")))
+    assert model_sizer._available_ram_gb() is None
+    monkeypatch.setattr(model_sizer, "_available_ram_gb", lambda: None)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(
+        is_available=lambda: False,
+    )))
+    p = model_sizer.profile_hardware()
+    assert not p.cuda_available and p.gpu_count == 0
+
+
+def test_doctor_cuda_and_llama_failure_paths(monkeypatch, tmp_path):
+    fake_torch = SimpleNamespace(
+        __version__="x",
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 2,
+            get_device_name=lambda i: f"GPU{i}",
+        ),
+    )
+    monkeypatch.setattr(doctor.importlib, "import_module", lambda name: fake_torch)
+    ok, detail = doctor._torch_state()
+    assert ok and "2 GPU(s)" in detail
+    monkeypatch.setattr(fake_torch.cuda, "get_device_name", lambda i: (_ for _ in ()).throw(RuntimeError("broken")))
+    ok, detail = doctor._torch_state()
+    assert ok and "device details failed" in detail
+    target = tmp_path / "third_party" / "llama.cpp"
+    target.mkdir(parents=True)
+    (target / ".git").mkdir()
+    (target / "convert_hf_to_gguf.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(doctor.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("git missing")))
+    assert not doctor._llamacpp_state(tmp_path)[0]
+
+
+def test_integrity_source_manifest_and_atomic_cleanup(tmp_path):
+    source = tmp_path / "source.txt"
+    source.write_text("source", encoding="utf-8")
+    out = tmp_path / "out.jsonl"
+    integrity.atomic_jsonl_write(out, [{"x": 1}])
+    integrity.write_manifest(out, kind="jsonl", extra={"source": str(source), "source_sha256": integrity.sha256_file(source)})
+    assert integrity.artifact_valid(out)
+    source.write_text("changed", encoding="utf-8")
+    assert not integrity.artifact_valid(out)
+    with pytest.raises(ValueError):
+        integrity.atomic_jsonl_write(tmp_path / "bad2.jsonl", ["]"])
+    assert not (tmp_path / "bad2.jsonl").exists()
+
+
+def test_web_remaining_endpoint_wrappers(monkeypatch):
+    monkeypatch.setattr(cc_web, "status", lambda: {"items": [1]})
+    assert cc_web.datasets() == {"items": [1]}
+    monkeypatch.setattr(cc_web, "ingest", lambda did, path: {"did": did, "path": path})
+    assert cc_web.ingest_dataset(2, cc_web.DatasetIngest(path="x"))["did"] == 2
+    monkeypatch.setattr(cc_web, "stage", lambda did, name: {"did": did, "stage": name})
+    assert cc_web.run_stage(2, "clean")["stage"] == "clean"
+    monkeypatch.setattr(cc_web, "stop", lambda did: True)
+    assert cc_web.stop_stage(2) == {"stopped": True}
+    monkeypatch.setattr(cc_web.store, "crawl_stats", lambda did: {"did": did})
+    monkeypatch.setattr(cc_web.store, "crawl_domains", lambda did: {"did": did})
+    monkeypatch.setattr(cc_web.store, "crawl_log", lambda did, tail: {"did": did, "tail": tail})
+    assert cc_web.crawl_stats(2)["did"] == 2
+    assert cc_web.crawl_domains(2)["did"] == 2
+    assert cc_web.crawl_log(2, 3)["tail"] == 3
+    monkeypatch.setattr(cc_web, "credential_test", lambda name: {"name": name})
+    assert cc_web.test_cred("n")["name"] == "n"
+    monkeypatch.setattr(cc_web, "credential_delete", lambda name: name)
+    assert cc_web.del_cred("n") == {"deleted": "n"}
+
+
+def test_semantic_embedding_run_stream_and_model_fallback(monkeypatch):
+    class FakeModel:
+        def get_sentence_embedding_dimension(self): return 2
+        def encode(self, chunks, **kwargs):
+            return np.asarray([[1.0, 0.0] if "same" in x else [0.0, 1.0] for x in chunks], dtype=np.float32)
+    monkeypatch.setattr(semantic_dedup, "ST_AVAILABLE", True)
+    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", False)
+    monkeypatch.setattr(semantic_dedup, "SentenceTransformer", lambda *a, **k: FakeModel())
+    d = semantic_dedup.SemanticDeduplicator({"mode": "auto", "similarity_threshold": 0.9})
+    docs = [Document("a", text="same one", final_weight=1), Document("b", text="same two", final_weight=0), Document("c", text="other", final_weight=1)]
+    assert [x.doc_id for x in d.run(docs)] == ["a", "c"]
+    assert [x.doc_id for x in d.stream(iter(docs), buffer_size=2)] == ["a", "c"]
+    d2 = semantic_dedup.SemanticDeduplicator({"mode": "auto"})
+    monkeypatch.setattr(d2, "_load_model", lambda: (_ for _ in ()).throw(OSError("offline")))
+    assert d2._ensure_embedding_or_fallback() is False
+    with pytest.raises(RuntimeError, match="locally available"):
+        d2._mode = "embedding"
+        d2._ensure_embedding_or_fallback()
+
+
+def test_orchestrator_stage_methods_with_contract_mocks(tmp_path, monkeypatch):
+    p = object.__new__(orchestrator.Pipeline)
+    p.cfg = {
+        "crawl": {"sources": {"web": True}, "web": {"seed_urls": ["https://x"]}},
+        "embed_dedup": {"buffer_size": 2},
+        "weight": {},
+        "tokenizer": {"output_path": str(tmp_path / "tokenizer")},
+        "shard": {"output_dir": str(tmp_path / "shards"), "sequence_length": 4},
+        "train": {"allow_cpu_training": True},
+        "export": {"llamacpp_dir": "third_party/llama.cpp", "quant": "q4_k_m"},
+    }
+    p._scratch = tmp_path / "scratch"; p._scratch.mkdir()
+    p._out = tmp_path / "output"; p._out.mkdir()
+    p._resume = False
+    p._config_sha256 = "cfg"; p._weights_path = tmp_path / "weights"; p._dataset_groups_path = tmp_path / "groups"; p._clean_config_path = tmp_path / "clean"
+    for x in [p._weights_path, p._dataset_groups_path, p._clean_config_path]:
+        x.write_text("x", encoding="utf-8")
+    p._source_definition_paths = {}
+    p._source_manifest_path = tmp_path / "source_manifest.json"
+    p._provenance = lambda stage, input_path=None, extra=None: {"stage": stage}
+    monkeypatch.setattr(orchestrator, "artifact_valid", lambda *a, **k: True)
+    monkeypatch.setattr(orchestrator, "_jsonl_read", lambda path: iter([Document("1", text="hello")]))
+    monkeypatch.setattr(orchestrator, "_jsonl_write", lambda docs, path, **kw: (path.write_text(next(docs).to_jsonl()+"\n", encoding="utf-8") or 1))
+    class Cleaner:
+        def __init__(self, path): pass
+        def clean(self, text, doc_id=None): return SimpleNamespace(kept=True, text=text+"!", action="keep", score=1.0)
+    class Deduper:
+        def __init__(self, cfg): pass
+        def stream(self, docs, buffer_size): return docs
+    class Weighter:
+        def __init__(self, *a, **k): pass
+        def apply(self, docs): return docs
+    class TokTrainer:
+        def __init__(self, cfg): pass
+        def train(self, path): return SimpleNamespace(get_vocab_size=lambda: 8)
+        def load(self): return "loaded"
+    class Writer:
+        def __init__(self, cfg, tok): pass
+        def write(self, path):
+            d = Path(self_dir)
+            d.mkdir(parents=True, exist_ok=True)
+            (d/"shard_000.bin").write_bytes(b"x")
+    self_dir = tmp_path / "shards"
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: {
+        "Cleaner": Cleaner, "SemanticDeduplicator": Deduper, "DomainWeighter": Weighter,
+        "BPETokenizerTrainer": TokTrainer, "ShardWriter": Writer,
+    }.get(name))
+    src = tmp_path / "input.jsonl"; src.write_text("{}\n", encoding="utf-8")
+    assert p.stage_clean(src).name == "02_cleaned.jsonl"
+    assert p.stage_embed_dedup(src).name == "03_deduped.jsonl"
+    assert p.stage_weight(src).name == "04_weighted.jsonl"
+    tok = p.stage_tokenize(src)
+    assert tok.get_vocab_size() == 8
+    assert p.stage_shard(src, tok) == self_dir
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: SimpleNamespace(run=lambda self: None) if name == "Trainer" else None)
+    p.cfg["train"]["allow_cpu_training"] = True
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    (p._out / "checkpoints").mkdir(parents=True, exist_ok=True)
+    (p._out / "checkpoints" / "ckpt_best_0000001.pt").write_bytes(b"x")
+    assert p.stage_train().name.startswith("ckpt_best_")
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: SimpleNamespace(export_checkpoint=lambda **kw: kw) if name == "export_checkpoint" else None)
+    assert p.stage_export() is None
+
+
+def test_orchestrator_manifest_invalid_branches(tmp_path):
+    bad = tmp_path / "bad.json"
+    for value in ["{}", '{"schema":2}', '{"schema":2,"dataset_group":"all","retrieval_started_at":"s","retrieval_completed_at":"e","source_definition_files":{},"sources":[],"rights_note":"x"}']:
+        bad.write_text(value, encoding="utf-8")
+        assert not orchestrator._source_manifest_is_valid(bad)
+    bad.write_text("{", encoding="utf-8")
+    assert not orchestrator._source_manifest_is_valid(bad)
+
+
+def test_trainer_run_one_step_with_fakes(monkeypatch, tmp_path):
+    class FakeModel:
+        def __init__(self, cfg): self.cfg = cfg; self.w = torch.nn.Parameter(torch.tensor(1.0))
+        def to(self, device): return self
+        def named_parameters(self): return [("w", self.w)]
+        def parameters(self): return [self.w]
+        def train(self): return self
+        def eval(self): return self
+        def __call__(self, x, y):
+            loss = (self.w * 0 + x.float().mean()) ** 2
+            return x, loss
+    class FakeLoader:
+        def __init__(self, *a, **k): self.i = 0
+        def next_batch(self, batch_size):
+            self.i += 1
+            return torch.ones((batch_size, 4), dtype=torch.long), torch.ones((batch_size, 4), dtype=torch.long)
+        def state_dict(self): return {"i": self.i}
+        def load_state_dict(self, state): self.i = state["i"]
+    class FakeScaler:
+        def __init__(self, *a, **k): pass
+        def scale(self, loss): return loss
+        def unscale_(self, opt): pass
+        def step(self, opt): opt.step()
+        def update(self): pass
+        def state_dict(self): return {}
+    class FakeOptim:
+        def __init__(self, params, **kwargs): self.param_groups = [{"lr": kwargs.get("lr", 0.001)}]
+        def zero_grad(self, **kwargs): pass
+        def step(self): pass
+        def state_dict(self): return {}
+    class FakeProfile:
+        model_preset="85M"; seq_len=4; batch_size=1; grad_accum_steps=1; eval_batches=1; eval_every_steps=1; checkpoint_every_steps=1; recommended_steps=1
+        def to_dict(self): return {"model_preset": self.model_preset}
+    monkeypatch.setattr("pipeline.trainer.train.LlamaModel", FakeModel)
+    monkeypatch.setattr("pipeline.trainer.train.ShardDataLoader", FakeLoader)
+    monkeypatch.setattr(torch.optim, "AdamW", FakeOptim)
+    monkeypatch.setattr(torch.amp, "GradScaler", FakeScaler)
+    monkeypatch.setattr("pipeline.trainer.train.ModelConfig.from_preset", lambda name: ModelConfig(vocab_size=8, seq_len=4, n_layers=1, n_heads=1, n_kv_heads=1, d_model=2, d_ffn=4))
+    monkeypatch.setattr("pipeline.trainer.train._provenance", lambda *a, **k: {"p": 1})
+    monkeypatch.setattr("pipeline.trainer.train.save_checkpoint", lambda *a, **k: Path(k["out_dir"]) / "ckpt.pt")
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", lambda *a, **k: torch.tensor(0.0))
+    cfg={"pipeline":{"output_dir":str(tmp_path)},"train":{"allow_cpu_training":True,"auto_size":False,"model_preset":"85M","vocab_size":8,"seq_len":4,"total_steps":1,"warmup_steps":1,"batch_size":1,"grad_accum_steps":1,"eval_every_steps":1,"checkpoint_every_steps":1,"keep_checkpoints":1,"eval_batches":1,"resume":False,"shard_dir":str(tmp_path/"shards")},"shard":{"sequence_length":4},"_pipeline_config_sha256":"x"}
+    (tmp_path/"shards").mkdir()
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    model, step = Trainer(cfg).run()
+    assert step == 1 and isinstance(model, FakeModel)
