@@ -480,25 +480,15 @@ def test_orchestrator_helpers_and_manifest_validation(tmp_path, monkeypatch):
     cfg = {"crawl": {"sources": {"web": True, "github": True, "arxiv": False, "huggingface": True}, "web": {"seed_urls": ["https://a"]}}}
     groups_path = tmp_path / "groups.yaml"
     groups_path.write_text(
-        "dataset_groups:\n"
-        "  - id: g1\n"
-        "    sources:\n"
-        "      web: true\n"
-        "      github: true\n"
-        "      huggingface: true\n"
-        "      arxiv: false\n"
-        "      google: true\n"
-        "    web:\n"
-        "      seed_urls:\n"
-        "        - https://a\n"
-        "    huggingface:\n"
-        "      datasets:\n"
-        "        - repo: org/data\n"
-        "          config: c\n"
-        "          split: train\n"
-        "    google:\n"
-        "      queries:\n"
-        "        - ml\n",
+        json.dumps({
+            "dataset_groups": [{
+                "id": "g1",
+                "sources": {"web": True, "github": True, "huggingface": True, "arxiv": False, "google": True},
+                "web": {"seed_urls": ["https://a"]},
+                "huggingface": {"datasets": [{"repo": "org/data", "config": "c", "split": "train"}]},
+                "google": {"queries": ["ml"]},
+            }]
+        }),
         encoding="utf-8",
     )
     paths = {"dataset_groups": groups_path}
@@ -570,7 +560,7 @@ def test_trainer_checkpoint_resume_guards(tmp_path):
         load_checkpoint(path, model, train_loader=Loader())
     (tmp_path / "ckpt_0000003.pt").write_bytes(b"x" * 1024)
     (tmp_path / "ckpt_0000003.pt.manifest.json").write_text("{}", encoding="utf-8")
-    assert latest_checkpoint(tmp_path) == path
+    assert latest_checkpoint(tmp_path) == tmp_path / "ckpt_0000003.pt"
 
 
 def test_trainer_cpu_guard_and_seq_len_guard(monkeypatch, tmp_path):
@@ -606,6 +596,10 @@ def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "pipeline.trainer.train.recommend_training_profile",
         lambda hardware, **kwargs: Profile(),
+    )
+    monkeypatch.setattr(
+        "pipeline.trainer.train._provenance",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Training provenance")),
     )
     cfg = {
         "pipeline": {"output_dir": str(tmp_path)},
