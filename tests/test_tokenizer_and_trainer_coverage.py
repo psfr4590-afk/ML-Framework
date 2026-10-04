@@ -62,14 +62,28 @@ def test_tokenizer_real_train_and_load(tmp_path):
         "machine learning framework dataset tokenizer transformer inference",
     ]
     corpus.write_text("\n".join(json.dumps({"text": t}) for t in texts) + "\n", encoding="utf-8")
+    pytest.importorskip("tokenizers")
+    from tokenizers import Tokenizer
+    from tokenizers.models import BPE
+    from tokenizers.normalizers import NFKC, Sequence as NormSequence
+    from tokenizers.pre_tokenizers import ByteLevel
+    from tokenizers.trainers import BpeTrainer
+
+    special = ["<|pad|>", "<|unk|>", "<|bos|>", "<|eos|>", "<|sep|>", "<|mask|>"]
+    reference = Tokenizer(BPE(unk_token="<|unk|>"))
+    reference.normalizer = NormSequence([NFKC()])
+    reference.pre_tokenizer = ByteLevel(add_prefix_space=False)
+    reference.train([str(corpus)], BpeTrainer(vocab_size=256, min_frequency=1, special_tokens=special))
+    expected_vocab = reference.get_vocab_size()
+
     trainer = train_tokenizer.BPETokenizerTrainer({
-        "vocab_size": 16,
+        "vocab_size": expected_vocab,
         "min_frequency": 1,
         "output_path": str(tmp_path / "tokenizer"),
     })
     tok = trainer.train(corpus)
-    assert tok.get_vocab_size() == 16
-    assert trainer.load().get_vocab_size() == 16
+    assert tok.get_vocab_size() == expected_vocab
+    assert trainer.load().get_vocab_size() == expected_vocab
     encoded = trainer.encode("alpha bravo", tok)
     assert encoded
     config = json.loads((tmp_path / "tokenizer" / "tokenizer_config.json").read_text(encoding="utf-8"))
@@ -171,3 +185,40 @@ def test_trainer_restore_rng_and_prune_missing_manifest(tmp_path):
     train._restore_rng_state(state)
     with pytest.raises(KeyError):
         train._restore_rng_state({"python": state["python"], "numpy": state["numpy"]})
+
+
+def test_tokenizer_provenance_and_artifact_contract_branches(tmp_path, monkeypatch):
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(json.dumps({"text": "a b c"}) + "\n", encoding="utf-8")
+    trainer = train_tokenizer.BPETokenizerTrainer({
+        "vocab_size": 16, "min_frequency": 1,
+        "special_tokens": ["<|unk|>", "<|bos|>"],
+        "output_path": str(tmp_path / "tok"),
+    })
+
+    class MissingSpecialTokenizer:
+        def __init__(self, *args, **kwargs): pass
+        def train(self, *args, **kwargs): pass
+        def get_vocab_size(self): return 16
+        def token_to_id(self, token): return None
+        def save(self, path): Path(path).write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(train_tokenizer, "Tokenizer", MissingSpecialTokenizer)
+    with pytest.raises(RuntimeError, match="special-token contract"):
+        trainer.train(corpus)
+
+    class MissingArtifactTokenizer(MissingSpecialTokenizer):
+        def token_to_id(self, token): return 0
+        def save(self, path): pass
+
+    monkeypatch.setattr(train_tokenizer, "Tokenizer", MissingArtifactTokenizer)
+    with pytest.raises(RuntimeError, match="artifact contract"):
+        trainer.train(corpus)
+
+
+def test_tokenizer_stream_sampling_is_deterministic(tmp_path):
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text("\n".join(json.dumps({"text": f"doc-{i}"}) for i in range(20)) + "\n", encoding="utf-8")
+    first = list(train_tokenizer._doc_stream(corpus, 5, seed=99))
+    second = list(train_tokenizer._doc_stream(corpus, 5, seed=99))
+    assert first == second and len(first) == 5
