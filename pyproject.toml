@@ -58,7 +58,7 @@ parallel = true
 source = ["command_center.config", "command_center.secrets", "command_center.service", "command_center.web", "pipeline.config_validation", "pipeline.contracts.run", "pipeline.doctor", "pipeline.embedder", "pipeline.filtering", "pipeline.integrity", "pipeline.model_sizer", "pipeline.orchestrator", "pipeline.tokenizer", "pipeline.trainer", "pipeline.weighter"]
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 90
 skip_empty = true
 show_missing = true
 exclude_also = ["if __name__ == .__main__:", "raise NotImplementedError"]
