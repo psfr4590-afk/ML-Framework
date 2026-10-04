@@ -209,3 +209,34 @@ def test_orchestrator_shard_resume_rebuild_and_run_dispatch(tmp_path, monkeypatc
     p.stage_export = lambda: calls.append("export") or "exported"
     assert p.run("all", dataset_group="g1")["export"] == "exported"
     assert calls == ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
+
+
+def test_orchestrator_helper_and_session_branches(tmp_path, monkeypatch):
+    monkeypatch.setattr(orchestrator, "PROJECT_ROOT", tmp_path)
+    p = orchestrator.Pipeline.__new__(orchestrator.Pipeline)
+    p._dataset_groups_path = tmp_path / "missing.yaml"
+    p.cfg = {"crawl": {"sources": {"web": True}}}
+    assert p._load_dataset_groups()[0]["id"] == "default"
+
+    p.dataset_id = 1
+    p._dataset_root = tmp_path / "datasets" / "dataset_001"
+    p._dataset_root.mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="Missing dataset metadata"):
+        p._session_group()
+    (p._dataset_root / "dataset.json").write_text(json.dumps({"group_id": "g"}), encoding="utf-8")
+    p._load_dataset_groups = lambda: [{"id": "other"}]
+    with pytest.raises(ValueError, match="unknown group"):
+        p._session_group()
+    (p._dataset_root / "dataset.json").write_text(json.dumps({"group_id": "g", "group_config": {"id": "g"}}), encoding="utf-8")
+    assert p._session_group()["id"] == "g"
+
+
+def test_orchestrator_jsonl_and_manifest_invalid_inputs(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        list(orchestrator._jsonl_read(tmp_path / "missing.jsonl"))
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("{}\n[]\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Input integrity failure"):
+        list(orchestrator._jsonl_read(bad))
+    assert orchestrator._file_hash(tmp_path / "missing") is None
+    assert orchestrator._source_entry("github", "repo", "g")["revision"] is None
