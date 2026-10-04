@@ -91,7 +91,7 @@ def test_general_seed_file_is_primary_source_oriented():
 def test_canonical_ui_and_docs_advertise_all_seeded_dataset_groups():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     dataset_ui = (ROOT / "ui/screens/dataset.py").read_text(encoding="utf-8")
-    assert "Ten dataset groups are preconfigured" in readme
+    assert "dataset groups and crawl configuration" in readme
     assert "Dataset 001–010 are seeded" in dataset_ui
 
 
