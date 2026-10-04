@@ -210,7 +210,7 @@ The release evidence generator records the resolved dependency environment and S
 
 The repository contains separate CI, security, and release workflows.
 
-- CI covers Linux and Windows Python 3.11 environments, bootstrap doctor, dependency consistency, Ruff, compilation, tests/coverage, and the Windows PowerShell bootstrap contract.
+- CI covers Linux and Windows Python 3.11 and 3.14 environments, bootstrap doctor, dependency consistency, Ruff, compilation, tests/coverage, and the Windows PowerShell bootstrap contract.
 - Security runs the repository security gate on `main` pushes and pull requests and can also be dispatched manually.
 - Release runs the security gate, generates dependency/SBOM evidence, executes `verify_release.py --bootstrap-native`, and uploads release evidence. It is configured for manual dispatch and version tags.
 
