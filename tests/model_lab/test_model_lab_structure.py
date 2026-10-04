@@ -66,7 +66,7 @@ def test_credentials_save_is_wired():
 def test_required_service_modules_exist():
  for service in ["process","system","credential","crawler","dataset","pipeline","training","output","log"]: assert (ROOT/"ui/services"/f"{service}_service.py").exists()
 def test_documentation_contains_real_launch_commands():
- readme=text(ROOT/"README.md"); assert "python .\\launch.py" in readme and "run_pipeline.py --doctor" in readme
+ readme=text(ROOT/"README.md"); assert "python .\\bootstrap.py --doctor" in readme and "python .\\run_pipeline.py --no-resume" in readme
 def test_documentation_mentions_machine_verification_boundary():
  readme=text(ROOT/"README.md"); assert "Windows" in readme and ("1760x990" in readme or "1760×990" in readme)
 def test_no_common_secret_literals_are_committed():
