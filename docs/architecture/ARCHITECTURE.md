@@ -1,93 +1,90 @@
 # Model Lab Architecture
 
-Model Lab is a local-first end-to-end training framework. The public repository contains the source, configuration, tests, and release tooling. Runtime datasets, checkpoints, logs, scratch state, and native build products are created outside version control.
+Model Lab is a local-first training framework. The repository contains source, configuration, tests, release tooling, and the optional desktop/control surfaces. Runtime datasets, checkpoints, logs, scratch state, and native build products are not part of the source-tree contract.
 
 ## System flow
 
 ```text
 seed URLs / dataset groups
         |
-        v
-     CRAWL  ---- source scoring / URL security / domain signals
+      crawl
         |
-        v
-     CLEAN  ---- HTML + Unicode normalization + quality/refusal filtering
+      clean
         |
-        v
-   SEMANTIC DEDUP ---- exact guards + optional embedding acceleration
+  semantic dedup
         |
-        v
-     WEIGHT  ---- domain/content weighting and sampling policy
+      weight
         |
-        v
-    TOKENIZE ---- deterministic tokenizer artifacts
+    tokenize
         |
-        v
-     SHARD   ---- validated binary training shards + manifest
+      shard
         |
-        v
-     TRAIN   ---- hardware-aware bounded training + checkpoints
+      train
         |
-        v
-    EXPORT   ---- HF checkpoint -> GGUF -> optional quantization
+     export
 ```
+
+Each stage has a persisted artifact boundary. Integrity and provenance metadata are used to decide whether an existing artifact can safely be reused.
 
 ## Repository layers
 
 ### `pipeline/`
-The production data and training path. Stage implementations are deliberately separated so each stage can be tested and resumed independently.
 
-- `crawler/`: source adapters, URL/security policy, and source scoring
-- `cleaner/` and `filtering/`: text normalization and quality filtering
+Production data and training behavior:
+
+- `crawler/`: source adapters and acquisition policy
+- `cleaner/` and `filtering/`: normalization and quality/refusal filtering
 - `embedder/` and `dedupe/`: semantic and compatibility deduplication
-- `weighter/`: corpus balancing policy
+- `weighter/`: corpus balancing
 - `tokenizer/`: tokenizer training and reload
-- `shardwriter/`: deterministic binary shard generation
-- `trainer/`: model definition and training loop
-- `integrity.py`: artifact validation, hashing, manifests, and atomic writes
-- `model_sizer.py`: hardware-aware training profile selection
+- `shardwriter/`: binary shard generation and manifests
+- `trainer/`: model definition, training, checkpointing, and resume
+- `integrity.py`: hashes, manifests, validation, and atomic artifact handling
+- `model_sizer.py`: hardware-aware profile selection
 - `orchestrator.py`: stage sequencing, resume boundaries, and artifact chaining
-- `contracts/`: stable compatibility namespace for shared pipeline data contracts
-
-`pipeline.types.Document` is the canonical document schema. `pipeline.contracts.run.Document` is intentionally a compatibility alias so the project has one schema instead of two subtly different ones.
+- `contracts/`: shared compatibility contracts
 
 ### `command_center/`
-The localhost control plane. It owns dataset sessions, credentials, process lifecycle, API routes, and crawler telemetry. The desktop UI talks to this layer instead of reimplementing pipeline logic.
+
+Local FastAPI control plane for dataset sessions, credentials, process lifecycle, API routes, and crawler telemetry.
 
 ### `ui/`
-The optional Windows/Tk desktop surface. Screens are presentation/control surfaces; pipeline behavior remains in `pipeline/` and backend behavior remains in `command_center/`.
+
+Optional Windows/Tk presentation and control surface. It calls the command center and does not reimplement pipeline stages.
 
 ### `config/`
-The canonical configuration surface. Dataset groups, seeds, source weights, cleaner policy, pipeline settings, credentials templates, and smoke-test settings live here. Runtime credentials are never intended to be committed.
+
+Checked-in pipeline configuration, dataset groups, source definitions, starter/smoke/full profiles, and templates.
 
 ### `scripts/`
-Release and environment tooling: native llama.cpp bootstrap, GGUF export, hardware recommendation, environment reconciliation, preflight, runtime helpers, and release verification.
+
+Bootstrap, environment, export, GGUF, hardware, security, and release-verification tooling.
 
 ### `tests/`
-Tests are split by purpose rather than implementation convenience:
 
-- root-level tests cover contracts and production behavior
-- `tests/model_lab/` covers the Model Lab release surface, service behavior, structure, and machine-environment boundaries
+Automated contract, regression, release, security, and machine-boundary tests.
 
 ## Runtime boundaries
 
-Model Lab is intentionally explicit about what can be verified in generic CI and what depends on the target host.
+CI can verify Python behavior, configuration contracts, artifact logic, and automated tests. CUDA, native llama.cpp behavior, network-dependent acquisition, desktop rendering, and target deployment hardware are environment-dependent.
 
-CI can verify Python compilation, configuration contracts, service behavior, artifact logic, and tests. CUDA availability, native llama.cpp builds, network access, and human-visible Tk behavior are target-machine concerns and must not be represented as unconditional CI passes.
+The code and workflow definitions are authoritative for exact commands and behavior. This document describes the architecture, not a promise that every environment-specific capability is available everywhere.
 
-## Dataset isolation
+## Data and artifact isolation
 
-A dataset session lives under `datasets/dataset_NNN/`. Its output and scratch paths are isolated from other sessions. Resume logic validates persisted artifacts before skipping a stage. Corrupt or incomplete artifacts are rebuilt instead of being silently trusted.
+Dataset sessions use isolated runtime paths. Stage outputs carry hashes and provenance. Resume logic validates persisted artifacts before skipping a stage. Corrupt, incomplete, or mismatched artifacts are rebuilt or rejected.
+
+Training checkpoints include deterministic state and provenance identities needed for safe resume.
 
 ## Extension rules
 
-1. Add new data sources as crawler adapters. Do not duplicate crawling logic in the UI.
-2. Add new cleaning policies through the cleaner/filtering layer and configuration.
-3. Preserve `Document` compatibility when adding fields. Avoid creating parallel document dataclasses.
-4. Treat artifact manifests and hashes as part of the stage contract.
-5. Keep optional heavy dependencies lazy so doctor, tests, and lightweight stages remain usable.
+1. Add new sources through crawler adapters.
+2. Add cleaning/filtering behavior through the existing pipeline layers and configuration.
+3. Preserve the canonical document contract.
+4. Treat manifests and hashes as part of stage contracts.
+5. Keep optional heavy dependencies lazy where practical.
 6. Never commit runtime credentials, datasets, checkpoints, caches, or generated logs.
 
 ## Release principle
 
-The release is production-quality when the source tree is reproducible, the pipeline stages have explicit contracts, automated tests pass, environment-dependent checks are honestly reported, and a fresh clone can discover the supported paths without relying on private development history.
+A production release is a source state plus current evidence. Automated tests, native verification, target-machine checks, and production operational evidence must be distinguished rather than inferred from one another.
