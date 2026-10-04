@@ -782,7 +782,7 @@ def test_orchestrator_stage_methods_with_contract_mocks(tmp_path, monkeypatch):
     (p._out / "checkpoints").mkdir(parents=True, exist_ok=True)
     (p._out / "checkpoints" / "ckpt_best_0000001.pt").write_bytes(b"x")
     assert p.stage_train().name.startswith("ckpt_best_")
-    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: SimpleNamespace(export_checkpoint=lambda **kw: kw) if name == "export_checkpoint" else None)
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: (lambda **kw: kw) if name == "export_checkpoint" else None)
     assert p.stage_export() is None
 
 
