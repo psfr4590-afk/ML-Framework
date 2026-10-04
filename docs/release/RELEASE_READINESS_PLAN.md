@@ -1,34 +1,26 @@
 # Model Lab Release Readiness
 
-This document is the current production-readiness contract for `main`. It distinguishes repository readiness from evidence that can only be produced by executing the release gate.
+This document defines the release-readiness contract. It is intentionally status-neutral: current workflow results and release evidence must be checked for the exact commit being approved.
 
-## Current RC gate state
+## Source and automated gates
 
-| Area | Current state | Evidence |
+| Area | Contract | Authoritative source |
 |---|---|---|
-| Repository hardening | Complete for current merged work | `main`, PRs #22 and #24 merged |
-| Linux CI definition | Present | `.github/workflows/ci.yml` |
-| Windows CI definition | Present | `.github/workflows/ci.yml` |
-| PowerShell contract | Present | `.github/workflows/ci.yml` |
-| Dependency consistency | Gated | `pip check` in CI/security/release |
-| Dependency vulnerability scan | Gated | `scripts/security_gate.py` |
-| Secret scan | Gated | `scripts/security_gate.py` |
-| Python compile | Gated | CI + `scripts/verify_release.py` |
-| Ruff F lint | Gated | CI + `scripts/verify_release.py` |
-| Automated test coverage | Gated, >=75% | `[tool.coverage.report].fail_under` in `pyproject.toml` |
-| Source provenance | Implemented | schema-2 source manifests |
-| Artifact source/config/code identity | Implemented | stage provenance contracts |
-| Network-dependent release smoke | Removed | native release smoke uses local fixture |
-| GGUF integrity | Gated | `scripts/verify_gguf.py` |
-| Native llama.cpp inference | Required for RC/release | `scripts/verify_release.py --bootstrap-native` |
-| Release dependency evidence | Implemented | freeze + SBOM |
-| Current main CI result | **PASS** | Linux + Windows CI green on latest verified main commit |
-| Termux native quantizer execution | **Verified tool-level evidence** | Android 16/aarch64; pinned llama.cpp `b95502b...`; `llama-quantize --help` executed successfully on 2026-09-29 |
-| Current native release result | **Pending execution** | complete `verify_release.py --bootstrap-native` and end-to-end export/inference remain required |
-| Target-hardware validation | **Pending execution** | must be executed on intended deployment hardware |
-| Production training/convergence | **Operational evidence** | separate from RC smoke |
+| Python support | >=3.11,<3.15 | `pyproject.toml` |
+| Linux CI | Python 3.11 and 3.14 | `.github/workflows/ci.yml` |
+| Windows CI | Python 3.11 and 3.14 | `.github/workflows/ci.yml` |
+| PowerShell contract | Required | `.github/workflows/ci.yml` |
+| Dependency consistency | Required | `pip check` in CI/security/release |
+| Vulnerability scan | Required | `scripts/security_gate.py` |
+| Secret scan | Required | `scripts/security_gate.py` |
+| Python compilation | Required | CI and `scripts/verify_release.py` |
+| Ruff | Required | CI and `scripts/verify_release.py` |
+| Pytest coverage | **90% aggregate minimum** | `[tool.coverage.report].fail_under` in `pyproject.toml` |
+| Artifact/provenance integrity | Required | `pipeline/integrity.py` and stage contracts |
+| Native llama.cpp verification | Required for native release | `scripts/verify_release.py --bootstrap-native` |
+| Release evidence | Required | `scripts/generate_release_evidence.py` and release workflow |
 
-## Release commands
+## Verification commands
 
 Static verification:
 
@@ -36,40 +28,37 @@ Static verification:
 python scripts/verify_release.py
 ```
 
-Full native RC/release verification:
+Full native verification:
 
 ```text
 python scripts/verify_release.py --bootstrap-native
 ```
 
-The native gate is intentionally separate from ordinary CI because it requires the pinned llama.cpp toolchain and a target environment. A green CI run is necessary but is not sufficient for a native production release.
+The static command does not claim native conversion or inference. The native command adds the pinned llama.cpp bootstrap and the deterministic local export/inference fixture.
 
-## Evidence retained by the release gate
+## Evidence retained
 
-- Python compile result
-- Ruff result including `ui/`
+The release gate is expected to retain, where applicable:
+
+- compilation and lint results
 - pytest result and coverage JSON
-- `pip check` result
-- security gate result
-- resolved dependency freeze
-- SBOM
-- source manifest and source-definition hashes
+- dependency consistency and security results
+- dependency freeze and SBOM
+- source and artifact manifests
 - export manifest
 - dataset and model cards
-- GGUF SHA-256 validation
-- llama.cpp inference result
+- GGUF hashes
+- native inference result
+- target-host information when target validation is required
 
-The 2026-09-29 Termux evidence proves the native quantizer can be built and
-executed on Android 16/aarch64. It does not satisfy the full native release gate:
-the Termux Python environment used for that check was outside the repository's
-declared Python 3.11-3.13 support range and did not provide the required
-`faiss-cpu>=1.15.0,<2` dependency. Therefore the native tool evidence and the
-complete Model Lab release gate remain intentionally separate.
+## Environment boundary
+
+Generic CI can validate source contracts, Python behavior, artifact logic, and the automated test suite. CUDA availability, native toolchain behavior, desktop/Tk behavior, and target deployment hardware remain environment-dependent.
+
+Tool-level evidence, such as the historical Termux llama-quantize check, must not be presented as a complete native release result.
 
 ## Release boundary
 
-A release is approved only when every required automated gate is green and the native verification has passed on the intended target environment.
+A production release requires current evidence for the exact approved source commit. Missing evidence is a release-process failure, not an implicit pass.
 
-Missing evidence is a release-process failure, not an implicit pass.
-
-Historical reports remain historical records and must not be presented as current release evidence.
+Historical reports remain historical records and must not be used as current release status.
