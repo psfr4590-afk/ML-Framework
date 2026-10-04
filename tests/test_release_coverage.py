@@ -708,14 +708,17 @@ def test_semantic_embedding_run_stream_and_model_fallback(monkeypatch):
         def get_sentence_embedding_dimension(self): return 2
         def encode(self, chunks, **kwargs):
             return np.asarray([[1.0, 0.0] if "same" in x else [0.0, 1.0] for x in chunks], dtype=np.float32)
-    monkeypatch.setattr(semantic_dedup, "ST_AVAILABLE", True)
-    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", False)
-    monkeypatch.setattr(semantic_dedup, "SentenceTransformer", lambda *a, **k: FakeModel())
-    d = semantic_dedup.SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.9})
     docs = [Document("a", text="same one", final_weight=1), Document("b", text="same two", final_weight=0), Document("c", text="other", final_weight=1)]
-    assert [x.doc_id for x in d.run(docs)] == ["a", "c"]
-    assert [x.doc_id for x in d.stream(iter(docs), buffer_size=2)] == ["a", "c"]
-    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", True)
+    monkeypatch.setattr(semantic_dedup, "ST_AVAILABLE", True)
+    monkeypatch.setattr(semantic_dedup, "SentenceTransformer", lambda *a, **k: FakeModel())
+    fallback = semantic_dedup.SemanticDeduplicator({"mode": "fallback", "similarity_threshold": 0.9})
+    assert [x.doc_id for x in fallback.run(docs)] == ["a", "b", "c"]
+    assert [x.doc_id for x in fallback.stream(iter(docs), buffer_size=2)] == ["a", "b", "c"]
+    embedding = semantic_dedup.SemanticDeduplicator({"mode": "embedding", "similarity_threshold": 0.9})
+    monkeypatch.setattr(embedding, "_ensure_embedding_or_fallback", lambda: True)
+    monkeypatch.setattr(embedding, "_build_index", lambda matrix: None)
+    assert [x.doc_id for x in embedding.run(docs)] == ["a", "c"]
+    assert [x.doc_id for x in embedding.stream(iter(docs), buffer_size=2)] == ["a", "c"]
     d2 = semantic_dedup.SemanticDeduplicator({"mode": "auto"})
     monkeypatch.setattr(d2, "_load_model", lambda: (_ for _ in ()).throw(OSError("offline")))
     assert d2._ensure_embedding_or_fallback() is False
@@ -757,8 +760,13 @@ def test_orchestrator_stage_methods_with_contract_mocks(tmp_path, monkeypatch):
         def __init__(self, *a, **k): pass
         def apply(self, docs): return docs
     class TokTrainer:
-        def __init__(self, cfg): pass
-        def train(self, path): return SimpleNamespace(get_vocab_size=lambda: 8)
+        def __init__(self, cfg):
+            self.cfg = cfg
+        def train(self, path):
+            out = Path(self.cfg["output_path"])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "tokenizer.json").write_text("{}", encoding="utf-8")
+            return SimpleNamespace(get_vocab_size=lambda: 8)
         def load(self): return "loaded"
     class Writer:
         def __init__(self, cfg, tok): pass
