@@ -5,6 +5,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+import numpy as np
 import torch
 
 from command_center import security, config as cc_config, web as cc_web
