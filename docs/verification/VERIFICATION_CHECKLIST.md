@@ -1,30 +1,38 @@
 # Model Lab Verification Checklist
 
+Use this checklist to distinguish automated evidence from checks that require a real target environment or human observation.
+
 ## Automated
-- Package identity and documentation
-- Launcher and project-root discovery
-- Navigation and screen inventory
+
+- Package/build metadata and project-root discovery
 - Pipeline stage and route contracts
-- Credential encryption/decryption paths
+- Artifact integrity and provenance contracts
 - Backend startup behavior
-- 1760×990 desktop configuration
-- Secret scanning
-- Release documentation
+- Credential encryption/decryption paths
+- Secret and dependency security checks
+- Python compilation and Ruff
+- Full pytest suite and enforced 90% aggregate coverage gate
+- Release documentation and structural checks
 
 ## Target machine
-- Windows and Python 3.11
-- Tkinter and 1760×990 display
-- Required executables
-- NVIDIA/PyTorch CUDA observability when applicable
-- llama.cpp checkout and export tools
-- Pipeline doctor and Command Center health
 
-## Human-visible
+- Required Python/runtime dependencies
+- NVIDIA/PyTorch CUDA observability when applicable
+- Native llama.cpp checkout and export tools
+- Pipeline doctor and Command Center health
+- Target hardware characteristics required for deployment
+
+## Human-visible desktop checks
+
 - Desktop launch and display fit
-- Every navigation surface
+- Navigation surfaces
 - Dataset selection and pipeline controls
 - Stop behavior
-- Four credential slots and safe save/replace behavior
-- Sources, Crawler, Training, Outputs, Logs, System, Configuration, Diagnostics, and Command Center
+- Credential save/replace behavior
+- Sources, Crawler, Training, Outputs, Logs, System, Configuration, Diagnostics, and Command Center surfaces
 
-No final release claim should be made until automated, target-machine, and human-visible checks are recorded as PASS or UNKNOWN.
+## Release rule
+
+Do not convert an unexecuted target-machine or human-visible check into PASS. Record PASS, FAIL, or UNKNOWN with the environment and evidence reference.
+
+The desktop 1760×990 value is a UI verification target, not an automated correctness requirement.
