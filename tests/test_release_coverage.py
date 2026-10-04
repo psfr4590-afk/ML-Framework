@@ -763,6 +763,7 @@ def test_semantic_embedding_run_stream_and_model_fallback(monkeypatch):
     assert [x.doc_id for x in embedding.run(docs)] == ["a", "c"]
     monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", False)
     assert [x.doc_id for x in embedding.stream(iter(docs), buffer_size=2)] == ["a", "c"]
+    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", True)
     d2 = semantic_dedup.SemanticDeduplicator({"mode": "auto"})
     monkeypatch.setattr(d2, "_load_model", lambda: (_ for _ in ()).throw(OSError("offline")))
     assert d2._ensure_embedding_or_fallback() is False
