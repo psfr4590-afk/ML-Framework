@@ -368,7 +368,7 @@ def test_integrity_checkpoint_state_failures(tmp_path):
     scaler = torch.amp.GradScaler("cpu", enabled=False)
     path = save_checkpoint(model, opt, scaler, 1, 0.5, {}, tmp_path)
     payload = torch.load(path, map_location="cpu", weights_only=False)
-    payload["model_cfg"]["seq_len"] = 5
+    payload["model_cfg"]["d_model"] = 16
     torch.save(payload, path)
     integrity.write_manifest(path, kind="checkpoint")
     with pytest.raises(RuntimeError):
@@ -487,10 +487,12 @@ def test_orchestrator_helpers_and_manifest_validation(tmp_path, monkeypatch):
         orchestrator._manifest_sources(cfg, paths, "missing")
     assert orchestrator._source_entry("web", "u", "g")["license"] == "unknown"
     root = tmp_path
+    (root / "config").mkdir()
     for name in ["pipeline_config.yaml", "source_weights.yaml", "dataset_groups.yaml", "dataset_profiles.yaml"]:
-        (root / name).write_text(name, encoding="utf-8")
+        (root / "config" / name).write_text(name, encoding="utf-8")
     sp = orchestrator._source_definition_paths({"crawl": {}}, root)
     assert set(sp) == {"pipeline_config", "source_weights", "dataset_groups", "dataset_profiles"}
+    assert all(p.is_file() for p in sp.values())
     out = tmp_path / "manifest.json"
     monkeypatch.setattr(orchestrator, "PROJECT_ROOT", tmp_path)
     orchestrator._write_source_manifest(out, cfg, sp, selected_group_id="all", retrieval_started_at="s", retrieval_completed_at="e")
@@ -521,3 +523,73 @@ def test_orchestrator_jsonl_and_pipeline_run_dispatch(tmp_path, monkeypatch):
     p.cfg = {"stages": {}}
     with pytest.raises(ValueError):
         p.run("all")
+
+def test_trainer_checkpoint_resume_guards(tmp_path):
+    cfg = ModelConfig(vocab_size=8, seq_len=4, n_layers=1, n_heads=1, n_kv_heads=1, d_model=8, d_ffn=8)
+    model = LlamaModel(cfg)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cpu", enabled=False)
+    path = save_checkpoint(model, opt, scaler, 2, 0.4, {"seed": 1}, tmp_path, provenance={"p": 1})
+    with pytest.raises(RuntimeError, match="provenance mismatch"):
+        load_checkpoint(path, model, opt, scaler, torch.device("cpu"), expected_provenance={"p": 2})
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload.pop("rng_state")
+    torch.save(payload, path)
+    integrity.write_manifest(path, kind="checkpoint", provenance={"p": 1})
+    with pytest.raises(RuntimeError, match="RNG state"):
+        load_checkpoint(path, model)
+    payload["rng_state"] = _rng_state()
+    payload["loader_state"] = {"train": None, "val": None}
+    torch.save(payload, path)
+    integrity.write_manifest(path, kind="checkpoint", provenance={"p": 1})
+    class Loader:
+        def load_state_dict(self, state):
+            self.state = state
+    with pytest.raises(RuntimeError, match="train loader state"):
+        load_checkpoint(path, model, train_loader=Loader())
+    (tmp_path / "ckpt_0000002.pt").write_bytes(b"x" * 1024)
+    assert latest_checkpoint(tmp_path) is None
+    (tmp_path / "ckpt_0000003.pt").write_bytes(b"x" * 1024)
+    (tmp_path / "ckpt_0000003.pt.manifest.json").write_text("{}", encoding="utf-8")
+    assert latest_checkpoint(tmp_path) is None
+
+
+def test_trainer_cpu_guard_and_seq_len_guard(monkeypatch, tmp_path):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    trainer = Trainer({"pipeline": {"output_dir": str(tmp_path)}, "train": {"allow_cpu_training": False}})
+    with pytest.raises(RuntimeError, match="allow_cpu_training"):
+        trainer.run()
+    cfg = {
+        "pipeline": {"output_dir": str(tmp_path)},
+        "train": {
+            "allow_cpu_training": True, "auto_size": False, "model_preset": "85M",
+            "vocab_size": 8, "seq_len": 8, "total_steps": 1, "warmup_steps": 1,
+            "batch_size": 1, "grad_accum_steps": 1, "eval_every_steps": 1,
+            "eval_batches": 1, "checkpoint_every_steps": 1, "shard_dir": str(tmp_path / "shards")
+        },
+        "shard": {"sequence_length": 4, "dtype": "uint16"},
+        "_pipeline_config_sha256": "test",
+    }
+    with pytest.raises(RuntimeError, match="exceeds shard sequence_length"):
+        Trainer(cfg).run()
+
+
+def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    class Hardware:
+        def to_dict(self): return {"tier": "cpu"}
+    class Profile:
+        model_preset = "85M"; seq_len = 4; batch_size = 1; grad_accum_steps = 1
+        eval_batches = 1; eval_every_steps = 1; checkpoint_every_steps = 1; recommended_steps = 1
+        def to_dict(self): return {"model_preset": self.model_preset}
+    monkeypatch.setattr("pipeline.trainer.train.profile_hardware", lambda: Hardware())
+    monkeypatch.setattr("pipeline.trainer.train.estimate_total_tokens", lambda p: (_ for _ in ()).throw(ValueError("bad shard")))
+    monkeypatch.setattr("pipeline.trainer.train.recommend_training_profile", lambda **kwargs: Profile())
+    cfg = {
+        "pipeline": {"output_dir": str(tmp_path)},
+        "train": {"allow_cpu_training": True, "auto_size": True, "model_preset": "85M", "vocab_size": 8, "seq_len": 4, "total_steps": 1, "target_training_hours": None, "observed_tokens_per_sec": None},
+        "shard": {"sequence_length": 4},
+        "_pipeline_config_sha256": "test",
+    }
+    with pytest.raises(RuntimeError, match="Training provenance"):
+        Trainer(cfg).run()
