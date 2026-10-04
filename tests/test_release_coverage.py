@@ -201,7 +201,8 @@ def test_model_sizer_platform_and_gpu_failure_paths(monkeypatch):
     fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True, device_count=lambda: 1, get_device_properties=lambda _: (_ for _ in ()).throw(RuntimeError("broken"))))
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     p = model_sizer.profile_hardware()
-    assert not p.cuda_available and p.gpu_count == 0
+    assert p.cuda_available and p.gpu_count == 1
+    assert p.gpu_memory_gb == 0.0 and p.gpu_name is None
 
 
 def test_model_sizer_profile_hardware(monkeypatch):
@@ -760,6 +761,7 @@ def test_semantic_embedding_run_stream_and_model_fallback(monkeypatch):
     monkeypatch.setattr(embedding, "_ensure_embedding_or_fallback", lambda: True)
     monkeypatch.setattr(embedding, "_build_index", lambda matrix: None)
     assert [x.doc_id for x in embedding.run(docs)] == ["a", "c"]
+    monkeypatch.setattr(semantic_dedup, "FAISS_AVAILABLE", False)
     assert [x.doc_id for x in embedding.stream(iter(docs), buffer_size=2)] == ["a", "c"]
     d2 = semantic_dedup.SemanticDeduplicator({"mode": "auto"})
     monkeypatch.setattr(d2, "_load_model", lambda: (_ for _ in ()).throw(OSError("offline")))
