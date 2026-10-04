@@ -604,8 +604,24 @@ def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
     )
     shard_dir = tmp_path / "shards"
     shard_dir.mkdir()
-    (shard_dir / "shard_000000_train.bin").write_bytes(b"\x00\x00")
-    (shard_dir / "shard_000000_val.bin").write_bytes(b"\x00\x00")
+    train_shard = shard_dir / "shard_000000_train.bin"
+    val_shard = shard_dir / "shard_000000_val.bin"
+    train_shard.write_bytes(b"\x00\x00")
+    val_shard.write_bytes(b"\x00\x00")
+    import hashlib
+    (shard_dir / "shards.manifest.json").write_text(
+        json.dumps({
+            "version": 1,
+            "dtype": "uint16",
+            "sequence_length": 4,
+            "vocab_size": 8,
+            "files": [
+                {"name": train_shard.name, "size": train_shard.stat().st_size, "sha256": hashlib.sha256(train_shard.read_bytes()).hexdigest()},
+                {"name": val_shard.name, "size": val_shard.stat().st_size, "sha256": hashlib.sha256(val_shard.read_bytes()).hexdigest()},
+            ],
+        }),
+        encoding="utf-8",
+    )
     cfg = {
         "pipeline": {"output_dir": str(tmp_path)},
         "train": {"allow_cpu_training": True, "auto_size": True, "model_preset": "85M", "vocab_size": 8, "seq_len": 4, "total_steps": 1, "target_training_hours": None, "observed_tokens_per_sec": None, "shard_dir": str(shard_dir)},
