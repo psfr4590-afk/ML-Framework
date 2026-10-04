@@ -56,7 +56,6 @@ def test_orchestrator_source_manifest_validation_matrix(tmp_path):
         out, cfg, paths, selected_group_id="g1",
         retrieval_started_at="s", retrieval_completed_at="e",
     )
-
     assert orchestrator._source_manifest_is_valid(out, "g1", paths)
     assert not orchestrator._source_manifest_is_valid(out, "g2", paths)
 
@@ -65,19 +64,13 @@ def test_orchestrator_source_manifest_validation_matrix(tmp_path):
     out.write_text(json.dumps(data), encoding="utf-8")
     assert not orchestrator._source_manifest_is_valid(out)
 
-    orchestrator._write_source_manifest(
-        out, cfg, paths, selected_group_id="g1",
-        retrieval_started_at="s", retrieval_completed_at="e",
-    )
+    orchestrator._write_source_manifest(out, cfg, paths, selected_group_id="g1", retrieval_started_at="s", retrieval_completed_at="e")
     data = json.loads(out.read_text(encoding="utf-8"))
     data["sources"][0]["dataset_group"] = "other"
     out.write_text(json.dumps(data), encoding="utf-8")
     assert not orchestrator._source_manifest_is_valid(out)
 
-    orchestrator._write_source_manifest(
-        out, cfg, paths, selected_group_id="g1",
-        retrieval_started_at="s", retrieval_completed_at="e",
-    )
+    orchestrator._write_source_manifest(out, cfg, paths, selected_group_id="g1", retrieval_started_at="s", retrieval_completed_at="e")
     data = json.loads(out.read_text(encoding="utf-8"))
     data["sources"][0]["raw_source_sha256"] = 123
     out.write_text(json.dumps(data), encoding="utf-8")
@@ -94,10 +87,7 @@ def test_orchestrator_crawl_groups_and_failure_paths(tmp_path, monkeypatch):
             "id": "g1",
             "sources": {"web": True, "github": True, "arxiv": True, "huggingface": True, "google": True},
             "web": {"seed_urls": ["https://g1"]},
-            "github": {},
-            "arxiv": {},
-            "huggingface": {},
-            "google": {},
+            "github": {}, "arxiv": {}, "huggingface": {}, "google": {},
         },
         {"id": "g2", "sources": {"web": False, "github": False, "arxiv": False, "huggingface": False, "google": False}},
     ]
@@ -110,23 +100,11 @@ def test_orchestrator_crawl_groups_and_failure_paths(tmp_path, monkeypatch):
         def crawl(self):
             yield Document(f"d{len(crawler_calls)}", text="doc")
 
-    monkeypatch.setattr(
-        orchestrator,
-        "_load_class",
-        lambda module, name: Crawler,
-    )
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: Crawler)
     monkeypatch.setattr(orchestrator, "atomic_jsonl_write", lambda path, producer: sum(1 for _ in producer()))
     monkeypatch.setattr(orchestrator, "write_manifest", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        orchestrator,
-        "_write_source_manifest",
-        lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
-        p,
-        "_should_skip",
-        lambda *args, **kwargs: False,
-    )
+    monkeypatch.setattr(orchestrator, "_write_source_manifest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(p, "_should_skip", lambda *args, **kwargs: False)
 
     out = p.stage_crawl(only_group="g1")
     assert out.name == "01_crawled__g1.jsonl"
@@ -143,7 +121,6 @@ def test_orchestrator_crawl_groups_and_failure_paths(tmp_path, monkeypatch):
 def test_orchestrator_stage_skip_and_input_guards(tmp_path, monkeypatch):
     p = _bare_pipeline(tmp_path)
     missing = tmp_path / "missing.jsonl"
-
     monkeypatch.setattr(p, "_should_skip", lambda *args, **kwargs: True)
     assert p.stage_clean(missing) == p._scratch / "02_cleaned.jsonl"
     assert p.stage_embed_dedup(missing) == p._scratch / "03_deduped.jsonl"
@@ -164,11 +141,13 @@ def test_orchestrator_stage_skip_and_input_guards(tmp_path, monkeypatch):
     marker.parent.mkdir(parents=True)
     marker.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(p, "_should_skip", lambda *args, **kwargs: True)
+
     class TokenTrainer:
         def __init__(self, cfg):
             self.cfg = cfg
         def load(self):
             return "loaded"
+
     monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: TokenTrainer)
     assert p.stage_tokenize(missing) == "loaded"
 
@@ -195,16 +174,25 @@ def test_orchestrator_shard_resume_rebuild_and_run_dispatch(tmp_path, monkeypatc
 
     marker.write_text("{", encoding="utf-8")
     writes = []
+
     class Writer:
         def __init__(self, cfg, tok):
             writes.append(("init", cfg["sequence_length"], tok))
         def write(self, path):
             writes.append(("write", path))
             (Path(path) / "shard_001.bin").write_bytes(b"y")
+
     monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: Writer)
     assert p.stage_shard(corpus, tokenizer) == shard_dir
     assert writes and writes[-1][0] == "write"
 
+    class NoOutputWriter:
+        def __init__(self, cfg, tok):
+            pass
+        def write(self, path):
+            return None
+
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: NoOutputWriter)
     for path in shard_dir.glob("shard_*.bin"):
         path.unlink()
     with pytest.raises(RuntimeError, match="no shard files"):
