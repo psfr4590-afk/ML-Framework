@@ -90,5 +90,5 @@ jobs:
         shell: pwsh
         run: |
           $source = Get-Content -Raw -Encoding UTF8 'scripts/bootstrap_llama_cpp.ps1'
-          $required = @('$Tag = "b10516"','$Commit = "b95502b"','convert_hf_to_gguf.py','llama-quantize','llama-cli','-DGGML_NATIVE=OFF','-DGGML_OPENMP=OFF')
+          $required = @('$Tag = "b10516"','$Commit = "b95502b"','convert_hf_to_gguf.py','llama-quantize','llama-cli','-DGGML_NATIVE=OFF','-DGGML_OPENMP=OFF','-DLLAMA_BUILD_SERVER=OFF')
           foreach ($needle in $required) { if ($source -notlike "*$needle*") { throw "Missing PowerShell bootstrap contract: $needle" } }
