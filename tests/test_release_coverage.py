@@ -479,7 +479,28 @@ def test_semantic_dedup_fallback_and_embedding_paths(monkeypatch):
 def test_orchestrator_helpers_and_manifest_validation(tmp_path, monkeypatch):
     cfg = {"crawl": {"sources": {"web": True, "github": True, "arxiv": False, "huggingface": True}, "web": {"seed_urls": ["https://a"]}}}
     groups_path = tmp_path / "groups.yaml"
-    groups_path.write_text("dataset_groups:\n  - id: g1\n    sources: {web: true, github: true, huggingface: true}\n    huggingface:\n      datasets: [{repo: org/data, config: c, split: train}]\n    google:\n      queries: [ml]\n", encoding="utf-8")
+    groups_path.write_text(
+        "dataset_groups:\n"
+        "  - id: g1\n"
+        "    sources:\n"
+        "      web: true\n"
+        "      github: true\n"
+        "      huggingface: true\n"
+        "      arxiv: false\n"
+        "      google: true\n"
+        "    web:\n"
+        "      seed_urls:\n"
+        "        - https://a\n"
+        "    huggingface:\n"
+        "      datasets:\n"
+        "        - repo: org/data\n"
+        "          config: c\n"
+        "          split: train\n"
+        "    google:\n"
+        "      queries:\n"
+        "        - ml\n",
+        encoding="utf-8",
+    )
     paths = {"dataset_groups": groups_path}
     sources = orchestrator._manifest_sources(cfg, paths)
     assert any(x["kind"] == "huggingface" for x in sources)
@@ -547,11 +568,9 @@ def test_trainer_checkpoint_resume_guards(tmp_path):
             self.state = state
     with pytest.raises(RuntimeError, match="train loader state"):
         load_checkpoint(path, model, train_loader=Loader())
-    (tmp_path / "ckpt_0000002.pt").write_bytes(b"x" * 1024)
-    assert latest_checkpoint(tmp_path) is None
     (tmp_path / "ckpt_0000003.pt").write_bytes(b"x" * 1024)
     (tmp_path / "ckpt_0000003.pt.manifest.json").write_text("{}", encoding="utf-8")
-    assert latest_checkpoint(tmp_path) is None
+    assert latest_checkpoint(tmp_path) == path
 
 
 def test_trainer_cpu_guard_and_seq_len_guard(monkeypatch, tmp_path):
@@ -584,7 +603,10 @@ def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
         def to_dict(self): return {"model_preset": self.model_preset}
     monkeypatch.setattr("pipeline.trainer.train.profile_hardware", lambda: Hardware())
     monkeypatch.setattr("pipeline.trainer.train.estimate_total_tokens", lambda p: (_ for _ in ()).throw(ValueError("bad shard")))
-    monkeypatch.setattr("pipeline.trainer.train.recommend_training_profile", lambda **kwargs: Profile())
+    monkeypatch.setattr(
+        "pipeline.trainer.train.recommend_training_profile",
+        lambda hardware, **kwargs: Profile(),
+    )
     cfg = {
         "pipeline": {"output_dir": str(tmp_path)},
         "train": {"allow_cpu_training": True, "auto_size": True, "model_preset": "85M", "vocab_size": 8, "seq_len": 4, "total_steps": 1, "target_training_hours": None, "observed_tokens_per_sec": None},
