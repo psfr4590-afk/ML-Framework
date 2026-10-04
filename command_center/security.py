@@ -26,11 +26,21 @@ def is_within(path: str | Path, root: str | Path) -> bool:
 
 
 def validate_import_source(path: str | Path) -> Path:
-    raw = Path(path).expanduser()
-    if raw.is_symlink():
-        raise ValueError("symlink ingest sources are not permitted")
-    source = raw.resolve(strict=False)
+    """Validate an ingest path as a relative path inside IMPORT_ROOT.
+
+    User input is never resolved from the process working directory. Absolute
+    paths and parent traversal are rejected before filesystem resolution.
+    """
+    user_path = Path(path)
+    if user_path.is_absolute() or ".." in user_path.parts:
+        raise ValueError("ingest source must be inside the configured imports directory")
+
     root = IMPORT_ROOT.resolve(strict=False)
+    candidate = root / user_path
+    if candidate.is_symlink():
+        raise ValueError("symlink ingest sources are not permitted")
+
+    source = candidate.resolve(strict=False)
     if not is_within(source, root):
         raise ValueError("ingest source must be inside the configured imports directory")
     if not source.exists():
