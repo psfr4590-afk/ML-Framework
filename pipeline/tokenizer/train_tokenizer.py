@@ -77,7 +77,11 @@ def _doc_stream(jsonl_path: Path, sample_size: int | None, seed: int = 42) -> It
 class BPETokenizerTrainer:
     def __init__(self, cfg: dict):
         self._cfg = cfg
+        # None means "let the tokenizer determine the final vocabulary size".
+        # A concrete value remains an exact vocabulary contract.
         self._vocab_size = cfg.get("vocab_size", 32000)
+        self._requested_vocab_size = self._vocab_size
+        self._trainer_vocab_size = self._vocab_size if self._vocab_size is not None else 32000
         self._min_freq = cfg.get("min_frequency", 2)
         self._special = cfg.get(
             "special_tokens",
@@ -98,7 +102,7 @@ class BPETokenizerTrainer:
         tokenizer.pre_tokenizer = ByteLevel(add_prefix_space=False)
         tokenizer.decoder = decoders.ByteLevel()
         trainer = BpeTrainer(
-            vocab_size=self._vocab_size,
+            vocab_size=self._trainer_vocab_size,
             min_frequency=self._min_freq,
             special_tokens=self._special,
             show_progress=True,
@@ -117,10 +121,10 @@ class BPETokenizerTrainer:
 
             tokenizer.train([str(tmp_path)], trainer)
             actual_vocab_size = tokenizer.get_vocab_size()
-            if actual_vocab_size != self._vocab_size:
+            if self._requested_vocab_size is not None and actual_vocab_size != self._requested_vocab_size:
                 raise RuntimeError(
                     "Tokenizer vocabulary contract failed: "
-                    f"requested={self._vocab_size}, actual={actual_vocab_size}. "
+                    f"requested={self._requested_vocab_size}, actual={actual_vocab_size}. "
                     "Increase corpus diversity/size or adjust tokenizer training parameters."
                 )
 
@@ -147,7 +151,7 @@ class BPETokenizerTrainer:
                     "corpus_path": str(corpus_path),
                     "sample_size": self._sample_size,
                     "seed": 42,
-                    "vocab_size_requested": self._vocab_size,
+                    "vocab_size_requested": self._requested_vocab_size,
                     "min_frequency": self._min_freq,
                     "special_tokens": list(self._special),
                 },
@@ -162,8 +166,11 @@ class BPETokenizerTrainer:
                 raise RuntimeError("Tokenizer artifact contract failed; missing: " + ", ".join(missing))
             saved_config = json.loads((self._output_path / "tokenizer_config.json").read_text(encoding="utf-8"))
             saved_specials = json.loads((self._output_path / "special_tokens_map.json").read_text(encoding="utf-8"))
-            if saved_config.get("vocab_size") != self._vocab_size:
-                raise RuntimeError(f"Tokenizer config vocab_size contract failed: expected={self._vocab_size}, actual={saved_config.get('vocab_size')}")
+            if saved_config.get("vocab_size") != actual_vocab_size:
+                raise RuntimeError(
+                    "Tokenizer config vocab_size contract failed: "
+                    f"expected={actual_vocab_size}, actual={saved_config.get('vocab_size')}"
+                )
             if not saved_config.get("provenance", {}).get("corpus_sha256"):
                 raise RuntimeError("Tokenizer provenance contract failed: corpus_sha256 is missing")
             for name in ("bos_token", "eos_token", "unk_token", "pad_token", "sep_token", "mask_token"):
