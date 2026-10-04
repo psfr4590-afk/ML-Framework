@@ -174,6 +174,36 @@ def test_model_sizer_all_tiers_and_token_estimates(tmp_path, monkeypatch):
         model_sizer.estimate_total_tokens(shard)
 
 
+def test_model_sizer_platform_and_gpu_failure_paths(monkeypatch):
+    monkeypatch.setattr(model_sizer.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(model_sizer.os, "sysconf", lambda key: 8)
+    assert model_sizer._available_ram_gb() > 0
+    monkeypatch.setattr(model_sizer.platform, "system", lambda: "Windows")
+    class Kernel32:
+        @staticmethod
+        def GlobalMemoryStatusEx(status):
+            status.ullAvailPhys = 2 * 1024**3
+            return 1
+    class Windll:
+        kernel32 = Kernel32()
+    class FakeCtypes:
+        class Structure:
+            def __init_subclass__(cls, **kwargs): return super().__init_subclass__(**kwargs)
+        c_ulong = int
+        c_ulonglong = int
+        windll = Windll()
+        @staticmethod
+        def sizeof(cls): return 64
+        @staticmethod
+        def byref(obj): return obj
+    monkeypatch.setitem(sys.modules, "ctypes", FakeCtypes)
+    assert model_sizer._available_ram_gb() == 2
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True, device_count=lambda: 1, get_device_properties=lambda _: (_ for _ in ()).throw(RuntimeError("broken"))))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    p = model_sizer.profile_hardware()
+    assert not p.cuda_available and p.gpu_count == 0
+
+
 def test_model_sizer_profile_hardware(monkeypatch):
     class FakeCuda:
         @staticmethod
@@ -208,6 +238,17 @@ def test_integrity_jsonl_and_artifacts(tmp_path):
     assert not integrity.artifact_valid(path, {"a": 2})
     path.write_text("tampered\n", encoding="utf-8")
     assert not integrity.artifact_valid(path)
+
+
+def test_integrity_manifest_source_type_rejection(tmp_path):
+    p = tmp_path / "x.bin"
+    p.write_bytes(b"abc")
+    mp = integrity.write_manifest(p, kind="bin")
+    data = json.loads(mp.read_text(encoding="utf-8"))
+    data["source"] = 123
+    data["source_sha256"] = "abc"
+    mp.write_text(json.dumps(data), encoding="utf-8")
+    assert not integrity.artifact_valid(p)
 
 
 def test_integrity_artifact_edge_cases(tmp_path):
@@ -715,6 +756,7 @@ def test_semantic_embedding_run_stream_and_model_fallback(monkeypatch):
     assert [x.doc_id for x in fallback.run(docs)] == ["a", "b", "c"]
     assert [x.doc_id for x in fallback.stream(iter(docs), buffer_size=2)] == ["a", "b", "c"]
     embedding = semantic_dedup.SemanticDeduplicator({"mode": "embedding", "similarity_threshold": 0.9})
+    embedding._model = FakeModel()
     monkeypatch.setattr(embedding, "_ensure_embedding_or_fallback", lambda: True)
     monkeypatch.setattr(embedding, "_build_index", lambda matrix: None)
     assert [x.doc_id for x in embedding.run(docs)] == ["a", "c"]
@@ -786,7 +828,14 @@ def test_orchestrator_stage_methods_with_contract_mocks(tmp_path, monkeypatch):
     tok = p.stage_tokenize(src)
     assert tok.get_vocab_size() == 8
     assert p.stage_shard(src, tok) == self_dir
-    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: SimpleNamespace(run=lambda self: None) if name == "Trainer" else None)
+    class FakeTrainer:
+        def __init__(self, cfg):
+            self.cfg = cfg
+        def run(self):
+            ckpt_dir = Path(self.cfg.get("pipeline", {}).get("output_dir", p._out) if False else p._out) / "checkpoints"
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            (ckpt_dir / "ckpt_best_0000002.pt").write_bytes(b"x")
+    monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: FakeTrainer if name == "Trainer" else None)
     p.cfg["train"]["allow_cpu_training"] = True
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     (p._out / "checkpoints").mkdir(parents=True, exist_ok=True)
