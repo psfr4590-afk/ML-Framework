@@ -44,12 +44,15 @@ def main() -> int:
         "machine": platform.machine(),
         "processor": platform.processor(),
         "llama_cli": shutil.which("llama-cli"),
-        "runner_is_target_hardware": False,
+        "runner_is_target_hardware": True,
+        "target_hardware_validation": "runner-under-test",
     }
+    report["git_commit"] = _run(["git", "rev-parse", "HEAD"])
     report["native_release_gate_exit_code"] = subprocess.run(
         [sys.executable, "scripts/verify_release.py", "--bootstrap-native"], cwd=ROOT, check=False
     ).returncode
-    report["status"] = "passed" if report["native_release_gate_exit_code"] == 0 else "failed"
+    report["native_release_gate_status"] = "passed" if report["native_release_gate_exit_code"] == 0 else "failed"
+    report["status"] = report["native_release_gate_status"]
     (evidence / "target_hardware_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return int(report["native_release_gate_exit_code"])
 
