@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -169,7 +167,6 @@ def test_model_sizer_all_tiers_and_token_estimates(tmp_path, monkeypatch):
         p.unlink()
     with pytest.raises(FileNotFoundError):
         model_sizer.estimate_total_tokens(shard)
-
 
 
 def test_model_sizer_profile_hardware(monkeypatch):
