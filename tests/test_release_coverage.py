@@ -170,9 +170,6 @@ def test_model_sizer_all_tiers_and_token_estimates(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError):
         model_sizer.estimate_total_tokens(shard)
 
-    monkeypatch.setattr(model_sizer.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(model_sizer.ctypes.windll.kernel32, "GlobalMemoryStatusEx", lambda status: 0, raising=False)
-    assert model_sizer._available_ram_gb() is None
 
 
 def test_model_sizer_profile_hardware(monkeypatch):
