@@ -63,13 +63,13 @@ def test_tokenizer_real_train_and_load(tmp_path):
     ]
     corpus.write_text("\n".join(json.dumps({"text": t}) for t in texts) + "\n", encoding="utf-8")
     trainer = train_tokenizer.BPETokenizerTrainer({
-        "vocab_size": 32,
+        "vocab_size": 34,
         "min_frequency": 1,
         "output_path": str(tmp_path / "tokenizer"),
     })
     tok = trainer.train(corpus)
-    assert tok.get_vocab_size() == 32
-    assert trainer.load().get_vocab_size() == 32
+    assert tok.get_vocab_size() == 34
+    assert trainer.load().get_vocab_size() == 34
     encoded = trainer.encode("alpha bravo", tok)
     assert encoded
     config = json.loads((tmp_path / "tokenizer" / "tokenizer_config.json").read_text(encoding="utf-8"))
@@ -128,7 +128,7 @@ def test_trainer_helper_branches(tmp_path, monkeypatch):
     state = train._rng_state()
     random.random()
     train._restore_rng_state(state)
-    assert random.random() == random.random() if False else True
+    assert train._rng_state()["python"] == state["python"]
     with pytest.raises(RuntimeError, match="invalid"):
         train._restore_rng_state(None)
 
