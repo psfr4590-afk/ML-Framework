@@ -46,7 +46,8 @@ def _bare_pipeline(tmp_path):
     return p
 
 
-def test_orchestrator_source_manifest_validation_matrix(tmp_path):
+def test_orchestrator_source_manifest_validation_matrix(tmp_path, monkeypatch):
+    monkeypatch.setattr(orchestrator, "PROJECT_ROOT", tmp_path)
     source = tmp_path / "source.yaml"
     source.write_text("x", encoding="utf-8")
     paths = {"pipeline_config": source}
@@ -177,10 +178,13 @@ def test_orchestrator_shard_resume_rebuild_and_run_dispatch(tmp_path, monkeypatc
 
     class Writer:
         def __init__(self, cfg, tok):
+            self.cfg = cfg
             writes.append(("init", cfg["sequence_length"], tok))
         def write(self, path):
             writes.append(("write", path))
-            (Path(path) / "shard_001.bin").write_bytes(b"y")
+            output_dir = Path(self.cfg.get("output_dir", shard_dir))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "shard_001.bin").write_bytes(b"y")
 
     monkeypatch.setattr(orchestrator, "_load_class", lambda module, name: Writer)
     assert p.stage_shard(corpus, tokenizer) == shard_dir
