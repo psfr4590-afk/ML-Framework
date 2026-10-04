@@ -63,13 +63,13 @@ def test_tokenizer_real_train_and_load(tmp_path):
     ]
     corpus.write_text("\n".join(json.dumps({"text": t}) for t in texts) + "\n", encoding="utf-8")
     trainer = train_tokenizer.BPETokenizerTrainer({
-        "vocab_size": 34,
+        "vocab_size": 16,
         "min_frequency": 1,
         "output_path": str(tmp_path / "tokenizer"),
     })
     tok = trainer.train(corpus)
-    assert tok.get_vocab_size() == 34
-    assert trainer.load().get_vocab_size() == 34
+    assert tok.get_vocab_size() == 16
+    assert trainer.load().get_vocab_size() == 16
     encoded = trainer.encode("alpha bravo", tok)
     assert encoded
     config = json.loads((tmp_path / "tokenizer" / "tokenizer_config.json").read_text(encoding="utf-8"))
