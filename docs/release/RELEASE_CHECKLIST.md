@@ -1,32 +1,31 @@
-# Model Lab Release Candidate / Production Release Checklist
+# Model Lab Release Checklist
 
-A release candidate is a source-tree candidate plus reproducible evidence. A production release requires the additional target-environment gates.
+A release candidate is a source-tree candidate plus reproducible evidence. Production release approval requires every applicable gate below to be backed by current evidence for the exact approved commit.
 
 ## 1. Repository and automated gates
 
-- [x] Current RC source state identified on `main`; release commit must be frozen before tagging
-- [x] Linux CI passes on the current `main` source state
-- [x] Windows CI passes on the current `main` source state
-- [x] Windows PowerShell bootstrap contract passes
-- [x] `python -m compileall -q .` passes in CI
-- [x] `python -m pytest -q` passes with the enforced >=75% coverage threshold
-- [x] `python run_pipeline.py --doctor` has no required failures
-- [x] Security gate passes: secret scan, `pip check`, `pip-audit`
-- [x] CodeQL analysis passes on the current `main` source state
-- [x] No unintended generated artifacts, credentials, caches, or native build products are tracked
+- [ ] Exact approved commit is identified and frozen
+- [ ] Linux CI passes for that exact commit
+- [ ] Windows CI passes for that exact commit
+- [ ] Windows PowerShell bootstrap contract passes
+- [ ] `python -m compileall -q .` passes
+- [ ] `python -m pytest -q` passes with the enforced **90% aggregate coverage threshold**
+- [ ] `python run_pipeline.py --doctor` has no required failures
+- [ ] Security gate passes: secret scan, `pip check`, and `pip-audit`
+- [ ] CodeQL passes for the exact approved commit when configured as a release gate
+- [ ] No unintended generated artifacts, credentials, caches, or native build products are tracked
 
 ## 2. Native release gate
 
-- [ ] Pinned llama.cpp bootstrap completed and commit is `b95502b...`
+- [ ] Pinned llama.cpp bootstrap completes at the repository's configured revision
 - [ ] `convert_hf_to_gguf.py` exists in the pinned checkout
-- [ ] `llama-quantize` exists when quantized export is enabled
-- [x] Termux/Android native quantizer smoke evidence recorded for 2026-09-29: Android 16/aarch64 executable starts successfully
+- [ ] `llama-quantize` exists when quantized export is requested
 - [ ] Deterministic network-free release fixture completes
 - [ ] Tokenizer and shard contracts pass
-- [ ] Reduced training run writes a checkpoint and integrity manifest
+- [ ] Reduced training run writes a checkpoint and integrity metadata
 - [ ] Checkpoint reload succeeds
 - [ ] GGUF F16 export succeeds
-- [ ] Requested quantized GGUF export succeeds
+- [ ] Requested quantized GGUF export succeeds when requested
 - [ ] Export manifest hashes match files on disk
 - [ ] Dataset and model cards are generated and hashed
 - [ ] `scripts/verify_gguf.py` passes
@@ -35,9 +34,9 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 ## 3. Provenance, security, and reproducibility
 
 - [ ] Every production source has a retained source manifest with identifier, retrieval time, revision, license/usage terms, and raw-source SHA-256 where available
-- [ ] Attribution and redistribution requirements have been reviewed before publishing a dataset or model
+- [ ] Attribution and redistribution requirements are reviewed before publishing a dataset or model
 - [ ] Sources without established training rights are excluded
-- [ ] Crawler boundary/security tests pass
+- [ ] Crawler boundary and security tests pass
 - [ ] Untrusted document/archive parsing limits are enforced
 - [ ] Credential storage and redaction controls are verified
 - [ ] Command-center localhost binding and access controls are verified
@@ -57,7 +56,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 
 ## 5. Production-only gates
 
-These are not satisfied by the bounded RC smoke test:
+These are not satisfied by the bounded release fixture:
 
 - [ ] Target deployment hardware passes native export/inference
 - [ ] Intended production training run completes successfully
@@ -65,4 +64,4 @@ These are not satisfied by the bounded RC smoke test:
 - [ ] Production dataset provenance/rights review is complete
 - [ ] Release artifact is rebuilt from the exact approved source/config/dependency state
 
-Every completed gate should include its execution environment, result, and relevant artifact or log evidence. Historical reports do not satisfy current gates.
+Historical reports do not satisfy current gates. Every completed gate should include its execution environment, result, and relevant artifact or log evidence.
