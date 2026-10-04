@@ -1,7 +1,15 @@
-# Source of truth
+# Source of Truth
 
-The public GitHub `main` branch is the authoritative source of truth for Model Lab 1.3.0. Delivery archives and working-session snapshots are historical inputs, not authoritative repository state.
+The repository's source of truth is the Git history and code on the branch/commit being reviewed. Once a change is merged, `main` is the authoritative public branch.
 
-Generated virtual environments, caches, datasets, build outputs, and nested vendor Git metadata are excluded from the public repository. Native llama.cpp remains a separately bootstrapped and pinned dependency.
+When documentation, tests, release notes, or historical reports disagree with the code, inspect the current code and workflow configuration first and update the stale document.
 
-When documentation, tests, or release notes disagree with the code on `main`, treat `main` as authoritative and update the stale document rather than reconstructing source state from an older archive.
+Historical archives, delivery notes, generated reports, and working-session snapshots are not authoritative source.
+
+Runtime datasets, checkpoints, caches, build outputs, live credentials, and separately bootstrapped native dependencies are outside the source-tree contract unless explicitly tracked by the repository.
+
+## Status claims
+
+Documentation must not hard-code a workflow result, test count, coverage result, release approval, or target-machine result unless that evidence is explicitly tied to a commit and retained as current release evidence.
+
+Current status belongs to GitHub Actions and the release evidence produced for the approved commit.
