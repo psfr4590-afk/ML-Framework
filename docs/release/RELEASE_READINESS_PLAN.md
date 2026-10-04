@@ -15,7 +15,7 @@ This document is the current production-readiness contract for `main`. It distin
 | Secret scan | Gated | `scripts/security_gate.py` |
 | Python compile | Gated | CI + `scripts/verify_release.py` |
 | Ruff F lint | Gated | CI + `scripts/verify_release.py` |
-| Automated test coverage | Gated, >=75% | `pytest-cov` gate in `pyproject.toml` |
+| Automated test coverage | Gated, >=75% | `[tool.coverage.report].fail_under` in `pyproject.toml` |
 | Source provenance | Implemented | schema-2 source manifests |
 | Artifact source/config/code identity | Implemented | stage provenance contracts |
 | Network-dependent release smoke | Removed | native release smoke uses local fixture |
