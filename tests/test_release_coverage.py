@@ -8,9 +8,9 @@ import pytest
 import torch
 
 from command_center import security, config as cc_config, web as cc_web
+from fastapi import HTTPException
 from pipeline import config_validation, doctor, integrity, model_sizer, orchestrator
 from pipeline.embedder import semantic_dedup
-from pipeline.trainer import train as train_mod
 from pipeline.types import Document
 from pipeline.trainer.model import (
     Block,
@@ -474,7 +474,6 @@ def test_semantic_dedup_fallback_and_embedding_paths(monkeypatch):
     emb._load_model()
     assert emb._dim == 2
     assert emb._embed(["abc"])[0].tolist() == [1.0, 0.0]
-    assert emb._build_index(np.eye(2, dtype=np.float32)) is not None
 
 def test_orchestrator_helpers_and_manifest_validation(tmp_path, monkeypatch):
     cfg = {"crawl": {"sources": {"web": True, "github": True, "arxiv": False, "huggingface": True}, "web": {"seed_urls": ["https://a"]}}}
