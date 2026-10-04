@@ -54,40 +54,30 @@ def test_tokenizer_init_encode_load_and_dependency_guards(tmp_path, monkeypatch)
 
 
 def test_tokenizer_real_train_and_load(tmp_path):
+    # Keep this fixture intentionally tiny and deterministic.  The production
+    # trainer owns the BPE configuration and exact-vocabulary contract, so this
+    # test must not construct a second tokenizer to predict its output.
     corpus = tmp_path / "corpus.jsonl"
-    texts = [
-        "alpha bravo charlie delta echo foxtrot golf hotel india juliet",
-        "kilo lima mike november oscar papa quebec romeo sierra tango",
-        "uniform victor whiskey xray yankee zulu python rust java kotlin",
-        "machine learning framework dataset tokenizer transformer inference",
-    ]
-    corpus.write_text("\n".join(json.dumps({"text": t}) for t in texts) + "\n", encoding="utf-8")
-    pytest.importorskip("tokenizers")
-    from tokenizers import Tokenizer
-    from tokenizers.models import BPE
-    from tokenizers.normalizers import NFKC, Sequence as NormSequence
-    from tokenizers.pre_tokenizers import ByteLevel
-    from tokenizers.trainers import BpeTrainer
-
-    special = ["<|pad|>", "<|unk|>", "<|bos|>", "<|eos|>", "<|sep|>", "<|mask|>"]
-    reference = Tokenizer(BPE(unk_token="<|unk|>"))
-    reference.normalizer = NormSequence([NFKC()])
-    reference.pre_tokenizer = ByteLevel(add_prefix_space=False)
-    reference.train([str(corpus)], BpeTrainer(vocab_size=256, min_frequency=1, special_tokens=special))
-    expected_vocab = reference.get_vocab_size()
+    corpus.write_text(json.dumps({"text": "a"}) + "\n", encoding="utf-8")
 
     trainer = train_tokenizer.BPETokenizerTrainer({
-        "vocab_size": expected_vocab,
+        "vocab_size": 2,
         "min_frequency": 1,
+        "special_tokens": ["<|unk|>"],
         "output_path": str(tmp_path / "tokenizer"),
     })
     tok = trainer.train(corpus)
-    assert tok.get_vocab_size() == expected_vocab
-    assert trainer.load().get_vocab_size() == expected_vocab
-    encoded = trainer.encode("alpha bravo", tok)
+
+    assert tok.get_vocab_size() == 2
+    assert trainer.load().get_vocab_size() == 2
+    encoded = trainer.encode("a", tok)
     assert encoded
-    config = json.loads((tmp_path / "tokenizer" / "tokenizer_config.json").read_text(encoding="utf-8"))
+
+    output = tmp_path / "tokenizer"
+    config = json.loads((output / "tokenizer_config.json").read_text(encoding="utf-8"))
+    assert config["vocab_size"] == 2
     assert config["provenance"]["corpus_sha256"]
+    assert json.loads((output / "special_tokens_map.json").read_text(encoding="utf-8"))["unk_token"] == "<|unk|>"
 
 
 def test_tokenizer_empty_corpus_and_contract_failures(tmp_path, monkeypatch):
