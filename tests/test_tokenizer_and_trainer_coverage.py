@@ -54,28 +54,31 @@ def test_tokenizer_init_encode_load_and_dependency_guards(tmp_path, monkeypatch)
 
 
 def test_tokenizer_real_train_and_load(tmp_path):
-    # Keep this fixture intentionally tiny and deterministic.  The production
-    # trainer owns the BPE configuration and exact-vocabulary contract, so this
-    # test must not construct a second tokenizer to predict its output.
+    # The tokenizer owns vocabulary construction.  Do not predict BPE output
+    # with a second training path or hard-code a version-sensitive vocabulary.
     corpus = tmp_path / "corpus.jsonl"
-    corpus.write_text(json.dumps({"text": "a"}) + "\n", encoding="utf-8")
+    corpus.write_text(
+        json.dumps({"text": "alpha bravo charlie delta echo"}) + "\n",
+        encoding="utf-8",
+    )
 
     trainer = train_tokenizer.BPETokenizerTrainer({
-        "vocab_size": 2,
+        "vocab_size": None,
         "min_frequency": 1,
         "special_tokens": ["<|unk|>"],
         "output_path": str(tmp_path / "tokenizer"),
     })
     tok = trainer.train(corpus)
+    actual_vocab = tok.get_vocab_size()
 
-    assert tok.get_vocab_size() == 2
-    assert trainer.load().get_vocab_size() == 2
-    encoded = trainer.encode("a", tok)
-    assert encoded
+    assert actual_vocab > 1
+    assert trainer.load().get_vocab_size() == actual_vocab
+    assert trainer.encode("alpha", tok)
 
     output = tmp_path / "tokenizer"
     config = json.loads((output / "tokenizer_config.json").read_text(encoding="utf-8"))
-    assert config["vocab_size"] == 2
+    assert config["vocab_size"] == actual_vocab
+    assert config["provenance"]["vocab_size_requested"] is None
     assert config["provenance"]["corpus_sha256"]
     assert json.loads((output / "special_tokens_map.json").read_text(encoding="utf-8"))["unk_token"] == "<|unk|>"
 
