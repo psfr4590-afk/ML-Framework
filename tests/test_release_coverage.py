@@ -499,8 +499,9 @@ def test_orchestrator_helpers_and_manifest_validation(tmp_path, monkeypatch):
     assert orchestrator._source_entry("web", "u", "g")["license"] == "unknown"
     root = tmp_path
     (root / "config").mkdir()
-    for name in ["pipeline_config.yaml", "source_weights.yaml", "dataset_groups.yaml", "dataset_profiles.yaml"]:
+    for name in ["pipeline_config.yaml", "source_weights.yaml", "dataset_profiles.yaml"]:
         (root / "config" / name).write_text(name, encoding="utf-8")
+    (root / "config" / "dataset_groups.yaml").write_text(groups_path.read_text(encoding="utf-8"), encoding="utf-8")
     sp = orchestrator._source_definition_paths({"crawl": {}}, root)
     assert set(sp) == {"pipeline_config", "source_weights", "dataset_groups", "dataset_profiles"}
     assert all(p.is_file() for p in sp.values())
@@ -601,9 +602,13 @@ def test_trainer_auto_size_fallback_and_profile(monkeypatch, tmp_path):
         "pipeline.trainer.train._provenance",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Training provenance")),
     )
+    shard_dir = tmp_path / "shards"
+    shard_dir.mkdir()
+    (shard_dir / "shard_000000_train.bin").write_bytes(b"\x00\x00")
+    (shard_dir / "shard_000000_val.bin").write_bytes(b"\x00\x00")
     cfg = {
         "pipeline": {"output_dir": str(tmp_path)},
-        "train": {"allow_cpu_training": True, "auto_size": True, "model_preset": "85M", "vocab_size": 8, "seq_len": 4, "total_steps": 1, "target_training_hours": None, "observed_tokens_per_sec": None},
+        "train": {"allow_cpu_training": True, "auto_size": True, "model_preset": "85M", "vocab_size": 8, "seq_len": 4, "total_steps": 1, "target_training_hours": None, "observed_tokens_per_sec": None, "shard_dir": str(shard_dir)},
         "shard": {"sequence_length": 4},
         "_pipeline_config_sha256": "test",
     }
