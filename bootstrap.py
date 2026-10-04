@@ -25,7 +25,7 @@ RECONCILER = ROOT / "scripts" / "reconcile_environment.py"
 REQUIREMENTS = ROOT / "requirements.txt"
 TORCH_REQUIREMENTS = ROOT / "requirements-torch.txt"
 MIN_PYTHON = (3, 11)
-MAX_PYTHON_EXCLUSIVE = (3, 14)
+MAX_PYTHON_EXCLUSIVE = (3, 15)
 REQUIRED = (
     "yaml",
     "requests",
@@ -74,8 +74,8 @@ def _python_supported() -> bool:
 def _python_requirement_message() -> str:
     version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     return (
-        f"Python 3.11-3.13 required; found Python {version}. "
-        "Python 3.14+ is not supported because dependency compatibility "
+        f"Python 3.11-3.14 required; found Python {version}. "
+        "Python 3.15+ is not supported because dependency compatibility "
         "has not been validated for that interpreter range."
     )
 
