@@ -5,20 +5,34 @@ This document records what can be established from the repository without claimi
 ## 1. Repository and runtime contract
 
 - Project-root discovery is independent of the caller's working directory.
-- Python support is defined by `pyproject.toml` as `>=3.11,<3.15`.
-- The bootstrapper has explicit PyTorch channel selection.
+- Python support is defined by `pyproject.toml` and `bootstrap.py` as `>=3.11,<3.15`.
+- The bootstrapper has explicit PyTorch channel selection and hardware detection.
 - Native llama.cpp is separately bootstrapped and pinned.
 - Runtime datasets, checkpoints, GGUF artifacts, caches, logs, and live credentials are outside the source-tree contract.
 
-## 2. Dependency and security gates
+## 2. Canonical architecture
+
+- `pipeline/orchestrator.py` is the single production stage orchestrator.
+- `pipeline.types.Document` is the canonical preprocessing document contract.
+- `pipeline/app.py` is a compatibility surface and does not define a second pipeline.
+- The command center delegates stage execution to `run_pipeline.py`.
+- The optional Tk UI delegates backend work to the localhost command center.
+
+The stage contract is:
+
+`crawl → clean → semantic dedup → weight → tokenize → shard → train → export`
+
+## 3. Dependency and security gates
 
 - `bootstrap.py --doctor` checks installation and host prerequisites.
+- `run_pipeline.py --doctor` checks project/runtime readiness.
 - Runtime dependencies are declared in `pyproject.toml` and requirements files.
 - The security gate checks tracked source, dependency consistency, and dependency vulnerabilities.
+- Command-center ingestion is confined to its imports root and rejects traversal, absolute paths, and symlink sources.
 
-## 3. Configuration and dataset catalog
+## 4. Configuration and dataset catalog
 
-The checked-in dataset catalog contains ten groups:
+The checked-in canonical dataset catalog contains ten groups:
 
 1. `swe_cs_systems`
 2. `ai_ml_cybersec_dataeng`
@@ -33,39 +47,44 @@ The checked-in dataset catalog contains ten groups:
 
 Configuration validation and dataset-group identity are enforced by the current configuration/schema code.
 
-## 4. Source provenance
+## 5. Source provenance
 
 Source manifests use schema 2 and retain dataset-group identity, source-definition hashes, source kind and identifier, revision/license fields, timestamps, and raw-source hashes when available.
 
 A stale or incomplete source manifest cannot satisfy the production artifact lineage contract.
 
-## 5. Stage lineage
+## 6. Stage lineage
 
-The current stage contract is:
+Each material stage output carries integrity/provenance information. Resume logic validates those records before reusing persisted output.
 
-`crawl → clean → semantic dedup → weight → tokenize → shard → train → export`
+- crawl produces source/provenance state
+- clean normalizes and filters
+- semantic dedup removes near-duplicates using the configured embedding/index path
+- weight applies source/content weighting
+- tokenize produces the BPE tokenizer and manifest
+- shard produces binary shards and a shard manifest with sizes/hashes
+- train produces integrity-protected checkpoints with deterministic state
+- export validates upstream identities before creating HF/GGUF/Ollama artifacts
 
-Material artifacts are protected by hashes and stage provenance. Resume logic validates those records before reusing persisted output.
+## 7. Training architecture
 
-Shard manifests independently record shard sizes and SHA-256 values. Tokenizer and weighted-corpus artifacts are checked before export.
+The built-in model is a Llama-style decoder-only transformer with RMSNorm, RoPE, causal attention/grouped-query support, SwiGLU, tied embeddings, and configurable geometry.
 
-## 6. Training lineage
+Available presets are approximately 85M, 117M, and 360M parameters. Hardware-aware profile selection can reduce context, batch geometry, and training steps for constrained hosts.
 
-Training checkpoints retain model/training configuration identities, optimizer/scaler state, deterministic RNG and loader state, shard identity, source-manifest identity, and seed.
+Production training refuses accidental CPU pretraining when `allow_cpu_training=false`.
 
-Production training refuses accidental CPU pretraining unless CPU training is explicitly allowed by configuration.
+## 8. Export lineage
 
-## 7. Export lineage
-
-Export validates the checkpoint and the retained tokenizer, weighted-corpus, shard, source-manifest, and configuration identities before conversion.
+Export validates the checkpoint and retained tokenizer, weighted-corpus, shard, source-manifest, configuration, and model-vocabulary identities before conversion.
 
 The release path produces GGUF artifacts, export metadata, dataset/model cards, and hashes. Native verification additionally validates GGUF integrity and native inference.
 
-## 8. Native release verification
+## 9. Native release verification
 
-`scripts/verify_release.py --bootstrap-native` is the repository's native release gate. It performs the static verification first, then reconciles the pinned llama.cpp dependency and executes the local deterministic fixture through tokenization, sharding, training, GGUF export, artifact verification, and native inference.
+`scripts/verify_release.py --bootstrap-native` is the repository's native release gate. It performs the static verification first, reconciles the pinned llama.cpp dependency, creates the deterministic local fixture, runs the enabled tokenization/sharding/training/export path, verifies the resulting GGUF, and exercises native inference.
 
-## 9. Runtime-only evidence
+## 10. Runtime-only evidence
 
 Static inspection cannot prove:
 
@@ -74,5 +93,6 @@ Static inspection cannot prove:
 - legal rights for every external source
 - actual production training loss, convergence, or model capability
 - successful native verification on the intended deployment hardware
+- human-visible desktop behavior
 
 Those remain explicit runtime/operational gates.
