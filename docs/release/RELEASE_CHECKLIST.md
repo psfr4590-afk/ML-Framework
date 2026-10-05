@@ -23,7 +23,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. Produ
 - [ ] Deterministic network-free release fixture completes
 - [ ] Tokenizer and shard contracts pass
 - [ ] Reduced training run writes a checkpoint and integrity metadata
-- [ ] Checkpoint reload succeeds
+- [ ] Checkpoint reload succeeds with provenance validation
 - [ ] GGUF F16 export succeeds
 - [ ] Requested quantized GGUF export succeeds when requested
 - [ ] Export manifest hashes match files on disk
@@ -40,6 +40,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. Produ
 - [ ] Untrusted document/archive parsing limits are enforced
 - [ ] Credential storage and redaction controls are verified
 - [ ] Command-center localhost binding and access controls are verified
+- [ ] Dataset/session identity is preserved through the run
 - [ ] Dependency vulnerability/license scanning is complete for the release environment
 - [ ] Dependency freeze and SBOM are retained
 
