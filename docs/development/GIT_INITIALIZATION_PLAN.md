@@ -56,4 +56,6 @@ Before release:
 
 ## Source-of-truth rule
 
-GitHub `main` is the public source of truth. The archived delivery package is a reference for missing architecture and release evidence, not a reason to overwrite newer repository improvements wholesale.
+The branch/commit under review is the immediate source of truth. After merge, GitHub `main` is the authoritative public branch.
+
+The maintained architecture is one canonical pipeline orchestrator, one localhost command center, and an optional desktop control surface. Historical delivery packages are references for history and evidence, not alternate implementations.
