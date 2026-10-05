@@ -4,10 +4,9 @@ This contract is the gate between source configuration and training data. It doe
 
 ## Static contract
 
-`scripts/verify_dataset_contract.py` validates all ten canonical dataset profiles and groups before collection. It checks:
+`scripts/verify_dataset_contract.py` validates the canonical dataset profiles and groups before collection. It checks:
 
-- exactly ten dataset IDs, 1 through 10
-- one-to-one profile-to-group identity
+- canonical dataset IDs and one-to-one profile/group identity
 - executable rules for every declared exclusion
 - source-specific acquisition configuration
 - explicit source identity fields
@@ -34,7 +33,7 @@ Rights metadata is retained on source records. Unknown rights do not automatical
 
 ## Exclusions and quality
 
-Profile exclusions are backed by executable regex rules in `config/dataset_source_policy.yaml`. They are not merely descriptive YAML labels anymore.
+Profile exclusions are backed by executable rules in `config/dataset_source_policy.yaml`. They are not merely descriptive YAML labels.
 
 `scripts/verify_dataset_corpus.py` rejects:
 
