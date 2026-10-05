@@ -1,8 +1,8 @@
 # ML-Framework
 
-**ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: an end-to-end, local-first system for building training datasets, training a model, and exporting it for local inference.
+**ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: a local-first system for acquiring and validating training data, preparing artifacts, training a Llama-style decoder-only model, and exporting it for local inference.
 
-The repository is under release-candidate hardening. The source tree contains the pipeline, control plane, optional desktop surface, tests, security controls, and release tooling. A production release is not claimed until the required evidence exists for the exact approved commit.
+The source tree contains one canonical pipeline implementation, a localhost FastAPI control plane, an optional Windows/Tk desktop surface, tests, security controls, and release tooling. Runtime datasets, checkpoints, logs, caches, credentials, and native build products are outside the source-tree contract.
 
 ## What it does
 
@@ -10,15 +10,16 @@ The repository is under release-candidate hardening. The source tree contains th
 
 The repository includes:
 
-- dataset groups and crawl configuration
-- source scoring, URL security, filtering, and provenance manifests
-- exact and semantic deduplication
-- deterministic tokenizer and validated binary shard generation
-- isolated dataset sessions and resumable stage boundaries
-- hardware-aware training profiles and checkpoint integrity
-- GGUF export and native llama.cpp verification tooling
-- localhost FastAPI command center and optional Windows/Tk desktop surface
-- automated contract, regression, security, and release tests
+- dataset groups, source configuration, and dataset-session identity
+- source scoring, URL security, bounded acquisition, filtering, and provenance manifests
+- exact and semantic near-deduplication
+- deterministic BPE tokenizer training and validated binary shard generation
+- hardware-aware training profiles and checkpoint integrity/resume state
+- a Llama-style decoder-only transformer with 85M, 117M, and 360M presets
+- Hugging Face checkpoint mapping, GGUF export, quantization, and native llama.cpp verification
+- localhost FastAPI command center for dataset lifecycle, stage control, credentials, telemetry, and system status
+- optional Windows/Tk desktop control surface that delegates to the command center
+- automated contract, regression, security, coverage, and release verification
 
 ## Repository map
 
@@ -32,6 +33,7 @@ ML-Framework/
 ├── bootstrap.py
 ├── run_pipeline.py
 ├── run_command_center.py
+├── launch.py
 ├── command_center/
 ├── config/
 ├── pipeline/
@@ -55,6 +57,7 @@ ML-Framework/
 - [Static Pipeline Audit](docs/release/static_pipeline_audit.md)
 - [Verification](docs/verification/VERIFICATION.md)
 - [Verification Checklist](docs/verification/VERIFICATION_CHECKLIST.md)
+- [Export and llama.cpp Integration](docs/EXPORT_AND_LLAMA_CPP_INTEGRATION.md)
 
 Historical reports are retained as history. They are not current status documents.
 
@@ -76,24 +79,46 @@ python3 bootstrap.py --doctor
 python3 run_pipeline.py --no-resume
 ```
 
-The canonical starter profile is `config/pipeline_config.yaml`. It is bounded and CPU-safe. The larger `config/pipeline_config.full.yaml` profile must be selected explicitly.
+The project supports **Python 3.11 through 3.14**. Python 3.15+ is outside the declared package/bootstrap range.
 
-The bootstrapper installs framework dependencies and uses the official CUDA PyTorch wheel index by default. CPU-only hosts can use `--torch-channel cpu`; `--torch-channel default` uses the standard PyPI channel.
+The canonical starter profile is `config/pipeline_config.yaml`. It is intentionally bounded for correctness checks. The larger `config/pipeline_config.full.yaml` profile must be selected explicitly.
 
-## Runtime behavior
+The bootstrapper installs framework dependencies and defaults to the official CUDA PyTorch wheel index. CPU-only hosts can select `--torch-channel cpu`; `--torch-channel default` uses the standard PyPI channel.
 
-The pipeline is linear by design. Each stage consumes a verified artifact and produces a new artifact with hashes and provenance. Invalid or mismatched artifacts are rebuilt or rejected instead of silently reused.
+## Runtime architecture
 
-Training checkpoints retain model/optimizer state, deterministic RNG and loader state, and provenance identities. Export verifies checkpoint, tokenizer, weighted-corpus, shard, source-manifest, configuration, seed, and provenance identities before conversion.
+The pipeline has eight canonical stages:
 
-## Desktop and backend
+1. **crawl**: acquire configured sources into a dataset session and produce source/provenance metadata
+2. **clean**: normalize, filter, and perform exact duplicate removal
+3. **dedup**: semantic near-deduplication using the configured embedding/index strategy
+4. **weight**: apply source/content weighting
+5. **tokenize**: train or reload the configured BPE tokenizer
+6. **shard**: create validated binary training shards and a shard manifest
+7. **train**: train the configured Llama-style decoder-only model and write integrity-protected checkpoints
+8. **export**: validate lineage, map the checkpoint to Hugging Face format, convert to GGUF, optionally quantize, and write export evidence
+
+Artifacts are chained through hashes and provenance. Resume logic validates those identities before reusing persisted output. Dataset IDs and dataset-group identities are preserved across command-center sessions and pipeline execution.
+
+## Control plane and desktop
+
+The FastAPI command center is localhost-only. Mutating API requests require the command-center control header and local-origin rules. Dataset ingestion is confined to the configured imports directory and rejects absolute paths, traversal, and symlink sources.
+
+The desktop UI is a control surface, not a second pipeline implementation. It delegates pipeline actions to the existing localhost command center. The 1760×990 value is a desktop verification target, not a universal requirement.
+
+Launch the desktop surface with:
 
 ```powershell
 python .\launch.py
+```
+
+Run the backend without opening a browser:
+
+```powershell
 python .\run_command_center.py --no-browser
 ```
 
-The desktop UI calls the localhost FastAPI command center and does not implement a second pipeline. The 1760×990 value is a desktop verification target, not a universal requirement.
+The pipeline CLI can also start the backend with `python run_pipeline.py --web`.
 
 ## Verification
 
@@ -109,9 +134,9 @@ Full native release verification:
 python scripts/verify_release.py --bootstrap-native
 ```
 
-The static command covers compilation, Ruff, pytest/coverage, and the required doctor. The native command additionally bootstraps the pinned llama.cpp toolchain and runs the deterministic local export/inference fixture.
+The static command covers compilation, Ruff, pytest/coverage, and the required project doctor. The native command additionally bootstraps the pinned llama.cpp toolchain and runs the deterministic local export/inference fixture.
 
-The repository enforces **90% aggregate pytest coverage**.
+The repository enforces **90% aggregate pytest coverage** through `pyproject.toml`.
 
 ## Security and release evidence
 
@@ -127,7 +152,7 @@ The security gate checks tracked source, dependency consistency, and dependency 
 
 The repository has three workflows:
 
-- **CI**: Linux and Windows on Python 3.11 and 3.14, bootstrap doctor, dependency consistency, Ruff, compilation, tests/coverage, and the Windows PowerShell bootstrap contract.
+- **CI**: Linux and Windows on Python 3.11 and 3.14, bootstrap/doctor contracts, dependency consistency, Ruff, compilation, tests/coverage, and Windows PowerShell bootstrap validation.
 - **Security**: security gate on pushes and pull requests, plus manual dispatch.
 - **Release Gate**: security, release evidence, target-hardware/native verification, package build, and evidence upload.
 
@@ -135,7 +160,7 @@ Workflow files and current Actions results are authoritative for status. This RE
 
 ## Native llama.cpp boundary
 
-Native llama.cpp is pinned and bootstrapped separately. GGUF conversion requires `convert_hf_to_gguf.py`; quantized export additionally requires `llama-quantize`.
+Native llama.cpp is pinned and bootstrapped separately. GGUF conversion requires `convert_hf_to_gguf.py`; quantized export additionally requires `llama-quantize`. The repository also validates the exported GGUF through `llama-cli` during the full native release fixture.
 
 Historical Termux evidence demonstrates native tool execution on Android 16/aarch64. It is not a complete end-to-end release result.
 
