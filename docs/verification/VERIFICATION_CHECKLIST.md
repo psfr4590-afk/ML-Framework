@@ -5,9 +5,11 @@ Use this checklist to distinguish automated evidence from checks that require a 
 ## Automated
 
 - Package/build metadata and project-root discovery
-- Pipeline stage and route contracts
+- Canonical pipeline stage and CLI contracts
+- Dataset identity and configuration contracts
 - Artifact integrity and provenance contracts
 - Backend startup behavior
+- Command-center localhost and mutation-boundary security
 - Credential encryption/decryption paths
 - Secret and dependency security checks
 - Python compilation and Ruff
@@ -21,6 +23,7 @@ Use this checklist to distinguish automated evidence from checks that require a 
 - Native llama.cpp checkout and export tools
 - Pipeline doctor and Command Center health
 - Target hardware characteristics required for deployment
+- Native GGUF conversion, quantization, and inference when the full native gate is required
 
 ## Human-visible desktop checks
 
