@@ -6,7 +6,7 @@ This document defines the release-readiness contract. It is intentionally status
 
 | Area | Contract | Authoritative source |
 |---|---|---|
-| Python support | >=3.11,<3.15 | `pyproject.toml` |
+| Python support | >=3.11,<3.15 | `pyproject.toml`, `bootstrap.py` |
 | Linux CI | Python 3.11 and 3.14 | `.github/workflows/ci.yml` |
 | Windows CI | Python 3.11 and 3.14 | `.github/workflows/ci.yml` |
 | PowerShell contract | Required | `.github/workflows/ci.yml` |
@@ -17,8 +17,19 @@ This document defines the release-readiness contract. It is intentionally status
 | Ruff | Required | CI and `scripts/verify_release.py` |
 | Pytest coverage | **90% aggregate minimum** | `[tool.coverage.report].fail_under` in `pyproject.toml` |
 | Artifact/provenance integrity | Required | `pipeline/integrity.py` and stage contracts |
+| Dataset identity | Required | `pipeline/dataset_identity.py`, command-center store/config |
 | Native llama.cpp verification | Required for native release | `scripts/verify_release.py --bootstrap-native` |
 | Release evidence | Required | `scripts/generate_release_evidence.py` and release workflow |
+
+## Canonical runtime architecture
+
+The source has one production orchestrator, `pipeline/orchestrator.py`, for:
+
+`crawl → clean → semantic dedup → weight → tokenize → shard → train → export`
+
+The command center is a localhost control plane that delegates stage execution to `run_pipeline.py`. The optional Tk application is a control surface over that backend.
+
+The built-in model is a Llama-style decoder-only transformer with 85M, 117M, and 360M presets. Its checkpoints retain provenance and deterministic resume state.
 
 ## Verification commands
 
@@ -53,9 +64,9 @@ The release gate is expected to retain, where applicable:
 
 ## Environment boundary
 
-Generic CI can validate source contracts, Python behavior, artifact logic, and the automated test suite. CUDA availability, native toolchain behavior, desktop/Tk behavior, and target deployment hardware remain environment-dependent.
+Generic CI can validate source contracts, Python behavior, artifact logic, and the automated test suite. CUDA availability, native toolchain behavior, desktop/Tk behavior, network acquisition, and target deployment hardware remain environment-dependent.
 
-Tool-level evidence, such as the historical Termux llama-quantize check, must not be presented as a complete native release result.
+Tool-level evidence, such as historical Termux llama-quantize execution, must not be presented as a complete native release result.
 
 ## Release boundary
 
