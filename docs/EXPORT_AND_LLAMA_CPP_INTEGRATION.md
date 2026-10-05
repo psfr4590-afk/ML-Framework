@@ -9,7 +9,7 @@ Training Pipeline
     ↓
 checkpoint + provenance
     ↓
-[export_gguf.py] ← validates provenance, loads checkpoint, trains HF → maps tensors → writes HF checkpoint
+[export_gguf.py] ← validates provenance, loads the checkpoint, maps tensors → writes a Hugging Face checkpoint
     ↓
 [reconcile_environment.py] + [bootstrap_llama_cpp.sh]
     ↓ (clones & builds pinned llama.cpp)
@@ -210,9 +210,9 @@ llama-cli -m model.gguf -p "Hello" -n 1 --single-turn --no-display-prompt --simp
 |--------|-----------|
 | **llama.cpp version** | Pinned to exact commit (b95502b), reproducible across platforms |
 | **Tokenizer compat** | Patch applied at reconciliation time, fails closed if llama.cpp internals change |
-| **Provenance chain** | Every artifact signed with SHA-256; export refuses if any link is broken |
+| **Provenance chain** | Artifact lineage is protected with SHA-256 manifests; export refuses if any required link is broken |
 | **Tensor mapping** | Deterministic Llama → HF → GGUF, validated against schema |
-| **Quantization** | Deterministic; same input always produces same GGUF bits |
+| **Quantization** | The release path records the exact input/toolchain state and hashes the resulting GGUF; reproducibility is established by the retained evidence rather than assumed |
 | **Inference test** | Single-token generation; proves model loads and can generate output |
 | **Export cards** | Auditable markdown; not used for verification, but retained as evidence |
 
