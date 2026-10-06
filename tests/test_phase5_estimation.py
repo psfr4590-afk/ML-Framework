@@ -264,11 +264,11 @@ def test_capability_discovery_records_verified_and_failed_probe(monkeypatch):
             return None, loss
 
     def make_model(cfg):
-        if int(cfg["seq_len"]) == 512:
+        if int(cfg.seq_len) == 512:
             raise RuntimeError("synthetic probe failure")
         return TinyModel()
 
-    monkeypatch.setattr(preflight, "_make_model", make_model)
+    monkeypatch.setattr(preflight, "LlamaModel", make_model)
     hw = HardwareProfile("test", 4, 8.0, 0, 0.0, None, False)
     report = preflight.discover_capabilities(
         hw,
