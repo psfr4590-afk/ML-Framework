@@ -37,7 +37,8 @@ class GoogleCrawler(BaseCrawler):
                 payload = resp.json()
                 self.stats["fetched"] += 1
             except (requests.RequestException, ValueError) as exc:
-                self.record_request_error()
+                if "resp" not in locals() or not hasattr(resp, "status_code"):
+                    self.record_request_error()
                 self.stats["errors"] += 1
                 log.warning("Google search failed for %r: %s", query, exc)
                 continue
