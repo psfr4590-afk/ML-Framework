@@ -185,7 +185,7 @@ def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path],
     definition_hash = _hash_value({name: value.get("sha256") for name, value in files.items()})
     manifest = {
         "schema": 2,
-        "run_id": cfg.get("_run_id"),
+        "run_id": cfg.get("_run_id") or "standalone-source-definition",
         "dataset_group": selected_group_id or "all",
         "retrieval_started_at": started,
         "retrieval_completed_at": retrieval_completed_at,
