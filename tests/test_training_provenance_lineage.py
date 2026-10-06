@@ -129,6 +129,15 @@ def test_export_accepts_independent_stage_config_identities_without_pipeline_has
             "shard_manifest_sha256": _sha256(shard_manifest),
             "source_manifest_sha256": _sha256(source),
             "seed": 42,
+            "parent_artifact_ids": [
+                f"shard-manifest:{_sha256(shard_manifest)}",
+                f"tokenizer-manifest:{_sha256(tokenizer_manifest)}",
+                f"dataset-manifest:{_sha256(scratch / '04_weighted.jsonl.manifest.json')}",
+                f"source-manifest:{_sha256(source)}",
+            ],
+            "tokenizer_artifact_id": f"tokenizer-manifest:{_sha256(tokenizer_manifest)}",
+            "dataset_artifact_id": f"dataset-manifest:{_sha256(scratch / '04_weighted.jsonl.manifest.json')}",
+            "source_artifact_id": f"source-manifest:{_sha256(source)}",
         },
         "model_cfg": {"vocab_size": 8},
     }
