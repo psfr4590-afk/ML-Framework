@@ -61,6 +61,6 @@ def test_write_export_cards_creates_both_cards_and_lineage(tmp_path, monkeypatch
     model_card = Path(paths["model_card"])
     assert dataset_card.is_file()
     assert model_card.is_file()
-    assert "Pipeline configuration SHA-256: `config-sha`" in dataset_card.read_text(encoding="utf-8")
+    assert "Pipeline configuration SHA-256 (legacy compatibility evidence): `config-sha`" in dataset_card.read_text(encoding="utf-8")
     assert "Final GGUF SHA-256: `gguf-sha`" in model_card.read_text(encoding="utf-8")
     assert "Dataset card: `DATASET_CARD.md`" in model_card.read_text(encoding="utf-8")
