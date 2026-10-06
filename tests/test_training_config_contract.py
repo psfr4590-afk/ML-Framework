@@ -231,15 +231,16 @@ def test_checkpoint_metadata_records_reproducibility_fields(tmp_path):
 
 def test_resume_restores_optimizer_and_rng_state_for_deterministic_continuation(tmp_path):
     model, optimizer, scaler = _checkpoint_fixture(tmp_path)
-    x = torch.randn(2, 16)
+    x = torch.randint(0, 32, (2, 16))
     y = torch.randint(0, 32, (2, 16))
     # Create optimizer state before saving.
     loss = model(x.long(), y.long())[1]
     loss.backward()
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
+    rng_before = torch.get_rng_state()
     expected_next = torch.rand(4)
-    torch.set_rng_state(torch.get_rng_state())
+    torch.set_rng_state(rng_before)
     path = save_checkpoint(
         model, optimizer, scaler, step=7, val_loss=1.25, cfg={"seed": 42},
         out_dir=tmp_path, provenance={"contract": "resume-test"},
