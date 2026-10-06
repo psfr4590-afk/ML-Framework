@@ -14,7 +14,6 @@ from typing import Any
 
 from pipeline.experiment_db import ExperimentDB
 
-from pipeline.experiment_db import ExperimentDB
 
 STATES = {"PENDING", "RUNNING", "PASS", "WARN", "FAILED", "SKIPPED", "DEGRADED"}
 
