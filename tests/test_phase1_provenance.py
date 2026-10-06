@@ -32,7 +32,7 @@ def test_configuration_snapshots_are_immutable(tmp_path: Path):
     cfg = {"crawl": {}, "clean": {}, "dedup": {}, "weight": {}, "tokenizer": {}, "shard": {}, "train": {}, "export": {}}
     ids = config_identities(cfg, pipeline_sha256="legacy")
     paths = snapshot_configs(tmp_path, cfg, ids)
-    original = Path(paths["dataset"]).read_text(encoding="utf-8")
+    original = (tmp_path / paths["dataset"]).read_text(encoding="utf-8")
     cfg["train"]["total_steps"] = 999
     snapshot_configs(tmp_path, cfg, ids)
     assert (tmp_path / paths["dataset"]).read_text(encoding="utf-8") == original
