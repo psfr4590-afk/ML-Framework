@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,8 @@ from scripts.export_cards import write_export_cards
 
 log = logging.getLogger("export")
 QUANTS = {"F16", "Q4_K_M", "Q5_K_M", "Q8_0"}
+EXPORTER_VERSION = "9.0.0"
+ALL_QUANTS = ("F16", "Q4_K_M", "Q5_K_M", "Q8_0")
 
 
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -233,24 +237,171 @@ def _quantize(f16: Path, quantizer: Path, quant: str, gguf_dir: Path) -> Path:
     return out
 
 
-def export_checkpoint(output_dir: str | Path, llamacpp_dir: str | Path, quant: str = "Q4_K_M", model_name: str = "pretrain-model", checkpoint: str | Path | None = None) -> dict[str, Any]:
-    output_dir = Path(output_dir).resolve(); llamacpp_dir = Path(llamacpp_dir).resolve(); quant = quant.upper()
-    if quant not in QUANTS: raise ValueError(f"Unsupported quantization '{quant}'. Choose from {sorted(QUANTS)}")
-    ckpt = Path(checkpoint).resolve() if checkpoint else _find_best_checkpoint(output_dir / "checkpoints"); state, cfg, payload = _load_checkpoint(ckpt); _enforce_training_provenance(output_dir, payload)
-    tokenizer_dir = output_dir / "tokenizer"; tokenizer_json = tokenizer_dir / "tokenizer.json"
-    if not tokenizer_json.is_file(): raise FileNotFoundError(f"Tokenizer is missing: {tokenizer_json}")
-    try: tok_data = json.loads(tokenizer_json.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc: raise RuntimeError(f"Tokenizer JSON is invalid: {tokenizer_json}") from exc
-    vocab = tok_data.get("model", {}).get("vocab", {})
-    if not isinstance(vocab, dict) or len(vocab) != cfg.vocab_size: raise RuntimeError(f"Tokenizer vocab ({len(vocab) if isinstance(vocab, dict) else 'invalid'}) does not match model vocab_size ({cfg.vocab_size})")
-    hf_dir = output_dir / "export" / "hf"; gguf_dir = output_dir / "gguf"; _write_hf_checkpoint(state, cfg, hf_dir, model_name); _tokenizer_files(tokenizer_dir, hf_dir); converter = _find_converter(llamacpp_dir); f16 = _convert_to_f16(converter, hf_dir, gguf_dir); final = f16 if quant == "F16" else _quantize(f16, _find_quantizer(llamacpp_dir), quant, gguf_dir)
-    modelfile = gguf_dir / "Modelfile"; modelfile.write_text(f"FROM {final.name}\n\nPARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER repeat_penalty 1.1\n", encoding="utf-8")
-    manifest = {"schema": 3, "checkpoint": str(ckpt), "checkpoint_sha256": sha256_file(ckpt), "checkpoint_step": int(payload.get("step", 0)), "model_name": model_name, "model_config": cfg.to_dict(), "quantization": quant, "llamacpp_dir": str(llamacpp_dir), "converter": str(converter), "converter_version": _llama_version(llamacpp_dir), "hf_dir": str(hf_dir), "f16_gguf": str(f16), "final_gguf": str(final), "final_gguf_sha256": sha256_file(final), "final_gguf_size": final.stat().st_size, "f16_gguf_sha256": sha256_file(f16), "modelfile": str(modelfile), "training_provenance": payload.get("provenance") or {}}
-    card_paths = write_export_cards(output_dir, manifest, payload); manifest["dataset_card"] = card_paths["dataset_card"]; manifest["model_card"] = card_paths["model_card"]; manifest["dataset_card_sha256"] = sha256_file(Path(card_paths["dataset_card"])); manifest["model_card_sha256"] = sha256_file(Path(card_paths["model_card"])); _atomic_json(gguf_dir / "export_manifest.json", manifest); log.info("Export complete: %s", final); return manifest
+def _artifact_manifest(
+    *,
+    quant: str,
+    artifact: Path,
+    checkpoint: Path,
+    payload: dict[str, Any],
+    cfg: ModelConfig,
+    export_config: dict[str, Any],
+    lineage: dict[str, Any],
+    converter_version: str,
+    hf_dir: Path,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return {
+        "schema": 4,
+        "exporter_version": EXPORTER_VERSION,
+        "timestamp": now,
+        "quantization": quant,
+        "checkpoint": str(checkpoint),
+        "checkpoint_sha256": sha256_file(checkpoint),
+        "checkpoint_step": int(payload.get("step", 0)),
+        "model_config": cfg.to_dict(),
+        "export_config": export_config,
+        "converter_version": converter_version,
+        "hugging_face": {
+            "path": str(hf_dir),
+            "files": {
+                p.name: {"path": str(p), "sha256": sha256_file(p), "size_bytes": p.stat().st_size}
+                for p in sorted(hf_dir.iterdir()) if p.is_file()
+            },
+        },
+        "artifact": {
+            "path": str(artifact),
+            "sha256": sha256_file(artifact),
+            "size_bytes": artifact.stat().st_size,
+        },
+        "lineage": lineage,
+    }
 
+
+def _write_modelfile(path: Path, gguf: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"FROM {gguf.name}\\n\\nPARAMETER temperature 0.7\\nPARAMETER top_p 0.9\\nPARAMETER repeat_penalty 1.1\\n",
+        encoding="utf-8",
+    )
+
+
+def export_checkpoint(
+    output_dir: str | Path,
+    llamacpp_dir: str | Path,
+    quant: str = "Q4_K_M",
+    model_name: str = "pretrain-model",
+    checkpoint: str | Path | None = None,
+) -> dict[str, Any]:
+    """Export one or every supported GGUF quantization with durable lineage evidence."""
+    output_dir = Path(output_dir).resolve()
+    llamacpp_dir = Path(llamacpp_dir).resolve()
+    requested = str(quant).upper()
+    if requested == "ALL":
+        requested_quants = list(ALL_QUANTS)
+    elif requested in QUANTS:
+        requested_quants = [requested]
+    else:
+        raise ValueError(f"Unsupported quantization '{quant}'. Choose from ALL, {sorted(QUANTS)}")
+
+    ckpt = Path(checkpoint).resolve() if checkpoint else _find_best_checkpoint(output_dir / "checkpoints")
+    state, cfg, payload = _load_checkpoint(ckpt)
+    _enforce_training_provenance(output_dir, payload)
+    tokenizer_dir = output_dir / "tokenizer"
+    tokenizer_json = tokenizer_dir / "tokenizer.json"
+    if not tokenizer_json.is_file():
+        raise FileNotFoundError(f"Tokenizer is missing: {tokenizer_json}")
+    try:
+        tok_data = json.loads(tokenizer_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Tokenizer JSON is invalid: {tokenizer_json}") from exc
+    vocab = tok_data.get("model", {}).get("vocab", {})
+    if not isinstance(vocab, dict) or len(vocab) != cfg.vocab_size:
+        raise RuntimeError(f"Tokenizer vocab ({len(vocab) if isinstance(vocab, dict) else 'invalid'}) does not match model vocab_size ({cfg.vocab_size})")
+
+    hf_dir = output_dir / "export" / "hf"
+    gguf_dir = output_dir / "gguf"
+    _write_hf_checkpoint(state, cfg, hf_dir, model_name)
+    _tokenizer_files(tokenizer_dir, hf_dir)
+    converter = _find_converter(llamacpp_dir)
+    converter_version = _llama_version(llamacpp_dir)
+    f16 = _convert_to_f16(converter, hf_dir, gguf_dir)
+    export_config = {
+        "requested_quantization": requested,
+        "quantizations": requested_quants,
+        "model_name": model_name,
+        "llamacpp_dir": str(llamacpp_dir),
+        "converter": str(converter),
+        "converter_version": converter_version,
+        "hf_dir": str(hf_dir),
+    }
+    provenance = payload.get("provenance") or {}
+    lineage = {
+        "run_id": provenance.get("run_id"),
+        "parent_artifact_ids": list(provenance.get("parent_artifact_ids") or []),
+        "training_provenance": provenance,
+        "checkpoint_manifest": str(ckpt) + ".manifest.json",
+        "hf_artifact": str(hf_dir),
+    }
+    artifacts: dict[str, dict[str, Any]] = {}
+    for q in requested_quants:
+        artifact = f16 if q == "F16" else _quantize(f16, _find_quantizer(llamacpp_dir), q, gguf_dir)
+        modelfile = gguf_dir / f"Modelfile-{q}"
+        _write_modelfile(modelfile, artifact)
+        record = _artifact_manifest(
+            quant=q,
+            artifact=artifact,
+            checkpoint=ckpt,
+            payload=payload,
+            cfg=cfg,
+            export_config=export_config,
+            lineage=lineage,
+            converter_version=converter_version,
+            hf_dir=hf_dir,
+        )
+        record["modelfile"] = str(modelfile)
+        record["modelfile_sha256"] = sha256_file(modelfile)
+        manifest_path = gguf_dir / f"export_manifest_{q}.json"
+        _atomic_json(manifest_path, record)
+        record["manifest"] = str(manifest_path)
+        record["manifest_sha256"] = sha256_file(manifest_path)
+        artifacts[q] = record
+
+    primary = artifacts[requested_quants[-1]]
+    aggregate = {
+        "schema": 4,
+        "exporter_version": EXPORTER_VERSION,
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "checkpoint": str(ckpt),
+        "checkpoint_sha256": sha256_file(ckpt),
+        "checkpoint_step": int(payload.get("step", 0)),
+        "model_name": model_name,
+        "model_config": cfg.to_dict(),
+        "export_config": export_config,
+        "converter_version": converter_version,
+        "hf_dir": str(hf_dir),
+        "hf_files": {p.name: sha256_file(p) for p in sorted(hf_dir.iterdir()) if p.is_file()},
+        "artifacts": artifacts,
+        "quantization": primary["quantization"],
+        "f16_gguf": str(f16),
+        "f16_gguf_sha256": sha256_file(f16),
+        "final_gguf": primary["artifact"]["path"],
+        "final_gguf_sha256": primary["artifact"]["sha256"],
+        "final_gguf_size": primary["artifact"]["size_bytes"],
+        "modelfile": primary["modelfile"],
+        "lineage": lineage,
+        "training_provenance": provenance,
+    }
+    card_paths = write_export_cards(output_dir, aggregate, payload)
+    aggregate["dataset_card"] = card_paths["dataset_card"]
+    aggregate["model_card"] = card_paths["model_card"]
+    aggregate["dataset_card_sha256"] = sha256_file(Path(card_paths["dataset_card"]))
+    aggregate["model_card_sha256"] = sha256_file(Path(card_paths["model_card"]))
+    _atomic_json(gguf_dir / "export_manifest.json", aggregate)
+    log.info("Export complete: %s", ", ".join(f"{q}={v['artifact']['path']}" for q, v in artifacts.items()))
+    return aggregate
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Export a Model Lab checkpoint to GGUF/Ollama"); parser.add_argument("--output-dir", required=True); parser.add_argument("--llamacpp-dir", required=True); parser.add_argument("--quant", default="Q4_K_M", choices=sorted(QUANTS)); parser.add_argument("--model-name", default="pretrain-model"); parser.add_argument("--checkpoint"); parser.add_argument("--verbose", action="store_true"); args = parser.parse_args(argv); logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    parser = argparse.ArgumentParser(description="Export a Model Lab checkpoint to GGUF/Ollama"); parser.add_argument("--output-dir", required=True); parser.add_argument("--llamacpp-dir", required=True); parser.add_argument("--quant", default="Q4_K_M", choices=["ALL", *sorted(QUANTS)]); parser.add_argument("--model-name", default="pretrain-model"); parser.add_argument("--checkpoint"); parser.add_argument("--verbose", action="store_true"); args = parser.parse_args(argv); logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     try: export_checkpoint(args.output_dir, args.llamacpp_dir, args.quant, args.model_name, args.checkpoint)
     except Exception as exc: log.error("Export failed: %s", exc); return 2
     return 0
