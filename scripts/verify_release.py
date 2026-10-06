@@ -181,13 +181,14 @@ def _write_release_report(*, static_failures: list[str], native_requested: bool,
     add("clean_clone", bool(evidence.get("clean_clone")) if "clean_clone" in evidence else None,
         "temporary clone acceptance path" if "clean_clone" in evidence else "run with --clean-clone")
     add("documentation", (ROOT / "README.md").is_file() and (ROOT / "docs" / "development" / "START_HERE.md").is_file(), "release docs present")
-    add("secrets", None, "security workflow owns dependency/secret audit")
+    secret_value = evidence.get("secrets")
+    add("secrets", bool(secret_value) if secret_value is not None else None, "security gate")
     git_status = _git_state(ROOT)
     add("git_state", git_status["commit"] is not None and not git_status["dirty"], json.dumps(git_status, sort_keys=True))
     add("release_artifacts", bool(evidence.get("export") and evidence.get("inference")) if native_requested else None,
         "native export/inference evidence")
 
-    required = [c for c in checks if c["name"] not in {"secrets", "ui_backend_connectivity", "clean_clone"}]
+    required = [c for c in checks if c["name"] not in {"ui_backend_connectivity", "clean_clone"}]
     gate_pass = native_requested and native_rc == 0 and not static_failures and all(c["status"] == "PASS" for c in required)
     report = {
         "schema": 1,
@@ -239,6 +240,10 @@ def main() -> int:
         return 2
     if args.ui_probe:
         NATIVE_EVIDENCE["ui_backend_connectivity"] = _ui_probe()
+    security_rc = run([sys.executable, "scripts/security_gate.py"])
+    NATIVE_EVIDENCE["secrets"] = security_rc == 0
+    if security_rc:
+        failures.append("security")
     if not args.bootstrap_native:
         _write_release_report(static_failures=failures, native_requested=False, native_rc=0)
         print("STATIC VERIFICATION PASSED: syntax, lint, coverage, tests, and required environment checks are green.")
@@ -264,8 +269,10 @@ def main() -> int:
             if clone_rc:
                 NATIVE_EVIDENCE["clean_clone"] = False
             else:
-                doctor = subprocess.run([sys.executable, "bootstrap.py", "--doctor"], cwd=clone, check=False)
-                NATIVE_EVIDENCE["clean_clone"] = doctor.returncode == 0
+                install = subprocess.run([sys.executable, "-m", "pip", "install", "-e", str(clone), "--no-deps"], cwd=clone, check=False)
+                doctor = subprocess.run([sys.executable, str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False)
+                smoke = subprocess.run([sys.executable, str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor.returncode == 0 else None
+                NATIVE_EVIDENCE["clean_clone"] = install.returncode == 0 and doctor.returncode == 0 and smoke is not None and smoke.returncode == 0
     if args.ui_probe and not NATIVE_EVIDENCE.get("ui_backend_connectivity"):
         failures.append("ui-backend")
     NATIVE_EVIDENCE["export"] = True
