@@ -141,7 +141,7 @@ class CommandCenterScreen(tk.Frame):
             ("GPU Utilization", f"{hardware['gpu_utilization']:.1f}%" if isinstance(hardware.get("gpu_utilization"), (int, float)) else "Not persisted", TEXT if hardware.get("gpu_utilization") is not None else MUTED),
         ])
 
-        c, g = self._section("PROVENANCE")
+        c, g = self._section("PROVENANCE", 5)
         checks = [
             ("Configuration", provenance.get("configuration")),
             ("Dataset lineage", provenance.get("dataset_lineage")),
