@@ -752,10 +752,28 @@ class Pipeline:
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 self._stage_metrics["train"] = {"preflight_report": str(preflight_report)}
         ckpt_dir = self._out / "checkpoints"
-        candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or (sorted(ckpt_dir.glob("ckpt_final_*.pt")) if ckpt_dir.exists() else [])
+        candidates = []
+        if (ckpt_dir / "ckpt_best.pt").is_file():
+            candidates.append(ckpt_dir / "ckpt_best.pt")
+        if (ckpt_dir / "ckpt_final.pt").is_file():
+            candidates.append(ckpt_dir / "ckpt_final.pt")
+        candidates.extend(sorted(ckpt_dir.glob("ckpt_[0-9]*.pt")))
         if not candidates:
             raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
-        return candidates[-1]
+        selected = candidates[-1]
+        try:
+            payload = torch.load(selected, map_location="cpu", weights_only=False)
+        except TypeError:
+            payload = torch.load(selected, map_location="cpu")
+        training_metadata = payload.get("training_metadata") if isinstance(payload, dict) else {}
+        self._stage_metrics["train"] = {
+            **(self._stage_metrics.get("train") or {}),
+            **(training_metadata if isinstance(training_metadata, dict) else {}),
+            "checkpoint_step": int(payload.get("step", 0)) if isinstance(payload, dict) else None,
+            "val_loss": payload.get("val_loss") if isinstance(payload, dict) else None,
+            "best_val_loss": payload.get("best_val_loss") if isinstance(payload, dict) else None,
+        }
+        return selected
 
     def stage_export(self):
         exporter = _load_class("scripts.export_gguf", "export_checkpoint")
