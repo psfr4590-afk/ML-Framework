@@ -35,5 +35,5 @@ def test_configuration_snapshots_are_immutable(tmp_path: Path):
     original = Path(paths["dataset"]).read_text(encoding="utf-8")
     cfg["train"]["total_steps"] = 999
     snapshot_configs(tmp_path, cfg, ids)
-    assert Path(paths["dataset"]).read_text(encoding="utf-8") == original
+    assert (tmp_path / paths["dataset"]).read_text(encoding="utf-8") == original
     assert json.loads(Path(paths["dataset"]).read_text(encoding="utf-8"))["crawl"] == {}
