@@ -103,7 +103,7 @@ def validate_checkpoint(
         meta = json.loads(mp.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Checkpoint manifest is invalid: {mp}") from exc
-    if int(meta.get("schema", -1)) != MANIFEST_SCHEMA or meta.get("kind") != "checkpoint":
+    if int(meta.get("schema", -1)) < MANIFEST_SCHEMA or meta.get("kind") != "checkpoint":
         raise RuntimeError(f"Checkpoint manifest schema/kind invalid: {mp}")
     if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
         raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
