@@ -157,39 +157,48 @@ def discover_capabilities(
     candidates: tuple[tuple[str, int], ...] | None = None,
     benchmark_steps: int = 2,
     vocab_size: int = 32000,
+    max_model_params: int = 1_000_000_000,
+    max_context: int = 4096,
+    model_probe_rounds: int = 4,
+    context_probe_rounds: int = 5,
 ) -> dict[str, Any]:
-    """Empirically map model/context combinations using synthetic tokens.
+    """Empirically map the usable model-size/context boundary.
 
-    Production shard geometry must not be mistaken for a hardware limit.
-    Production shard viability is measured separately by run_preflight().
+    When explicit candidates are supplied, they are probed exactly for
+    backwards-compatible tests and targeted diagnostics. Otherwise discovery
+    starts with coarse parameter-budget probes, constructs real intermediate
+    architectures, then refines the last-success/first-failure interval.
+    Context is probed independently on the largest verified model.
+
+    Synthetic tokens isolate hardware capability from shard geometry. The
+    normal run_preflight() benchmark remains the production-shard viability
+    gate.
     """
     results: list[dict[str, Any]] = []
-    if candidates is None:
-        candidates = capability_candidates(hardware)
-    for model_preset, seq_len in candidates:
+    steps = max(1, int(benchmark_steps))
+    device = torch.device("cuda" if hardware.cuda_available else "cpu")
+
+    def probe(cfg: ModelConfig, *, source: str, target_params: int | None = None) -> dict[str, Any]:
         started = time.perf_counter()
         model = None
         optimizer = None
         try:
-            cfg = {
-                "model_preset": model_preset,
-                "seq_len": int(seq_len),
-                "vocab_size": int(vocab_size),
-                "dropout": 0.0,
-            }
-            device = torch.device("cuda" if hardware.cuda_available else "cpu")
-            model = _make_model(cfg).to(device)
+            model = LlamaModel(cfg).to(device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.0)
             scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
             model.train()
             if device.type == "cuda":
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
-            for _ in range(max(1, int(benchmark_steps))):
-                x = torch.randint(0, int(vocab_size), (1, int(seq_len)), device=device)
-                y = torch.randint(0, int(vocab_size), (1, int(seq_len)), device=device)
+            for _ in range(steps):
+                x = torch.randint(0, int(cfg.vocab_size), (1, int(cfg.seq_len)), device=device)
+                y = torch.randint(0, int(cfg.vocab_size), (1, int(cfg.seq_len)), device=device)
                 optimizer.zero_grad(set_to_none=True)
-                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
+                with torch.autocast(
+                    device_type=device.type,
+                    dtype=torch.float16,
+                    enabled=(device.type == "cuda"),
+                ):
                     _, loss = model(x, y)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -198,30 +207,160 @@ def discover_capabilities(
                 torch.cuda.synchronize()
             elapsed = max(time.perf_counter() - started, 1e-9)
             peak = torch.cuda.max_memory_allocated() / (1024**3) if device.type == "cuda" else None
-            results.append({
-                "model_preset": model_preset, "seq_len": int(seq_len),
-                "batch_size": 1, "benchmark_steps": max(1, int(benchmark_steps)),
+            return {
+                "source": source,
+                "target_params": target_params,
+                "model_params": int(cfg.param_count()),
+                "architecture": {
+                    "n_layers": int(cfg.n_layers),
+                    "n_heads": int(cfg.n_heads),
+                    "n_kv_heads": int(cfg.n_kv_heads),
+                    "d_model": int(cfg.d_model),
+                    "d_ffn": int(cfg.d_ffn),
+                    "vocab_size": int(cfg.vocab_size),
+                },
+                "seq_len": int(cfg.seq_len),
+                "batch_size": 1,
+                "benchmark_steps": steps,
                 "viable": True,
-                "tokens_per_sec": (max(1, int(benchmark_steps)) * int(seq_len)) / elapsed,
-                "peak_memory_gb": peak, "elapsed_seconds": elapsed, "failure": None,
-            })
+                "tokens_per_sec": (steps * int(cfg.seq_len)) / elapsed,
+                "peak_memory_gb": peak,
+                "elapsed_seconds": elapsed,
+                "failure": None,
+            }
         except (RuntimeError, OSError, ValueError, TypeError) as exc:
-            if torch.cuda.is_available() and "out of memory" in str(exc).lower():
+            if device.type == "cuda" and "out of memory" in str(exc).lower():
                 torch.cuda.empty_cache()
-            results.append({
-                "model_preset": model_preset, "seq_len": int(seq_len),
-                "batch_size": 1, "benchmark_steps": max(1, int(benchmark_steps)),
-                "viable": False, "tokens_per_sec": None,
-                "peak_memory_gb": torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else None,
+            return {
+                "source": source,
+                "target_params": target_params,
+                "model_params": int(cfg.param_count()),
+                "architecture": {
+                    "n_layers": int(cfg.n_layers),
+                    "n_heads": int(cfg.n_heads),
+                    "n_kv_heads": int(cfg.n_kv_heads),
+                    "d_model": int(cfg.d_model),
+                    "d_ffn": int(cfg.d_ffn),
+                    "vocab_size": int(cfg.vocab_size),
+                },
+                "seq_len": int(cfg.seq_len),
+                "batch_size": 1,
+                "benchmark_steps": steps,
+                "viable": False,
+                "tokens_per_sec": None,
+                "peak_memory_gb": (
+                    torch.cuda.max_memory_allocated() / (1024**3)
+                    if device.type == "cuda" else None
+                ),
                 "elapsed_seconds": max(time.perf_counter() - started, 0.0),
                 "failure": f"{type(exc).__name__}: {exc}",
-            })
+            }
         finally:
             del optimizer
             del model
-            if torch.cuda.is_available():
+            if device.type == "cuda":
                 torch.cuda.empty_cache()
-    return {"schema": 1, "hardware": hardware.to_dict(), "tested_combinations": len(results), "results": results}
+
+    if candidates is not None:
+        for model_preset, seq_len in candidates:
+            cfg = ModelConfig.from_preset(str(model_preset))
+            cfg.vocab_size = int(vocab_size)
+            cfg.seq_len = int(seq_len)
+            results.append(probe(cfg, source="explicit"))
+    else:
+        # Named presets remain anchor points, but intermediate architectures
+        # are generated from the actual parameter budget instead of invented
+        # preset names. A coarse pass finds the boundary, then binary
+        # refinement resolves the useful region.
+        coarse = [64_000_000, 85_000_000, 117_000_000, 180_000_000,
+                  260_000_000, 360_000_000, 512_000_000]
+        if device.type == "cuda":
+            coarse.append(int(max_model_params))
+        else:
+            coarse = [p for p in coarse if p <= 117_000_000]
+        coarse = sorted({p for p in coarse if 1_000_000 <= p <= int(max_model_params)})
+        last_success: int | None = None
+        first_failure: int | None = None
+        tested_targets: set[int] = set()
+
+        for target in coarse:
+            if target in tested_targets:
+                continue
+            tested_targets.add(target)
+            cfg = ModelConfig.from_target_params(target, seq_len=128, vocab_size=vocab_size)
+            result = probe(cfg, source="coarse", target_params=target)
+            results.append(result)
+            if result["viable"]:
+                last_success = target
+            else:
+                first_failure = target
+                break
+
+        for _ in range(max(0, int(model_probe_rounds))):
+            if last_success is None or first_failure is None:
+                break
+            if first_failure - last_success < 1_000_000:
+                break
+            target = (last_success + first_failure) // 2
+            if target in tested_targets:
+                break
+            tested_targets.add(target)
+            cfg = ModelConfig.from_target_params(target, seq_len=128, vocab_size=vocab_size)
+            result = probe(cfg, source="refinement", target_params=target)
+            results.append(result)
+            if result["viable"]:
+                last_success = target
+            else:
+                first_failure = target
+
+        viable = [item for item in results if item["viable"]]
+        if viable:
+            largest = max(viable, key=lambda item: int(item["model_params"]))
+            base_cfg = ModelConfig.from_dict({
+                **largest["architecture"],
+                "seq_len": 128,
+            })
+            context = 128
+            context_success = 128
+            for _ in range(max(0, int(context_probe_rounds))):
+                next_context = min(int(max_context), context * 2)
+                if next_context <= context:
+                    break
+                context = next_context
+                cfg = ModelConfig.from_dict({**base_cfg.to_dict(), "seq_len": context})
+                result = probe(cfg, source="context", target_params=largest.get("target_params"))
+                results.append(result)
+                if result["viable"]:
+                    context_success = context
+                else:
+                    break
+            if context_success < int(max_context):
+                lower = context_success
+                upper = context
+                for _ in range(max(0, int(context_probe_rounds))):
+                    if upper - lower <= 1:
+                        break
+                    mid = (lower + upper) // 2
+                    cfg = ModelConfig.from_dict({**base_cfg.to_dict(), "seq_len": mid})
+                    result = probe(cfg, source="context_refinement", target_params=largest.get("target_params"))
+                    results.append(result)
+                    if result["viable"]:
+                        lower = mid
+                    else:
+                        upper = mid
+
+    verified = [item for item in results if item["viable"]]
+    failed = [item for item in results if not item["viable"]]
+    return {
+        "schema": 2,
+        "hardware": hardware.to_dict(),
+        "tested_combinations": len(results),
+        "verified_combinations": len(verified),
+        "failed_combinations": len(failed),
+        "max_verified_model_params": max((int(item["model_params"]) for item in verified), default=None),
+        "max_verified_context": max((int(item["seq_len"]) for item in verified), default=None),
+        "results": results,
+    }
 
 def estimate_duration(
     *,
