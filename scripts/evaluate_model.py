@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Evaluate a trained Model Lab checkpoint and write quantitative/qualitative evidence."""
 from __future__ import annotations
-import argparse, json, math, random, re, time
+import argparse, hashlib, json, math, random, re, time
 from pathlib import Path
 from typing import Any
 import numpy as np
@@ -93,41 +93,30 @@ def _summary(domains):
 
 def _markdown(report):
     m, s = report["model"], report["generation"]["summary"]
-    lines = [
-        "# MODEL EVALUATION", "",
+    lines = ["# MODEL EVALUATION", "",
         f"- Checkpoint: {report['checkpoint']['path']}",
         f"- Checkpoint SHA-256: {report['checkpoint']['sha256']}",
-        f"- Parameters: **{m['parameters']:,}**",
-        f"- Training steps: **{m['training_steps']:,}**", "",
-        "## Held-out validation", "",
-        f"- Validation loss: **{report['validation']['loss']:.4f}**",
-        f"- Perplexity: **{report['validation']['perplexity']:.2f}**",
-        f"- Batches: {report['validation']['batches']}", "",
-        "## Generation", "",
-        f"- Language: **{s['language']}**", f"- Coherence: **{s['coherence']}**",
-        f"- Domain behavior: **{s['domain_behavior']}**",
-        f"- Repetition rate: **{s['mean_repetition_rate']:.3f}**",
+        f"- Parameters: **{m['parameters']:,}**", f"- Training steps: **{m['training_steps']:,}**", "",
+        "## Held-out validation", "", f"- Validation loss: **{report['validation']['loss']:.4f}**",
+        f"- Perplexity: **{report['validation']['perplexity']:.2f}**", f"- Batches: {report['validation']['batches']}", "",
+        "## Generation", "", f"- Language: **{s['language']}**", f"- Coherence: **{s['coherence']}**",
+        f"- Domain behavior: **{s['domain_behavior']}**", f"- Repetition rate: **{s['mean_repetition_rate']:.3f}**",
         f"- Distinct-1: **{s['mean_distinct_1']:.3f}**", f"- Distinct-2: **{s['mean_distinct_2']:.3f}**",
         f"- Domains tested: **{s['domain_count']}**", f"- Fixed prompts: **{s['prompt_count']}**", "",
-        "## Checkpoint comparison", "", "| Checkpoint | Step | Val loss | Perplexity |", "|---|---:|---:|---:|",
-    ]
+        "## Checkpoint comparison", "", "| Checkpoint | Step | Val loss | Perplexity |", "|---|---:|---:|---:|"]
     for row in report["checkpoint_comparison"]:
         lines.append(f"| {row['path']} | {row['step']} | {row['val_loss']:.4f} | {row['perplexity']:.2f} |")
-    lines += ["", "## Interpretation", "",
-        "Training success is not model-quality evidence. A completed optimization run can be reproducible and operationally successful while the resulting language model remains weak.",
-        "", "Generation outputs are qualitative evidence, not a claim of human-level semantic quality.", "", "## Fixed-prompt outputs", ""]
+    lines += ["", "## Interpretation", "", "Training success is not model-quality evidence. A completed optimization run can be reproducible and operationally successful while the resulting language model remains weak.", "", "Generation outputs are qualitative evidence, not a claim of human-level semantic quality.", "", "## Fixed-prompt outputs", ""]
     for domain, rows in report["generation"]["domains"].items():
         lines.append(f"### {domain}")
-        for row in rows:
-            lines += [f"Prompt: {row['prompt']}", "", row["text"].replace("\n", " "), ""]
+        for row in rows: lines += [f"Prompt: {row['prompt']}", "", row["text"].replace("\n", " "), ""]
     return "\n".join(lines) + "\n"
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Evaluate a Model Lab checkpoint.")
     p.add_argument("--checkpoint", default="best", choices=["best", "final", "latest"])
-    p.add_argument("--checkpoint-path"); p.add_argument("--output-dir", default="output")
-    p.add_argument("--shard-dir"); p.add_argument("--tokenizer"); p.add_argument("--val-batches", type=int, default=20)
-    p.add_argument("--batch-size", type=int, default=1); p.add_argument("--max-new-tokens", type=int, default=64); p.add_argument("--seed", type=int, default=2026)
+    p.add_argument("--checkpoint-path"); p.add_argument("--output-dir", default="output"); p.add_argument("--shard-dir"); p.add_argument("--tokenizer")
+    p.add_argument("--val-batches", type=int, default=20); p.add_argument("--batch-size", type=int, default=1); p.add_argument("--max-new-tokens", type=int, default=64); p.add_argument("--seed", type=int, default=2026)
     args = p.parse_args()
     output_dir = (ROOT / args.output_dir).resolve()
     ckpt = Path(args.checkpoint_path).resolve() if args.checkpoint_path else select_checkpoint(output_dir / "checkpoints", args.checkpoint)
@@ -139,41 +128,38 @@ def main() -> int:
     if not tokenizer_path.is_file(): raise SystemExit(f"Tokenizer not found: {tokenizer_path}")
     if not shard_dir.is_dir(): raise SystemExit(f"Shard directory not found: {shard_dir}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, payload = _load_checkpoint(ckpt, device)
-    tokenizer = _tokenizer(tokenizer_path)
+    model, payload = _load_checkpoint(ckpt, device); tokenizer = _tokenizer(tokenizer_path)
     started = time.perf_counter()
     val_loss = _validation_loss(model, shard_dir, model.cfg.seq_len, args.batch_size, args.val_batches, device)
     domains = _evaluate_generation(model, tokenizer, device, args.seed, args.max_new_tokens)
-    report = {
-        "schema": 1, "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    report = {"schema": 1, "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "checkpoint": {"path": str(ckpt), "sha256": meta.get("sha256"), "kind": payload.get("checkpoint_kind")},
         "model": {"parameters": model.param_count(), "config": model.cfg.to_dict(), "training_steps": int(payload.get("step", 0)), "best_val_loss": payload.get("best_val_loss")},
         "validation": {"loss": val_loss, "perplexity": _perplexity(val_loss), "batches": args.val_batches, "dataset": "held-out val shards"},
-        "generation": {"summary": _summary(domains), "domains": domains}, "checkpoint_comparison": [], "duration_seconds": 0.0,
-    }
+        "generation": {"summary": _summary(domains), "domains": domains}, "checkpoint_comparison": [], "duration_seconds": 0.0}
     for kind in ("best", "final", "latest"):
         candidate = select_checkpoint(output_dir / "checkpoints", kind)
         if candidate is None or any(row["path"] == str(candidate) for row in report["checkpoint_comparison"]): continue
-        cp_meta = checkpoint_metadata(candidate)
-        cp = torch.load(candidate, map_location="cpu", weights_only=False)
-        loss = cp.get("val_loss", cp.get("best_val_loss"))
+        cp_meta = checkpoint_metadata(candidate); cp = torch.load(candidate, map_location="cpu", weights_only=False); loss = cp.get("val_loss", cp.get("best_val_loss"))
         if loss is None: continue
         report["checkpoint_comparison"].append({"path": str(candidate), "kind": cp.get("checkpoint_kind"), "step": int(cp.get("step", 0)), "val_loss": float(loss), "perplexity": _perplexity(float(loss)), "sha256": cp_meta.get("sha256")})
     report["duration_seconds"] = round(time.perf_counter() - started, 3)
     json_path, md_path = output_dir / "evaluations" / "model_evaluation.json", output_dir / "evaluations" / "MODEL_EVALUATION.md"
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    md_path.write_text(_markdown(report), encoding="utf-8")
+    json_path.parent.mkdir(parents=True, exist_ok=True); json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"); md_path.write_text(_markdown(report), encoding="utf-8")
+    report_sha = hashlib.sha256(json_path.read_bytes()).hexdigest()
     db = ExperimentDB(output_dir / "experiment.db")
     try:
-        run_id = str(payload.get("train_cfg", {}).get("_run_id") or meta.get("run_id") or "")
+        row = db.conn.execute("SELECT id FROM runs ORDER BY started_at DESC LIMIT 1").fetchone()
+        run_id = str(row["id"]) if row else ""
         if run_id:
+            artifact_id = f"{run_id}:evaluation:model_quality"
+            db.conn.execute("INSERT INTO artifacts(id,run_id,stage_name,path,sha256,size_bytes,created_at,parent_artifact_id,metadata_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET sha256=excluded.sha256,size_bytes=excluded.size_bytes,metadata_json=excluded.metadata_json",
+                (artifact_id, run_id, "evaluate", str(json_path), report_sha, json_path.stat().st_size, report["generated_at"], None, json.dumps({"markdown_path": str(md_path), "checkpoint_sha256": meta.get("sha256")}, sort_keys=True)))
             db.conn.execute("INSERT INTO evaluations(run_id,name,status,score,step,artifact_id,details_json) VALUES(?,?,?,?,?,?,?)",
-                (run_id, "model_quality", "PASS", val_loss, int(payload.get("step", 0)), None, json.dumps(report, sort_keys=True)))
+                (run_id, "model_quality", "COMPLETE", val_loss, int(payload.get("step", 0)), artifact_id, json.dumps(report, sort_keys=True)))
             db.conn.commit()
     finally: db.close()
-    print(_markdown(report))
-    return 0
+    print(_markdown(report)); return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
