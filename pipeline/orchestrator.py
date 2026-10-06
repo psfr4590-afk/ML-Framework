@@ -468,7 +468,12 @@ class Pipeline:
         marker = shard_dir / "shards.manifest.json"
         tok_cfg = self.cfg.get("tokenizer", {})
         tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if tok_cfg.get("output_path") else None
-        provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size()})
+        tokenizer_manifest = Path(str(tokenizer_path) + ".manifest.json") if tokenizer_path else None
+        tokenizer_artifact = artifact_id("tokenizer-manifest", sha256_file(tokenizer_manifest)) if tokenizer_manifest and tokenizer_manifest.is_file() else None
+        provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size(), "tokenizer_artifact_id": tokenizer_artifact})
+        if tokenizer_artifact:
+            provenance["parent_artifact_ids"] = list(dict.fromkeys(provenance.get("parent_artifact_ids", []) + [tokenizer_artifact]))
+            provenance["artifact_id"] = artifact_id("shard", _hash_value(provenance))
         if self._resume and marker.exists():
             try:
                 data = json.loads(marker.read_text(encoding="utf-8"))
