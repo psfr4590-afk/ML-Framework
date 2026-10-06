@@ -285,6 +285,9 @@ class Trainer:
         if device.type == "cpu" and not bool(t.get("allow_cpu_training", False)): raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining")
         requested_configuration = dict(t)
         hardware = profile_hardware()
+        self._hardware_profile = hardware.to_dict()
+        self._requested_configuration = requested_configuration
+        self._initial_estimate_seconds = 0.0
         shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
         if bool(t.get("auto_size", False)):
             try:
@@ -388,6 +391,7 @@ class Trainer:
         optimizer.zero_grad(set_to_none=True)
         start_time = time.time()
         initial_estimate_seconds = float((estimate or {}).get("estimated_duration_seconds") or 0.0)
+        self._initial_estimate_seconds = initial_estimate_seconds
         step = start_step
         try:
             while step < total_steps:
@@ -508,14 +512,14 @@ class Trainer:
             "training_duration_seconds": max(0.0, time.time() - start_time),
             "evaluation_duration_seconds": float(evaluation_duration),
             "checkpoint_duration_seconds": float(checkpoint_duration),
-            "hardware_profile": t.get("_hardware_profile", hardware.to_dict() if "hardware" in locals() else {}),
-            "requested_configuration": requested_configuration if "requested_configuration" in locals() else {},
+            "hardware_profile": t.get("_hardware_profile", self._hardware_profile),
+            "requested_configuration": self._requested_configuration,
             "effective_configuration": {k: v for k, v in t.items() if not k.startswith("__")},
             "preflight": t.get("_preflight"),
-            "initial_estimate_seconds": initial_estimate_seconds if "initial_estimate_seconds" in locals() else None,
+            "initial_estimate_seconds": self._initial_estimate_seconds,
             "estimated_vs_actual_seconds": (
-                {"estimated_seconds": initial_estimate_seconds, "actual_seconds": max(0.0, time.time() - start_time)}
-                if initial_estimate_seconds > 0 else None
+                {"estimated_seconds": self._initial_estimate_seconds, "actual_seconds": max(0.0, time.time() - start_time)}
+                if self._initial_estimate_seconds > 0 else None
             ),
         }
 
