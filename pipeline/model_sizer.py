@@ -191,7 +191,7 @@ def recommend_training_profile(
 ) -> TrainingProfile:
     profiles = {
         "cpu": TrainingProfile("cpu-safe", "85M", 256, 1, 32, 2, 100, 250, "fp32", "CPU-only host; smallest preset and short context reduce memory pressure"),
-        "gpu_<4gb": TrainingProfile("gpu-sub4gb", "85M", 256, 1, 32, 2, 100, 250, "fp16", "Very small VRAM budget; prioritize viability over throughput"),
+        "gpu_<4gb": TrainingProfile("gpu-sub4gb", "85M", 128, 1, 32, 2, 100, 250, "fp16", "VRAM < 4 GB; prioritize viability over throughput"),
         "gpu_4_6gb": TrainingProfile("gpu-4-6gb", "85M", 512, 1, 32, 4, 200, 500, "fp16", "4–6 GB VRAM; 85M preset with reduced context"),
         "gpu_6_10gb": TrainingProfile("gpu-6-10gb", "117M", 512, 1, 32, 4, 250, 500, "fp16", "6–10 GB VRAM; 117M is viable with reduced context"),
         "gpu_10_20gb": TrainingProfile("gpu-10-20gb", "117M", 1024, 1, 16, 8, 500, 1000, "fp16", "10–20 GB VRAM; full 1K context on the 117M preset"),
