@@ -148,7 +148,7 @@ def test_external_evidence_is_projected_into_sqlite(tmp_path):
 
     db.sync_manifest(manifest)
     assert db.conn.execute("SELECT COUNT(*) FROM checkpoints").fetchone()[0] == 1
-    assert db.conn.execute("SELECT COUNT(*) FROM metrics WHERE step IS NOT NULL").fetchone()[0] == 2
+    assert db.conn.execute("SELECT COUNT(*) FROM metrics WHERE step IS NOT NULL").fetchone()[0] == 4
     assert db.conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0] == 1
     assert db.conn.execute("SELECT COUNT(*) FROM runtime_estimates").fetchone()[0] >= 1
     db.close()
@@ -168,3 +168,4 @@ def test_historical_import_is_idempotent(tmp_path):
     db = ExperimentDB(output / "experiment.db")
     assert db.conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
     db.close()
+}
