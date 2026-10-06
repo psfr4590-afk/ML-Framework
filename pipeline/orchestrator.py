@@ -116,7 +116,6 @@ def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
     if not pipeline_config.is_absolute():
         pipeline_config = root / pipeline_config
     paths = {
-        "pipeline_config": pipeline_config,
         "source_weights": root / str(crawl.get("source_weights_file", "config/source_weights.yaml")),
         "dataset_groups": root / str(crawl.get("dataset_groups_file", "config/dataset_groups.yaml")),
         "dataset_profiles": root / str(crawl.get("dataset_profiles_file", "config/dataset_profiles.yaml")),
