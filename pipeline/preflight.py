@@ -92,7 +92,7 @@ def run_preflight(
             torch.cuda.reset_peak_memory_stats()
         model.train()
 
-        def step_once() -> None:
+        def step_once(model=model, optimizer=optimizer) -> None:
             optimizer.zero_grad(set_to_none=True)
             for _ in range(grad_accum):
                 x, y = loader.next_batch(batch_size)
