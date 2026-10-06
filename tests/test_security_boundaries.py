@@ -36,3 +36,40 @@ def test_log_service_rejects_symlink(tmp_path: Path):
             LogService().tail(link, 10)
     finally:
         link.unlink(missing_ok=True)
+
+
+
+def test_import_source_requires_relative_path_inside_root(tmp_path: Path, monkeypatch):
+    import command_center.security as security
+
+    root = tmp_path / "imports"
+    root.mkdir()
+    allowed = root / "allowed.txt"
+    allowed.write_text("safe", encoding="utf-8")
+    monkeypatch.setattr(security, "IMPORT_ROOT", root)
+
+    assert security.validate_import_source("allowed.txt") == allowed
+    with pytest.raises(ValueError, match="inside"):
+        security.validate_import_source(str(tmp_path / "outside.txt"))
+    with pytest.raises(ValueError, match="inside"):
+        security.validate_import_source("../outside.txt")
+
+
+def test_import_source_rejects_symlink_inside_root(tmp_path: Path, monkeypatch):
+    import command_center.security as security
+
+    root = tmp_path / "imports"
+    root.mkdir()
+    target = tmp_path / "target.txt"
+    target.write_text("outside", encoding="utf-8")
+    link = root / "link.txt"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    monkeypatch.setattr(security, "IMPORT_ROOT", root)
+    try:
+        with pytest.raises(ValueError, match="symlink"):
+            security.validate_import_source("link.txt")
+    finally:
+        link.unlink(missing_ok=True)
