@@ -93,6 +93,13 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
     checks.append(result("Source configuration", "PASS" if source_def_sha == source.get("source_definition_sha256")
                          else "FAIL", source_def_sha))
 
+    export_manifest = root / "gguf" / "export_manifest.json"
+    if export_manifest.is_file() and checkpoint is not None:
+        export_data = load_json(export_manifest)
+        export_ok = export_data.get("checkpoint_sha256") == sha256_file(checkpoint)
+        checks.append(result("Export → checkpoint", "PASS" if export_ok else "FAIL",
+                             export_data.get("checkpoint_sha256", "")))
+
     if checkpoint_meta is None:
         checks.append(result("Checkpoint lineage", "WARN", "no checkpoint supplied or discovered"))
         return checks, 0
