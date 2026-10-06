@@ -30,9 +30,11 @@ class ArxivCrawler(BaseCrawler):
             params = {"search_query": f"cat:{category}", "start": 0, "max_results": max_results, "sortBy": "submittedDate", "sortOrder": "descending"}
             try:
                 response = self.session.get("https://export.arxiv.org/api/query", params=params, timeout=self.timeout)
+                self.record_response(response)
                 response.raise_for_status()
                 root = ET.fromstring(response.text)
             except (requests.RequestException, ET.ParseError) as exc:
+                self.record_request_error()
                 self.stats["errors"] += 1
                 log.warning("ArXiv query failed for %s: %s", category, exc)
                 continue
