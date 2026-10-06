@@ -284,7 +284,13 @@ class Pipeline:
         self._clean_config_path = PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")
         self._source_definition_paths = _source_definition_paths(self.cfg, PROJECT_ROOT)
         self._source_definition_hashes = {name: _file_hash(path) for name, path in self._source_definition_paths.items()}
-        self.cfg["_run_id"] = new_run_id()
+        run_id_path = self._out / "provenance" / "run_id.txt"
+        if run_id_path.is_file() and run_id_path.read_text(encoding="utf-8").strip():
+            self.cfg["_run_id"] = run_id_path.read_text(encoding="utf-8").strip()
+        else:
+            self.cfg["_run_id"] = new_run_id()
+            run_id_path.parent.mkdir(parents=True, exist_ok=True)
+            run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
         self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
         self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
         self._source_manifest_path = self._out.parent / "source_manifest.json"
