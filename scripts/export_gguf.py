@@ -279,7 +279,7 @@ def _artifact_manifest(
 def _write_modelfile(path: Path, gguf: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        f"FROM {gguf.name}\\n\\nPARAMETER temperature 0.7\\nPARAMETER top_p 0.9\\nPARAMETER repeat_penalty 1.1\\n",
+        f"FROM {gguf.name}\n\nPARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER repeat_penalty 1.1\n",
         encoding="utf-8",
     )
 
