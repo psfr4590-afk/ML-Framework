@@ -209,7 +209,7 @@ def _write_release_report(*, static_failures: list[str], native_requested: bool,
     out = ROOT / "release-evidence"
     out.mkdir(exist_ok=True)
     path = out / "release_report.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Release report: {path}")
     return 0 if gate_pass else 2
 
