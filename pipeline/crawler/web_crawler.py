@@ -213,8 +213,9 @@ class WebCrawler(BaseCrawler):
                     return response
                 except requests.RequestException as exc:
                     last = exc
-                    self.record_request_error()
                     self.stats["errors"] += 1
+                    if "response" not in locals() or response is None:
+                        self.record_request_error()
                     if attempt < self.retries:
                         self.record_retry()
                         time.sleep(self.backoff * (attempt + 1))
