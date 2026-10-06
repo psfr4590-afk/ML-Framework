@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import platform
 import sys
 
@@ -150,6 +151,17 @@ def _run_snapshot(run_id: str | None = None) -> dict:
     def metric_value(*names):
         return next((latest[n]["metric_value"] for n in names if n in latest), None)
     train_runtime = next((r for r in runtime if r["estimate_type"] == "training"), {})
+    elapsed_seconds = None
+    if run.get("started_at"):
+        try:
+            start = datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(run["completed_at"].replace("Z", "+00:00")) if run.get("completed_at") else datetime.now(timezone.utc)
+            elapsed_seconds = max(0.0, (end - start).total_seconds())
+        except (TypeError, ValueError):
+            elapsed_seconds = None
+    eta_seconds = None
+    if progress and progress > 0 and elapsed_seconds is not None and not run.get("completed_at"):
+        eta_seconds = max(0.0, elapsed_seconds * (1.0 - progress) / progress)
     hardware_rows = _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,))
     hardware = hardware_rows[0] if hardware_rows else {}
     if hardware.get("snapshot_json"):
@@ -170,8 +182,10 @@ def _run_snapshot(run_id: str | None = None) -> dict:
             "tokens_per_sec": metric_value("tokens_per_sec", "tokens/sec", "train.tokens_per_sec"),
             "estimated_seconds": train_runtime.get("estimated_seconds"),
             "actual_seconds": train_runtime.get("actual_seconds"),
+            "elapsed_seconds": elapsed_seconds,
+            "eta_seconds": eta_seconds,
         },
-        "dataset": {**dataset, "sources": sources},
+        "dataset": {**dataset, "sources": sources, "model": train_config.get("model_preset") or train_config.get("model_name")},
         "hardware": hardware,
         "provenance": {
             "configuration": bool(configs),
