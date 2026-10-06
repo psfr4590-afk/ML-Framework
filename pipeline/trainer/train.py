@@ -129,14 +129,80 @@ def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_
     return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
 
 
-def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler, step: int, val_loss: float, cfg: dict, out_dir: Path, tag: str = "", provenance: Optional[dict] = None, train_loader: Optional[ShardDataLoader] = None, val_loader: Optional[ShardDataLoader] = None):
+def save_checkpoint(
+    model: LlamaModel,
+    optimizer: torch.optim.Optimizer,
+    scaler,
+    step: int,
+    val_loss: Optional[float],
+    cfg: dict,
+    out_dir: Path,
+    tag: str = "",
+    provenance: Optional[dict] = None,
+    train_loader: Optional[ShardDataLoader] = None,
+    val_loader: Optional[ShardDataLoader] = None,
+    training_metadata: Optional[dict] = None,
+    best_step: Optional[int] = None,
+    best_val_loss: Optional[float] = None,
+    final_step: Optional[int] = None,
+):
+    """Save an atomically replaced checkpoint and its integrity manifest."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = f"ckpt_{tag}_{step:07d}.pt" if tag else f"ckpt_{step:07d}.pt"
+    name = f"ckpt_{tag}.pt" if tag in {"best", "final"} else f"ckpt_{step:07d}.pt"
     path = out_dir / name
-    payload = {"schema": 3, "step": step, "model": model.state_dict(), "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "val_loss": val_loss, "model_cfg": model.cfg.to_dict(), "train_cfg": cfg, "provenance": provenance or {}, "rng_state": _rng_state(), "loader_state": {"train": train_loader.state_dict() if train_loader is not None else None, "val": val_loader.state_dict() if val_loader is not None else None}}
-    tmp = path.with_suffix(path.suffix + ".tmp"); torch.save(payload, tmp); os.replace(tmp, path)
-    manifest = {"schema": 2, "kind": "checkpoint", "path": str(path), "size": path.stat().st_size, "sha256": sha256_file(path), "step": step, "val_loss": val_loss, "provenance": provenance or {}}
-    mp = path.with_name(path.name + ".manifest.json"); mtmp = mp.with_suffix(mp.suffix + ".tmp"); mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"); os.replace(mtmp, mp)
+    rng_state = _rng_state()
+    metadata = dict(training_metadata or {})
+    metadata["random_state"] = "payload.rng_state"
+    metadata["random_state_sha256"] = _rng_state_sha256(rng_state)
+    metadata["checkpoint_step"] = int(step)
+    metadata["best_step"] = int(best_step) if best_step is not None else None
+    metadata["best_val_loss"] = float(best_val_loss) if best_val_loss is not None else None
+    metadata["final_step"] = int(final_step) if final_step is not None else None
+    started = time.perf_counter()
+    payload = {
+        "schema": 4,
+        "checkpoint_kind": tag or "periodic",
+        "step": int(step),
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scaler": scaler.state_dict(),
+        "val_loss": float(val_loss) if val_loss is not None else None,
+        "best_val_loss": float(best_val_loss) if best_val_loss is not None else None,
+        "best_step": int(best_step) if best_step is not None else None,
+        "final_step": int(final_step) if final_step is not None else None,
+        "model_cfg": model.cfg.to_dict(),
+        "train_cfg": cfg,
+        "provenance": provenance or {},
+        "training_metadata": metadata,
+        "rng_state": rng_state,
+        "loader_state": {
+            "train": train_loader.state_dict() if train_loader is not None else None,
+            "val": val_loader.state_dict() if val_loader is not None else None,
+        },
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp)
+    os.replace(tmp, path)
+    checkpoint_duration = time.perf_counter() - started
+    manifest = {
+        "schema": 3,
+        "kind": "checkpoint",
+        "checkpoint_kind": tag or "periodic",
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+        "step": int(step),
+        "val_loss": float(val_loss) if val_loss is not None else None,
+        "best_val_loss": float(best_val_loss) if best_val_loss is not None else None,
+        "best_step": int(best_step) if best_step is not None else None,
+        "final_step": int(final_step) if final_step is not None else None,
+        "checkpoint_duration_seconds": checkpoint_duration,
+        "provenance": provenance or {},
+    }
+    mp = path.with_name(path.name + ".manifest.json")
+    mtmp = mp.with_suffix(mp.suffix + ".tmp")
+    mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(mtmp, mp)
     return path
 
 
