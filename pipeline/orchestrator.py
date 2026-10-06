@@ -610,6 +610,13 @@ class Pipeline:
                 doc.char_count = len(doc.text)
                 yield doc
         _jsonl_write(cleaned(), out, kind="clean", provenance=provenance)
+        self._stage_metrics["clean"] = stage_counts(in_path, out)
+        self._stage_metrics["clean"]["removal_reasons"] = {
+            "too_short": cleaner.stats["dropped_short"],
+            "too_long": cleaner.stats["dropped_long"],
+            "duplicate": cleaner.stats["dropped_dedup"],
+            "refusal": cleaner.stats["dropped_refusal"],
+        }
         return out
 
     def stage_embed_dedup(self, in_path: Path, out_path: Path | None = None) -> Path:
@@ -633,6 +640,8 @@ class Pipeline:
                     yield doc
             yield from deduper.stream(unique_docs(), buffer_size=buffer_size)
         _jsonl_write(stream(), out, kind="dedup", provenance=provenance)
+        self._stage_metrics["dedup"] = stage_counts(in_path, out)
+        self._stage_metrics["dedup"]["removal_reasons"] = {"semantic_duplicate": int(deduper.stats.get("dropped", 0))}
         return out
 
     def stage_weight(self, in_path: Path, out_path: Path | None = None) -> Path:
@@ -646,6 +655,8 @@ class Pipeline:
             raise RuntimeError(f"Weight input failed integrity validation: {in_path}")
         weighter = _load_class("pipeline.weighter.weighter", "DomainWeighter")(str(weights_path), strategy=weight_cfg.get("strategy", "upsample"))
         _jsonl_write(weighter.apply(_jsonl_read(in_path)), out, kind="weight", provenance=provenance)
+        self._stage_metrics["weight"] = stage_counts(in_path, out)
+        self._stage_metrics["weight"]["removal_reasons"] = {}
         return out
 
     def stage_tokenize(self, corpus_path: Path):
@@ -659,6 +670,15 @@ class Pipeline:
             raise RuntimeError(f"Tokenizer input failed integrity validation: {corpus_path}")
         tokenizer = trainer.train(corpus_path)
         write_manifest(marker, kind="tokenizer", provenance=provenance, extra={"vocab_size": tokenizer.get_vocab_size()})
+        self._stage_metrics["tokenize"] = stage_counts(corpus_path, None)
+        self._stage_metrics["tokenize"].update({
+            "document_count": self._stage_metrics["tokenize"].get("input_document_count"),
+            "removed_count": 0,
+            "removal_reasons": {},
+            "token_count": None,
+            "token_count_status": "materialized during shard stage",
+            "vocab_size": tokenizer.get_vocab_size(),
+        })
         return tokenizer
 
     def stage_shard(self, corpus_path: Path, tokenizer) -> Path:
@@ -693,11 +713,23 @@ class Pipeline:
         shard_dir.mkdir(parents=True, exist_ok=True)
         for old in shard_dir.glob("shard_*.bin"):
             old.unlink(missing_ok=True)
-        Writer(shard_cfg, tokenizer).write(corpus_path)
+        writer = Writer(shard_cfg, tokenizer)
+        writer.write(corpus_path)
         paths = sorted(shard_dir.glob("shard_*.bin"))
         if not paths:
             raise RuntimeError("Shard stage produced no shard files")
         marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8")
+        self._stage_metrics["shard"] = stage_counts(corpus_path, None)
+        self._stage_metrics["shard"].update({
+            "document_count": int(writer.stats["docs_processed"]),
+            "removed_count": 0,
+            "removal_reasons": {},
+            "token_count": int(writer.stats["total_tokens"]),
+            "train_document_count": int(writer.stats.get("train_docs", 0)),
+            "validation_document_count": int(writer.stats.get("val_docs", 0)),
+            "train_shards": int(writer.stats["train_shards"]),
+            "validation_shards": int(writer.stats["val_shards"]),
+        })
         return shard_dir
 
     def stage_train(self) -> Path:
@@ -725,10 +757,17 @@ class Pipeline:
             if isinstance(p, (str, Path)) and Path(p).exists()
         ]
         self._run_tracker.start_stage(name, inputs=[Path(p) for p in tracked_inputs])
+        started = time.perf_counter()
         try:
             result = fn()
+            elapsed = time.perf_counter() - started
             outputs = [result] if isinstance(result, Path) else []
-            self._run_tracker.finish_stage(name, outputs=outputs)
+            metrics = dict(self._stage_metrics.get(name, {}))
+            metrics["duration_seconds"] = round(elapsed, 6)
+            metrics["throughput_docs_per_second"] = throughput(metrics.get("document_count"), elapsed)
+            if name == "crawl":
+                self._run_tracker.manifest["source_observability"] = list(self._source_observability)
+            self._run_tracker.finish_stage(name, outputs=outputs, metrics=metrics)
             return result
         except BaseException as exc:
             self._run_tracker.fail_stage(name, exc)
