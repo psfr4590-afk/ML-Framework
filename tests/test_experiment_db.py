@@ -151,3 +151,19 @@ def test_external_evidence_is_projected_into_sqlite(tmp_path):
     assert db.conn.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0] == 1
     assert db.conn.execute("SELECT COUNT(*) FROM runtime_estimates").fetchone()[0] >= 1
     db.close()
+
+
+def test_historical_import_is_idempotent(tmp_path):
+    from scripts.import_experiment_runs import import_runs
+
+    output = tmp_path / "output"
+    run_dir = output / "runs" / "run_test_001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(json.dumps(_manifest()), encoding="utf-8")
+
+    assert import_runs(output) == 1
+    assert import_runs(output) == 1
+
+    db = ExperimentDB(output / "experiment.db")
+    assert db.conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
+    db.close()
