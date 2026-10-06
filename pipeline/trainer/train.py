@@ -114,6 +114,14 @@ def _restore_rng_state(state: dict) -> None:
     if torch.cuda.is_available() and "torch_cuda" in state: torch.cuda.set_rng_state_all(state["torch_cuda"])
 
 
+def _rng_state_sha256(state: dict) -> str:
+    return hashlib.sha256(pickle.dumps(state, protocol=4)).hexdigest()
+
+
+def _model_parameter_count(model: LlamaModel) -> int:
+    return sum(parameter.numel() for parameter in model.parameters())
+
+
 def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_steps: int) -> float:
     if step < warmup_steps: return lr_max * step / max(warmup_steps, 1)
     if step >= total_steps: return lr_min
