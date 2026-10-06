@@ -246,3 +246,36 @@ def test_checkpoint_manifest_preserves_phase5_metadata(tmp_path):
     assert metadata["effective_configuration"]["model_preset"] == "85M"
     assert metadata["preflight"]["tokens_per_sec"] == 2048.0
     assert metadata["estimated_vs_actual_seconds"]["actual_seconds"] == 120.0
+
+
+def test_capability_discovery_records_verified_and_failed_probe(monkeypatch):
+    import torch
+    from pipeline import preflight
+    from pipeline.model_sizer import HardwareProfile
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(1))
+
+        def forward(self, x, y):
+            loss = (self.weight * (x.float().mean() - y.float().mean()) * 0 + self.weight.pow(2)).mean()
+            return None, loss
+
+    def make_model(cfg):
+        if int(cfg["seq_len"]) == 512:
+            raise RuntimeError("synthetic probe failure")
+        return TinyModel()
+
+    monkeypatch.setattr(preflight, "_make_model", make_model)
+    hw = HardwareProfile("test", 4, 8.0, 0, 0.0, None, False)
+    report = preflight.discover_capabilities(
+        hw,
+        candidates=(("85M", 256), ("117M", 512)),
+        benchmark_steps=1,
+        vocab_size=32,
+    )
+    assert report["tested_combinations"] == 2
+    assert report["results"][0]["viable"] is True
+    assert report["results"][1]["viable"] is False
+    assert "synthetic probe failure" in report["results"][1]["failure"]
