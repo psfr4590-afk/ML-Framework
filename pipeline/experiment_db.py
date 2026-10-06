@@ -243,8 +243,11 @@ class ExperimentDB:
         )
         self._sync_hardware(run_id, manifest.get("hardware") or {})
         self._sync_dataset(run_id, manifest)
+        self._sync_sources(run_id, manifest.get("source_observability") or [], manifest.get("dataset_identity") or {})
         self._sync_configs(run_id, manifest.get("configuration") or {})
-        self._sync_stages(run_id, manifest.get("stages") or {})
+        stages = manifest.get("stages") or {}
+        self._sync_stages(run_id, stages)
+        self._sync_metrics(run_id, stages)
         self._sync_artifacts(run_id, manifest.get("artifacts") or [])
         self._sync_warnings_errors(run_id, manifest.get("warnings") or [], manifest.get("errors") or [])
         self.conn.commit()
@@ -279,6 +282,34 @@ class ExperimentDB:
              report.get("sha256"), None, None, None, None),
         )
 
+    def _sync_sources(self, run_id: str, records: list[Any], identity: dict[str, Any]) -> None:
+        dataset_id = str(identity.get("dataset_id") or "")
+        if not dataset_id:
+            return
+        self.conn.execute("DELETE FROM source_stats WHERE source_id IN (SELECT id FROM sources WHERE dataset_id=?)", (dataset_id,))
+        self.conn.execute("DELETE FROM sources WHERE dataset_id=?", (dataset_id,))
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            source = record.get("source") if isinstance(record.get("source"), dict) else record
+            cur = self.conn.execute(
+                "INSERT INTO sources(dataset_id,kind,identifier,revision,license,raw_source_sha256,status) VALUES(?,?,?,?,?,?,?)",
+                (dataset_id, source.get("kind"), source.get("identifier") or source.get("display_name"),
+                 source.get("revision"), source.get("license", "unknown"), source.get("raw_source_sha256"),
+                 record.get("status") or source.get("status")),
+            )
+            source_id = cur.lastrowid
+            stats = record.get("stats") if isinstance(record.get("stats"), dict) else {}
+            if stats:
+                self.conn.execute(
+                    "INSERT INTO source_stats(source_id,requests,successes,failures,http_2xx,http_4xx,http_5xx,documents,retries,duration_seconds) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (source_id, _as_int(stats.get("requests")), _as_int(stats.get("successes")),
+                     _as_int(stats.get("failures")), _as_int(stats.get("http_2xx")), _as_int(stats.get("http_4xx")),
+                     _as_int(stats.get("http_5xx")), _as_int(stats.get("documents")), _as_int(stats.get("retries")),
+                     _as_float(stats.get("duration_seconds"))),
+                )
+
     def _sync_configs(self, run_id: str, configs: dict[str, Any]) -> None:
         for kind, value in configs.items():
             if isinstance(value, dict):
@@ -306,6 +337,19 @@ class ExperimentDB:
                  _as_int(metrics.get("document_count") or metrics.get("output_document_count")),
                  _as_int(metrics.get("token_count")), _as_float(metrics.get("throughput_docs_per_second")), None, None),
             )
+
+    def _sync_metrics(self, run_id: str, stages: dict[str, Any]) -> None:
+        self.conn.execute("DELETE FROM metrics WHERE run_id=?", (run_id,))
+        for stage_name, stage in stages.items():
+            stage_metrics = stage.get("metrics") if isinstance(stage, dict) else {}
+            if not isinstance(stage_metrics, dict):
+                continue
+            for metric_name, value in stage_metrics.items():
+                if isinstance(value, (int, float)):
+                    self.conn.execute(
+                        "INSERT INTO metrics(run_id,step,metric_name,metric_value,metric_unit,recorded_at) VALUES(?,?,?,?,?,?)",
+                        (run_id, None, f"{stage_name}.{metric_name}", float(value), None, stage.get("end")),
+                    )
 
     def _sync_artifacts(self, run_id: str, artifacts: Iterable[dict[str, Any]]) -> None:
         for item in artifacts:
