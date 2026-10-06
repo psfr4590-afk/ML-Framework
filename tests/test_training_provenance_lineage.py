@@ -105,6 +105,10 @@ def test_export_accepts_independent_stage_config_identities_without_pipeline_has
     manifest(output / "tokenizer" / "tokenizer.json", {
         "config_identities": identities | {"pipeline_config_sha256": "historical-" + "b" * 10},
     })
+    tokenizer_manifest = output / "tokenizer" / "tokenizer.json.manifest.json"
+    tokenizer_manifest_data = json.loads(tokenizer_manifest.read_text(encoding="utf-8"))
+    tokenizer_manifest_data["vocab_size"] = 8
+    tokenizer_manifest.write_text(json.dumps(tokenizer_manifest_data), encoding="utf-8")
     shard_manifest = output / "shards" / "shards.manifest.json"
     shard_manifest.write_text(json.dumps({
         "schema": 4,
