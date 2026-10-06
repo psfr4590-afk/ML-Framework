@@ -55,7 +55,7 @@ addopts = "--cov=command_center.config --cov=command_center.secrets --cov=comman
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["command_center.config", "command_center.secrets", "command_center.service", "command_center.web", "pipeline.config_validation", "pipeline.contracts.run", "pipeline.doctor", "pipeline.embedder", "pipeline.filtering", "pipeline.integrity", "pipeline.model_sizer", "pipeline.orchestrator", "pipeline.tokenizer", "pipeline.trainer", "pipeline.weighter"]
+source = ["command_center.config", "command_center.secrets", "command_center.service", "command_center.web", "pipeline.config_validation", "pipeline.contracts.run", "pipeline.doctor", "pipeline.embedder", "pipeline.filtering", "pipeline.integrity", "pipeline.experiment_db", "pipeline.model_sizer", "pipeline.orchestrator", "pipeline.tokenizer", "pipeline.trainer", "pipeline.weighter"]
 
 [tool.coverage.report]
 skip_empty = true
