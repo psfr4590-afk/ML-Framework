@@ -19,7 +19,7 @@ import torch.nn as nn
 
 from pipeline.integrity import sha256_file
 from pipeline.model_sizer import estimate_total_tokens, profile_hardware, recommend_training_profile
-from pipeline.preflight import estimate_duration, run_preflight, write_preflight_report
+from pipeline.preflight import discover_capabilities, estimate_duration, run_preflight, write_preflight_report
 from pipeline.shardwriter.shard_writer import ShardDataLoader
 from pipeline.provenance import config_identities, artifact_id, stable_hash
 from pipeline.trainer.model import LlamaModel, ModelConfig
@@ -294,15 +294,12 @@ class Trainer:
                 total_tokens = estimate_total_tokens(shard_dir)
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
                 total_tokens = None
-            shard_cfg = self.cfg.get("shard", {})
-            max_seq_len = shard_cfg.get("sequence_length")
             profile = recommend_training_profile(
                 hardware,
                 total_tokens=total_tokens,
                 configured_steps=int(t.get("total_steps", 100_000)),
                 target_training_hours=float(t["target_training_hours"]) if t.get("target_training_hours") is not None else None,
                 observed_tokens_per_sec=float(t["observed_tokens_per_sec"]) if t.get("observed_tokens_per_sec") is not None else None,
-                max_seq_len=int(max_seq_len) if max_seq_len is not None else None,
             )
             t.update({
                 "model_preset": profile.model_preset,
@@ -341,6 +338,12 @@ class Trainer:
                 eval_batches=int(t.get("eval_batches", 20)),
                 checkpoint_every_steps=int(t.get("checkpoint_every_steps", 1000)),
             )
+            capability_report = None
+            if bool(preflight_cfg.get("capability_discovery", False)):
+                capability_report = discover_capabilities(
+                    hardware,
+                    benchmark_steps=int(preflight_cfg.get("capability_benchmark_steps", 2)),
+                )
             write_preflight_report(self.out_dir / "preflight_report.json", {
                 "hardware": hardware.to_dict(),
                 "requested_configuration": requested_configuration,
@@ -348,6 +351,7 @@ class Trainer:
                 "decision_reasons": list(t.get("_training_profile", {}).get("decision_reasons", [])),
                 "benchmark": preflight_result.to_dict(),
                 "estimate": estimate,
+                "capability_discovery": capability_report,
             })
             t["_preflight"] = preflight_result.to_dict()
             t["_initial_estimate"] = estimate
