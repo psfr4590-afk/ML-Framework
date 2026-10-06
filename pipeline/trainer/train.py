@@ -343,6 +343,11 @@ class Trainer:
                 capability_report = discover_capabilities(
                     hardware,
                     benchmark_steps=int(preflight_cfg.get("capability_benchmark_steps", 2)),
+                    max_model_params=int(preflight_cfg.get("capability_max_model_params", 1_000_000_000)),
+                    max_context=int(preflight_cfg.get("capability_max_context", 4096)),
+                    model_probe_rounds=int(preflight_cfg.get("capability_model_probe_rounds", 4)),
+                    context_probe_rounds=int(preflight_cfg.get("capability_context_probe_rounds", 5)),
+                    vocab_size=int(t.get("vocab_size", 32000)),
                 )
             write_preflight_report(self.out_dir / "preflight_report.json", {
                 "hardware": hardware.to_dict(),

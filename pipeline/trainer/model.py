@@ -36,6 +36,47 @@ class ModelConfig:
             raise ValueError(f"Unknown preset '{name}'. Options: {list(presets)}")
         return presets[name]
 
+    @classmethod
+    def from_target_params(
+        cls,
+        target_params: int,
+        *,
+        seq_len: int = 1024,
+        vocab_size: int = 32000,
+    ) -> "ModelConfig":
+        """Build the nearest valid architecture to a requested parameter budget.
+
+        The capability probe uses this instead of treating the three named
+        presets as the complete model-size space. Candidates stay on the
+        architecture grid supported by this implementation: attention heads
+        divide the model width, and FFN width is chosen from common SwiGLU
+        ratios.
+        """
+        target = max(1, int(target_params))
+        best: tuple[int, ModelConfig] | None = None
+        for d_model in range(384, 1537, 64):
+            valid_heads = [h for h in range(4, min(32, d_model) + 1) if d_model % h == 0]
+            for n_heads in valid_heads:
+                for n_layers in range(4, 49):
+                    for ratio in (2.0, 2.5, 2.75, 3.0, 3.5, 4.0):
+                        d_ffn = max(64, int(round((d_model * ratio) / 64)) * 64)
+                        cfg = cls(
+                            vocab_size=int(vocab_size),
+                            seq_len=int(seq_len),
+                            n_layers=n_layers,
+                            n_heads=n_heads,
+                            n_kv_heads=n_heads,
+                            d_model=d_model,
+                            d_ffn=d_ffn,
+                        )
+                        count = cfg.param_count()
+                        distance = abs(count - target)
+                        if best is None or distance < best[0]:
+                            best = (distance, cfg)
+        if best is None:
+            raise ValueError("Unable to construct a valid model architecture")
+        return best[1]
+
     def to_dict(self) -> dict:
         import dataclasses
         return dataclasses.asdict(self)

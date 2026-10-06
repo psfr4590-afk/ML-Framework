@@ -16,7 +16,7 @@ SECTION_KEYS = {
     "train": {"resume", "allow_cpu_training", "auto_size", "target_training_hours", "observed_tokens_per_sec", "model_preset", "vocab_size", "seq_len", "dropout", "lr_max", "lr_min", "weight_decay", "grad_clip", "batch_size", "grad_accum_steps", "total_steps", "warmup_steps", "eval_every_steps", "eval_batches", "checkpoint_every_steps", "keep_checkpoints", "shard_dir"},
     "export": {"format", "llamacpp_dir", "quant", "model_name"},
     "command_center": {"host", "port", "auto_seed_datasets"},
-    "preflight": {"enabled", "warmup_steps", "benchmark_steps"},
+    "preflight": {"enabled", "warmup_steps", "benchmark_steps", "capability_discovery", "capability_benchmark_steps", "capability_max_model_params", "capability_max_context", "capability_model_probe_rounds", "capability_context_probe_rounds"},
 }
 NESTED_KEYS = {
     "sources": {"web", "github", "arxiv", "huggingface", "google"},
@@ -77,11 +77,17 @@ def validate_config(cfg: dict) -> None:
     preflight = cfg.get("preflight", {})
     if "enabled" in preflight:
         _bool("preflight", "enabled", preflight["enabled"])
-    for key in ("warmup_steps", "benchmark_steps"):
+    if "capability_discovery" in preflight:
+        _bool("preflight", "capability_discovery", preflight["capability_discovery"])
+    for key in ("warmup_steps", "benchmark_steps", "capability_benchmark_steps", "capability_max_model_params", "capability_max_context", "capability_model_probe_rounds", "capability_context_probe_rounds"):
         if key in preflight:
             value = preflight[key]
-            if not isinstance(value, int) or isinstance(value, bool) or value < 0 or (key == "benchmark_steps" and value == 0):
-                raise ValueError(f"preflight.{key} must be a non-negative integer" if key == "warmup_steps" else "preflight.benchmark_steps must be a positive integer")
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"preflight.{key} must be an integer")
+            if key in {"warmup_steps", "capability_model_probe_rounds", "capability_context_probe_rounds"} and value < 0:
+                raise ValueError(f"preflight.{key} must be non-negative")
+            if key in {"benchmark_steps", "capability_benchmark_steps", "capability_max_model_params", "capability_max_context"} and value <= 0:
+                raise ValueError(f"preflight.{key} must be positive")
     if "resume" in cfg["pipeline"]:
         _bool("pipeline", "resume", cfg["pipeline"]["resume"])
     for key in ("train_on_sample",):
