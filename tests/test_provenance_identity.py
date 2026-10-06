@@ -49,10 +49,10 @@ def test_source_definition_paths_include_dataset_profile_catalog():
     assert paths["dataset_profiles"].is_file()
 
 
-def test_source_definition_paths_bind_to_selected_config():
+def test_source_definition_paths_exclude_training_pipeline_config():
     cfg = _load_config("pipeline_config.smoke.yaml")
     paths = _source_definition_paths(cfg, ROOT)
-    assert paths["pipeline_config"] == (ROOT / "config" / "pipeline_config.smoke.yaml").resolve()
+    assert "pipeline_config" not in paths
 
 
 def test_dataset_session_config_binds_to_canonical_production_groups():
