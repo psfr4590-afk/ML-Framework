@@ -55,7 +55,7 @@ class ModelConfig:
         target = max(1, int(target_params))
         best: tuple[int, ModelConfig] | None = None
         for d_model in range(384, 1537, 64):
-            valid_heads = [h for h in range(4, min(32, d_model) + 1, 4) if d_model % h == 0]
+            valid_heads = [h for h in range(4, min(32, d_model) + 1) if d_model % h == 0]
             for n_heads in valid_heads:
                 for n_layers in range(4, 49):
                     for ratio in (2.0, 2.5, 2.75, 3.0, 3.5, 4.0):
