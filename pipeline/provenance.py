@@ -77,7 +77,7 @@ def snapshot_configs(root: Path, cfg: dict[str, Any], identities: dict[str, Any]
 
     for name, sections in CONFIG_SECTIONS.items():
         sha = identities[f"{name}_config_sha256"]
-        payload = {section: cfg.get(section, {}) for section in sections}
+        payload = {section: _semantic(cfg.get(section, {})) for section in sections}
         if name == "model":
             train = dict(payload.get("train") or {})
             payload["train"] = {
