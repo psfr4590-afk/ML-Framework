@@ -221,7 +221,23 @@ The release workflow is manually dispatchable and tag-driven so the complete nat
 
 ## Production export requirement
 
-Final GGUF export requires the pinned llama.cpp checkout containing `convert_hf_to_gguf.py`. Quantized exports also require the built `llama-quantize` executable. The exporter refuses to claim success when required tools are missing or when the training provenance chain is incomplete or inconsistent.
+Final RC export requires the pinned llama.cpp checkout containing `convert_hf_to_gguf.py` and the built `llama-quantize` executable. The Phase 9 exporter can produce the complete release set with `--quant ALL`: F16, Q4_K_M, Q5_K_M, and Q8_0.
+
+Each export receives its own checkpoint hash, model configuration, export configuration, exporter version, timestamp, artifact hash, and lineage manifest. The aggregate `output/gguf/export_manifest.json` records the complete set.
+
+The native gate validates every exported GGUF with llama.cpp:
+
+```bash
+python scripts/verify_release.py --bootstrap-native
+```
+
+For the full deployment gate, including Ollama:
+
+```bash
+python scripts/verify_release.py --bootstrap-native --verify-ollama
+```
+
+Ollama remains an external deployment dependency and is intentionally not installed by the Python requirements.
 
 ## Termux / Android native toolchain
 
