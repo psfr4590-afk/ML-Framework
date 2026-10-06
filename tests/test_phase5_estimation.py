@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from pipeline.model_sizer import HardwareProfile, recommend_training_profile
 from pipeline.preflight import estimate_duration
 
@@ -50,7 +52,6 @@ def test_duration_estimate_requires_benchmark_throughput():
     assert estimate["estimated_duration_seconds"] is None
 
 
-
 def test_preflight_runtime_failure_is_non_viable(monkeypatch, tmp_path):
     from pipeline import preflight
 
@@ -66,7 +67,6 @@ def test_preflight_runtime_failure_is_non_viable(monkeypatch, tmp_path):
 
 def test_preflight_report_persists_benchmark_and_estimate(tmp_path):
     from pipeline.preflight import PreflightResult, write_preflight_report
-    import json
 
     result = PreflightResult(
         viable=True,
