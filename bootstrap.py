@@ -280,10 +280,12 @@ def _pip_install(requirements: Path, *extra: str) -> int:
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
 
-def install(torch_channel: str = "cuda") -> int:
+def install(torch_channel: str = "auto") -> int:
     if not _python_supported():
         print(f"Bootstrap install aborted: {_python_requirement_message()}", file=sys.stderr)
         return 2
+    if torch_channel == "auto":
+        torch_channel = "cuda" if detect_hardware().nvidia_gpu_detected else "cpu"
     if torch_channel == "cpu":
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
     elif torch_channel == "cuda":
@@ -310,9 +312,9 @@ def main() -> int:
     parser.add_argument("--install", action="store_true")
     parser.add_argument(
         "--torch-channel",
-        choices=("cpu", "cuda", "default"),
-        default="cuda",
-        help="PyTorch wheel source for --install (default: cuda; use cpu for the official CPU wheel index)",
+        choices=("auto", "cpu", "cuda", "default"),
+        default="auto",
+        help="PyTorch wheel source for --install (default: auto-detect NVIDIA GPU; use cpu/cuda/default to override)",
     )
     parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()
