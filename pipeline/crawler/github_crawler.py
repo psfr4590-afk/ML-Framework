@@ -28,10 +28,12 @@ class GitHubCrawler(BaseCrawler):
     def _request(self, path: str, params: dict | None = None):
         try:
             resp = self.session.get(urljoin(self.base, path), params=params, timeout=self.timeout)
+            self.record_response(resp)
             resp.raise_for_status()
             self.stats["fetched"] += 1
             return resp.json()
         except requests.RequestException as exc:
+            self.record_request_error()
             self.stats["errors"] += 1
             log.warning("GitHub request failed: %s", exc)
             return None
