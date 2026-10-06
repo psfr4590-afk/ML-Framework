@@ -50,7 +50,7 @@ ignore = ["N999"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=command_center.config --cov=command_center.secrets --cov=command_center.service --cov=command_center.web --cov=pipeline.config_validation --cov=pipeline.contracts.run --cov=pipeline.doctor --cov=pipeline.embedder --cov=pipeline.filtering --cov=pipeline.integrity --cov=pipeline.model_sizer --cov=pipeline.orchestrator --cov=pipeline.tokenizer --cov=pipeline.trainer --cov=pipeline.weighter"
+addopts = "--cov=command_center.config --cov=command_center.secrets --cov=command_center.service --cov=command_center.web --cov=pipeline.config_validation --cov=pipeline.contracts.run --cov=pipeline.doctor --cov=pipeline.embedder --cov=pipeline.filtering --cov=pipeline.integrity --cov=pipeline.experiment_db --cov=pipeline.model_sizer --cov=pipeline.orchestrator --cov=pipeline.tokenizer --cov=pipeline.trainer --cov=pipeline.weighter"
 
 [tool.coverage.run]
 branch = true
