@@ -413,9 +413,17 @@ class Trainer:
                 if step % 10 == 0:
                     elapsed = max(time.time() - start_time, 1e-6)
                     tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed
+                    remaining_tokens = max(0, total_steps - step) * batch_size * grad_accum * seq_len
+                    remaining_seconds = remaining_tokens / tok_s if tok_s > 0 else None
+                    live_estimate_seconds = elapsed + remaining_seconds if remaining_seconds is not None else None
                     metrics.write(json.dumps({
                         "step": step, "train_loss": accum_loss, "lr": lr,
-                        "grad_norm": float(grad_norm), "tokens_per_sec": tok_s
+                        "grad_norm": float(grad_norm), "tokens_per_sec": tok_s,
+                        "elapsed_seconds": elapsed,
+                        "estimated_remaining_seconds": remaining_seconds,
+                        "live_estimate_seconds": live_estimate_seconds,
+                        "initial_estimate_seconds": initial_estimate_seconds,
+                        "actual_seconds_so_far": elapsed,
                     }) + "\n")
                     metrics.flush()
                 if step % eval_every == 0:
