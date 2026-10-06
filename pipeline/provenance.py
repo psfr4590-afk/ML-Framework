@@ -13,6 +13,17 @@ from pathlib import Path
 from typing import Any
 
 
+RUNTIME_PATH_KEYS = {"output_dir", "scratch_dir", "output_path", "shard_dir", "llamacpp_dir"}
+
+
+def _semantic(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _semantic(item) for key, item in value.items() if key not in RUNTIME_PATH_KEYS}
+    if isinstance(value, list):
+        return [_semantic(item) for item in value]
+    return value
+
+
 CONFIG_SECTIONS = {
     "dataset": ("crawl", "clean", "dedup", "weight"),
     "tokenizer": ("tokenizer",),
@@ -33,7 +44,7 @@ def config_identities(cfg: dict[str, Any], *, pipeline_sha256: str | None = None
     """Return independent immutable configuration identities for a run."""
     identities: dict[str, Any] = {}
     for name, sections in CONFIG_SECTIONS.items():
-        payload = {section: cfg.get(section, {}) for section in sections}
+        payload = {section: _semantic(cfg.get(section, {})) for section in sections}
         if name == "model":
             train = dict(payload.get("train") or {})
             payload["train"] = {
