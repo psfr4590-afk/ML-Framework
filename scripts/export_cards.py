@@ -64,6 +64,12 @@ def write_export_cards(output_dir: str | Path, export_manifest: dict[str, Any], 
     crawl_path, _ = stages["crawl"]; config_ids = checkpoint_provenance.get("config_identities") or {}
     if not config_ids and checkpoint_provenance.get("pipeline_config_sha256"):
         config_ids = {"pipeline_config_sha256": checkpoint_provenance.get("pipeline_config_sha256")}
+    if not config_ids:
+        for _, (_, manifest) in stages.items():
+            if manifest:
+                config_ids = (manifest.get("provenance") or {}).get("config_identities") or {}
+                if config_ids:
+                    break
     source_manifest = output_dir.parent / "source_manifest.json"
     if not source_manifest.is_file():
         raise RuntimeError(f"Source manifest is mandatory for production export provenance: {source_manifest}")
