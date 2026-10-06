@@ -168,4 +168,3 @@ def test_historical_import_is_idempotent(tmp_path):
     db = ExperimentDB(output / "experiment.db")
     assert db.conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
     db.close()
-}
