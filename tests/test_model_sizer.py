@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pipeline.model_sizer import HardwareProfile, estimate_total_tokens, recommend_training_profile
+from pipeline.model_sizer import HardwareProfile, capability_candidates, estimate_total_tokens, recommend_training_profile
 
 
 def test_cpu_profile_is_small_and_bounded():
@@ -32,7 +32,8 @@ def test_profile_context_can_be_capped_to_shard_geometry():
     hw = HardwareProfile("test", 4, 8.0, 0, 0.0, None, False)
     profile = recommend_training_profile(hw, total_tokens=10_000, max_seq_len=128)
     assert profile.seq_len == 128
-    assert "capped context" in profile.reason
+    assert "sequence length explicitly capped to 128" in profile.reason
+    assert "shard geometry" not in profile.reason
 
 
 def test_profile_rejects_non_positive_context_cap():
@@ -59,3 +60,19 @@ def test_target_duration_requires_observed_throughput():
     hw = HardwareProfile("test", 8, 16.0, 1, 12.0, "test-gpu", True)
     profile = recommend_training_profile(hw, total_tokens=10_000_000, target_training_hours=1)
     assert profile.estimated_hours is None
+
+
+def test_four_gb_profile_is_not_a_hard_512_context_ceiling():
+    hw = HardwareProfile("test", 8, 8.0, 1, 4.0, "test-gpu", True)
+    profile = recommend_training_profile(hw)
+    assert profile.seq_len == 512
+    assert "capped" not in profile.reason
+
+
+def test_capability_matrix_contains_larger_models_and_contexts():
+    hw = HardwareProfile("test", 8, 8.0, 1, 4.0, "test-gpu", True)
+    candidates = capability_candidates(hw)
+    assert ("117M", 768) in candidates
+    assert ("117M", 1024) in candidates
+    assert ("360M", 512) in candidates
+    assert ("360M", 1024) in candidates
