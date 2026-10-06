@@ -187,6 +187,7 @@ class WebCrawler(BaseCrawler):
             domain = parsed.netloc.lower()
             self._polite_wait(domain)
             for attempt in range(self.retries + 1):
+                response = None
                 try:
                     response = self._pinned_get(current_url, addresses)
                     self.record_response(response)
