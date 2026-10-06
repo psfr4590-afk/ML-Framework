@@ -181,3 +181,18 @@ a claim that the complete Python release gate has passed on Termux.
 `sentence-transformers` and `faiss-cpu` are required runtime dependencies for semantic deduplication and are installed by the canonical bootstrap path. The default embedding model remains local-only; set `allow_model_download: true` explicitly if the model may be downloaded.
 
 `python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is the exception: it is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
+
+
+## Final RC release gate
+
+The ten implementation phases are complete only when the final RC gate is green. Run:
+
+```bash
+python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
+```
+
+The gate writes one machine-readable report to `release-evidence/release_report.json`. It records the status of tests, configuration, provenance, lineage, dataset and source retrieval, checkpoint and best checkpoint, reproducibility, hardware, auto-sizing, ETA, evaluation, SQLite persistence, UI/backend connectivity, GGUF export and native inference, clean-clone acceptance, documentation, secrets, Git state, and release artifacts.
+
+`UNKNOWN` is never promoted to `PASS`. The full RC invocation requires the UI probe and clean-clone acceptance path, so missing evidence fails the release gate rather than being quietly omitted.
+
+The report is the authoritative release evidence summary. Human-readable console output remains useful for diagnosis, but release automation should consume the JSON report and its top-level `status`.
