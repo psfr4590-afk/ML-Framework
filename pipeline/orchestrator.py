@@ -260,7 +260,7 @@ class Pipeline:
         self.cfg = _load_config(self._cfg_path)
         self.cfg["_project_root"] = str(PROJECT_ROOT)
         self.cfg["_pipeline_config_path"] = str(self._cfg_path)
-        self.cfg["_pipeline_config_relative_path"] = str(self._cfg_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+        self.cfg["_pipeline_config_relative_path"] = _project_relative_path(self._cfg_path)
         validate_config(self.cfg)
         self.dataset_id = dataset_id
         configured_out = Path(self.cfg["pipeline"].get("output_dir", "output"))
