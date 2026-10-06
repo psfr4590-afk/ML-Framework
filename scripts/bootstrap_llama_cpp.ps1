@@ -82,4 +82,4 @@ if (-not $Cli) {
 Write-Host "`n=== LLAMA.CPP READY ===" -ForegroundColor Green
 Write-Host "  converter: $Target\convert_hf_to_gguf.py"
 Write-Host "  quantizer: $($Quant.FullName)"
-Write-Host "  app:       $($App.FullName)"
+Write-Host "  cli:       $($Cli.FullName)"
