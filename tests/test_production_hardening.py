@@ -171,7 +171,7 @@ def test_checkpoint_resume_restores_exact_loader_cursor(tmp_path):
 
 
 def test_export_provenance_rejects_missing_or_mismatched_lineage(tmp_path):
-    with pytest.raises(RuntimeError, match="incomplete"):
+    with pytest.raises(RuntimeError, match="legacy provenance schema"):
         _enforce_training_provenance(tmp_path / "output", {"provenance": {}})
 
 
