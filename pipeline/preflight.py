@@ -171,17 +171,25 @@ def estimate_duration(
     checkpoint_count = max(0, (int(total_steps) - 1) // max(1, int(checkpoint_every_steps)))
     total_seconds = training_seconds + eval_count * float(eval_seconds) + checkpoint_count * float(checkpoint_seconds)
     checkpoints = []
-    for step in range(max(1, int(checkpoint_every_steps)), int(total_steps) + 1, max(1, int(checkpoint_every_steps))):
-        checkpoints.append({"step": step, "estimated_elapsed_seconds": round(
-            (step * int(batch_size) * int(grad_accum_steps) * int(seq_len)) / tokens_per_sec,
-            3,
-        )})
+    evaluations = []
+    for step in range(1, int(total_steps) + 1):
+        if step % max(1, int(checkpoint_every_steps)) == 0:
+            checkpoints.append({"step": step, "estimated_elapsed_seconds": round(
+                (step * int(batch_size) * int(grad_accum_steps) * int(seq_len)) / tokens_per_sec,
+                3,
+            )})
+        if step % max(1, int(eval_every_steps)) == 0:
+            evaluations.append({"step": step, "estimated_elapsed_seconds": round(
+                (step * int(batch_size) * int(grad_accum_steps) * int(seq_len)) / tokens_per_sec,
+                3,
+            )})
     return {
         "estimated_training_seconds": training_seconds,
         "estimated_duration_seconds": total_seconds,
         "estimated_eval_count": eval_count,
         "estimated_checkpoint_count": checkpoint_count,
         "estimated_checkpoint_times": checkpoints,
+        "estimated_eval_times": evaluations,
         "estimated_completion": time.time() + total_seconds,
     }
 
