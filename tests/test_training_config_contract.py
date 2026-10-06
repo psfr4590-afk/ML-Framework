@@ -5,7 +5,7 @@ import torch
 import yaml
 
 from pipeline.trainer.model import LlamaModel, ModelConfig
-from pipeline.trainer.train import latest_checkpoint, load_checkpoint, save_checkpoint
+from pipeline.trainer.train import best_checkpoint, latest_checkpoint, load_checkpoint, save_checkpoint, select_checkpoint
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -141,3 +141,116 @@ def test_load_checkpoint_rejects_stale_provenance(tmp_path):
         assert "provenance mismatch" in str(exc).lower()
     else:
         raise AssertionError("stale checkpoint provenance was accepted")
+
+
+def _checkpoint_fixture(tmp_path):
+    model_cfg = ModelConfig(vocab_size=32, d_model=16, n_layers=1, n_heads=4, n_kv_heads=4, d_ffn=32, seq_len=16)
+    model = LlamaModel(model_cfg)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
+    return model, optimizer, scaler
+
+
+def test_best_checkpoint_tracks_authoritative_validation_metric_and_replaces_prior(tmp_path):
+    model, optimizer, scaler = _checkpoint_fixture(tmp_path)
+    first = save_checkpoint(
+        model, optimizer, scaler, step=700, val_loss=3.42, cfg={"seed": 42},
+        out_dir=tmp_path, tag="best", provenance={"contract": "best-test"},
+        best_step=700, best_val_loss=3.42,
+        training_metadata={"model_parameters": sum(p.numel() for p in model.parameters())},
+    )
+    second = save_checkpoint(
+        model, optimizer, scaler, step=1000, val_loss=3.24, cfg={"seed": 42},
+        out_dir=tmp_path, tag="best", provenance={"contract": "best-test"},
+        best_step=1000, best_val_loss=3.24,
+        training_metadata={"model_parameters": sum(p.numel() for p in model.parameters())},
+    )
+
+    assert first == second
+    assert best_checkpoint(tmp_path) == second
+    assert select_checkpoint(tmp_path, "best") == second
+    meta = json.loads(second.with_name(second.name + ".manifest.json").read_text(encoding="utf-8"))
+    assert meta["step"] == 1000
+    assert meta["val_loss"] == 3.24
+    assert meta["best_step"] == 1000
+    assert meta["best_val_loss"] == 3.24
+
+
+def test_final_checkpoint_records_final_step_separately_from_best(tmp_path):
+    model, optimizer, scaler = _checkpoint_fixture(tmp_path)
+    final = save_checkpoint(
+        model, optimizer, scaler, step=1200, val_loss=3.30, cfg={"seed": 42},
+        out_dir=tmp_path, tag="final", provenance={"contract": "final-test"},
+        best_step=1000, best_val_loss=3.24, final_step=1200,
+        training_metadata={"tokens_processed": 1200 * 16},
+    )
+    assert select_checkpoint(tmp_path, "final") == final
+    meta = json.loads(final.with_name(final.name + ".manifest.json").read_text(encoding="utf-8"))
+    assert meta["step"] == 1200
+    assert meta["final_step"] == 1200
+    assert meta["best_step"] == 1000
+    assert meta["best_val_loss"] == 3.24
+
+
+def test_checkpoint_metadata_records_reproducibility_fields(tmp_path):
+    model, optimizer, scaler = _checkpoint_fixture(tmp_path)
+    path = save_checkpoint(
+        model, optimizer, scaler, step=7, val_loss=1.25, cfg={"seed": 42},
+        out_dir=tmp_path, provenance={"contract": "metadata-test"},
+        training_metadata={
+            "model_parameters": sum(p.numel() for p in model.parameters()),
+            "architecture": "test",
+            "sequence_length": 16,
+            "batch_size": 2,
+            "effective_batch_size": 8,
+            "gradient_accumulation": 4,
+            "optimizer": "AdamW",
+            "lr": 1e-3,
+            "scheduler": "cosine",
+            "precision": "float32",
+            "seed": 42,
+            "total_steps": 100,
+            "tokens_processed": 112,
+            "training_duration_seconds": 1.0,
+            "evaluation_duration_seconds": 0.2,
+            "checkpoint_duration_seconds": 0.1,
+        },
+    )
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    meta = payload["training_metadata"]
+    for key in (
+        "model_parameters", "architecture", "sequence_length", "batch_size",
+        "effective_batch_size", "gradient_accumulation", "optimizer", "lr",
+        "scheduler", "precision", "seed", "total_steps", "tokens_processed",
+        "training_duration_seconds", "evaluation_duration_seconds",
+        "checkpoint_duration_seconds", "random_state", "random_state_sha256",
+    ):
+        assert key in meta
+    assert "rng_state" in payload
+
+
+def test_resume_restores_optimizer_and_rng_state_for_deterministic_continuation(tmp_path):
+    model, optimizer, scaler = _checkpoint_fixture(tmp_path)
+    x = torch.randint(0, 32, (2, 16))
+    y = torch.randint(0, 32, (2, 16))
+    # Create optimizer state before saving.
+    loss = model(x.long(), y.long())[1]
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    rng_before = torch.get_rng_state()
+    expected_next = torch.rand(4)
+    torch.set_rng_state(rng_before)
+    path = save_checkpoint(
+        model, optimizer, scaler, step=7, val_loss=1.25, cfg={"seed": 42},
+        out_dir=tmp_path, provenance={"contract": "resume-test"},
+    )
+
+    restored_model, restored_optimizer, restored_scaler = _checkpoint_fixture(tmp_path)
+    load_checkpoint(
+        path, restored_model, restored_optimizer, restored_scaler,
+        device=torch.device("cpu"), expected_provenance={"contract": "resume-test"},
+    )
+    restored_next = torch.rand(4)
+    assert torch.equal(restored_next, expected_next)
+    assert restored_optimizer.state_dict()["state"]

@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import pickle
 import random
 import time
 from pathlib import Path
@@ -113,6 +114,14 @@ def _restore_rng_state(state: dict) -> None:
     if torch.cuda.is_available() and "torch_cuda" in state: torch.cuda.set_rng_state_all(state["torch_cuda"])
 
 
+def _rng_state_sha256(state: dict) -> str:
+    return hashlib.sha256(pickle.dumps(state, protocol=4)).hexdigest()
+
+
+def _model_parameter_count(model: LlamaModel) -> int:
+    return sum(parameter.numel() for parameter in model.parameters())
+
+
 def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_steps: int) -> float:
     if step < warmup_steps: return lr_max * step / max(warmup_steps, 1)
     if step >= total_steps: return lr_min
@@ -120,14 +129,80 @@ def cosine_lr(step: int, warmup_steps: int, lr_max: float, lr_min: float, total_
     return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * progress))
 
 
-def save_checkpoint(model: LlamaModel, optimizer: torch.optim.Optimizer, scaler, step: int, val_loss: float, cfg: dict, out_dir: Path, tag: str = "", provenance: Optional[dict] = None, train_loader: Optional[ShardDataLoader] = None, val_loader: Optional[ShardDataLoader] = None):
+def save_checkpoint(
+    model: LlamaModel,
+    optimizer: torch.optim.Optimizer,
+    scaler,
+    step: int,
+    val_loss: Optional[float],
+    cfg: dict,
+    out_dir: Path,
+    tag: str = "",
+    provenance: Optional[dict] = None,
+    train_loader: Optional[ShardDataLoader] = None,
+    val_loader: Optional[ShardDataLoader] = None,
+    training_metadata: Optional[dict] = None,
+    best_step: Optional[int] = None,
+    best_val_loss: Optional[float] = None,
+    final_step: Optional[int] = None,
+):
+    """Save an atomically replaced checkpoint and its integrity manifest."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = f"ckpt_{tag}_{step:07d}.pt" if tag else f"ckpt_{step:07d}.pt"
+    name = f"ckpt_{tag}.pt" if tag in {"best", "final"} else f"ckpt_{step:07d}.pt"
     path = out_dir / name
-    payload = {"schema": 3, "step": step, "model": model.state_dict(), "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "val_loss": val_loss, "model_cfg": model.cfg.to_dict(), "train_cfg": cfg, "provenance": provenance or {}, "rng_state": _rng_state(), "loader_state": {"train": train_loader.state_dict() if train_loader is not None else None, "val": val_loader.state_dict() if val_loader is not None else None}}
-    tmp = path.with_suffix(path.suffix + ".tmp"); torch.save(payload, tmp); os.replace(tmp, path)
-    manifest = {"schema": 2, "kind": "checkpoint", "path": str(path), "size": path.stat().st_size, "sha256": sha256_file(path), "step": step, "val_loss": val_loss, "provenance": provenance or {}}
-    mp = path.with_name(path.name + ".manifest.json"); mtmp = mp.with_suffix(mp.suffix + ".tmp"); mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"); os.replace(mtmp, mp)
+    rng_state = _rng_state()
+    metadata = dict(training_metadata or {})
+    metadata["random_state"] = "payload.rng_state"
+    metadata["random_state_sha256"] = _rng_state_sha256(rng_state)
+    metadata["checkpoint_step"] = int(step)
+    metadata["best_step"] = int(best_step) if best_step is not None else None
+    metadata["best_val_loss"] = float(best_val_loss) if best_val_loss is not None else None
+    metadata["final_step"] = int(final_step) if final_step is not None else None
+    started = time.perf_counter()
+    payload = {
+        "schema": 4,
+        "checkpoint_kind": tag or "periodic",
+        "step": int(step),
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scaler": scaler.state_dict(),
+        "val_loss": float(val_loss) if val_loss is not None else None,
+        "best_val_loss": float(best_val_loss) if best_val_loss is not None else None,
+        "best_step": int(best_step) if best_step is not None else None,
+        "final_step": int(final_step) if final_step is not None else None,
+        "model_cfg": model.cfg.to_dict(),
+        "train_cfg": cfg,
+        "provenance": provenance or {},
+        "training_metadata": metadata,
+        "rng_state": rng_state,
+        "loader_state": {
+            "train": train_loader.state_dict() if train_loader is not None else None,
+            "val": val_loader.state_dict() if val_loader is not None else None,
+        },
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp)
+    os.replace(tmp, path)
+    checkpoint_duration = time.perf_counter() - started
+    manifest = {
+        "schema": 3,
+        "kind": "checkpoint",
+        "checkpoint_kind": tag or "periodic",
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+        "step": int(step),
+        "val_loss": float(val_loss) if val_loss is not None else None,
+        "best_val_loss": float(best_val_loss) if best_val_loss is not None else None,
+        "best_step": int(best_step) if best_step is not None else None,
+        "final_step": int(final_step) if final_step is not None else None,
+        "checkpoint_duration_seconds": checkpoint_duration,
+        "provenance": provenance or {},
+    }
+    mp = path.with_name(path.name + ".manifest.json")
+    mtmp = mp.with_suffix(mp.suffix + ".tmp")
+    mtmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(mtmp, mp)
     return path
 
 
@@ -141,9 +216,14 @@ def load_checkpoint(path: Path, model: LlamaModel, optimizer: Optional[torch.opt
     try: ckpt = torch.load(path, map_location=device or "cpu", weights_only=False)
     except TypeError: ckpt = torch.load(path, map_location=device or "cpu")
     if not isinstance(ckpt, dict) or "model" not in ckpt or "step" not in ckpt: raise RuntimeError(f"Checkpoint schema invalid: {path}")
+    if int(ckpt.get("schema", 0)) < 4: raise RuntimeError(f"Checkpoint schema too old for deterministic resume: {path}")
     model.load_state_dict(ckpt["model"])
-    if optimizer is not None and "optimizer" in ckpt: optimizer.load_state_dict(ckpt["optimizer"])
-    if scaler is not None and "scaler" in ckpt: scaler.load_state_dict(ckpt["scaler"])
+    if optimizer is not None:
+        if "optimizer" not in ckpt: raise RuntimeError("Checkpoint has no optimizer state; refusing resume")
+        optimizer.load_state_dict(ckpt["optimizer"])
+    if scaler is not None:
+        if "scaler" not in ckpt: raise RuntimeError("Checkpoint has no scaler state; refusing resume")
+        scaler.load_state_dict(ckpt["scaler"])
     loader_state = ckpt.get("loader_state") or {}
     if train_loader is not None:
         if not loader_state.get("train"): raise RuntimeError("Checkpoint has no deterministic train loader state; refusing resume")
@@ -164,6 +244,32 @@ def latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
             if stem.startswith("ckpt_") and stem[5:].isdigit(): numbered.append((int(stem[5:]), path))
     numbered.sort(key=lambda item: item[0])
     return numbered[-1][1] if numbered else None
+
+
+def checkpoint_metadata(path: Path) -> dict:
+    mp = path.with_name(path.name + ".manifest.json")
+    if not mp.is_file(): raise RuntimeError(f"Checkpoint integrity manifest missing: {mp}")
+    meta = json.loads(mp.read_text(encoding="utf-8"))
+    if meta.get("kind") != "checkpoint": raise RuntimeError(f"Invalid checkpoint manifest: {mp}")
+    if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
+        raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
+    return meta
+
+
+def best_checkpoint(ckpt_dir: Path) -> Optional[Path]:
+    path = ckpt_dir / "ckpt_best.pt"
+    if not path.is_file() or not path.with_name(path.name + ".manifest.json").is_file(): return None
+    meta = checkpoint_metadata(path)
+    return path if meta.get("checkpoint_kind") == "best" and meta.get("best_step") is not None else None
+
+
+def select_checkpoint(ckpt_dir: Path, kind: str = "latest") -> Optional[Path]:
+    if kind == "latest": return latest_checkpoint(ckpt_dir)
+    if kind == "best": return best_checkpoint(ckpt_dir)
+    if kind == "final":
+        path = ckpt_dir / "ckpt_final.pt"
+        return path if path.is_file() and path.with_name(path.name + ".manifest.json").is_file() else None
+    raise ValueError(f"Unknown checkpoint selection kind: {kind!r}")
 
 
 class Trainer:
@@ -193,36 +299,148 @@ class Trainer:
         if max_seq_len := self.cfg.get("shard", {}).get("sequence_length"):
             if seq_len > int(max_seq_len): raise RuntimeError(f"Training seq_len={seq_len} exceeds shard sequence_length={int(max_seq_len)}; rebuild shards or enable a compatible auto-size profile")
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype, seed=seed); val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype, seed=seed); provenance = _provenance(self.cfg, model_cfg, shard_dir, train_cfg=t)
-        start_step, best_val = 0, float("inf")
+        start_step, best_val, best_step = 0, float("inf"), None
+        tokens_processed = 0
+        evaluation_duration = 0.0
+        checkpoint_duration = 0.0
         if bool(t.get("resume", True)):
             ckpt = latest_checkpoint(self.ckpt_dir)
             if ckpt:
-                start_step = load_checkpoint(ckpt, model, optimizer, scaler, device, expected_provenance=provenance, train_loader=train_loader, val_loader=val_loader)
-                try: payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-                except TypeError: payload = torch.load(ckpt, map_location="cpu")
-                best_val = float(payload.get("val_loss", best_val))
-        metrics_path = self.out_dir / "logs" / "metrics.jsonl"; metrics = open(metrics_path, "a", encoding="utf-8"); model.train(); optimizer.zero_grad(set_to_none=True); start_time = time.time(); step = start_step
+                start_step = load_checkpoint(
+                    ckpt, model, optimizer, scaler, device,
+                    expected_provenance=provenance,
+                    train_loader=train_loader, val_loader=val_loader,
+                )
+                try:
+                    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+                except TypeError:
+                    payload = torch.load(ckpt, map_location="cpu")
+                best_val = float(payload.get("best_val_loss", payload.get("val_loss", best_val)))
+                best_step = payload.get("best_step")
+                saved_meta = payload.get("training_metadata", {})
+                tokens_processed = int(saved_meta.get(
+                    "tokens_processed", start_step * batch_size * grad_accum * seq_len
+                ))
+                evaluation_duration = float(saved_meta.get("evaluation_duration_seconds", 0.0))
+                checkpoint_duration = float(saved_meta.get("checkpoint_duration_seconds", 0.0))
+        metrics_path = self.out_dir / "logs" / "metrics.jsonl"
+        metrics = open(metrics_path, "a", encoding="utf-8")
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        start_time = time.time()
+        step = start_step
         try:
             while step < total_steps:
                 lr = cosine_lr(step, warmup_steps, float(t.get("lr_max", 3e-4)), float(t.get("lr_min", 3e-5)), total_steps)
-                for group in optimizer.param_groups: group["lr"] = lr
+                for group in optimizer.param_groups:
+                    group["lr"] = lr
                 accum_loss = 0.0
                 for _ in range(grad_accum):
-                    x, y = train_loader.next_batch(batch_size); x, y = x.to(device), y.to(device)
+                    x, y = train_loader.next_batch(batch_size)
+                    x, y = x.to(device), y.to(device)
                     with torch.autocast(device_type=device.type, dtype=self.amp_dtype, enabled=(device.type == "cuda")):
-                        _, loss = model(x, y); loss = loss / grad_accum
-                    scaler.scale(loss).backward(); accum_loss += loss.item()
-                scaler.unscale_(optimizer); grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip); scaler.step(optimizer); scaler.update(); optimizer.zero_grad(set_to_none=True); step += 1
+                        _, loss = model(x, y)
+                        loss = loss / grad_accum
+                    scaler.scale(loss).backward()
+                    accum_loss += loss.item()
+                scaler.unscale_(optimizer)
+                grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                step += 1
+                tokens_processed += batch_size * grad_accum * seq_len
                 if step % 10 == 0:
-                    elapsed = max(time.time() - start_time, 1e-6); tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed; metrics.write(json.dumps({"step": step, "train_loss": accum_loss, "lr": lr, "grad_norm": float(grad_norm), "tokens_per_sec": tok_s}) + "\n"); metrics.flush()
+                    elapsed = max(time.time() - start_time, 1e-6)
+                    tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed
+                    metrics.write(json.dumps({
+                        "step": step, "train_loss": accum_loss, "lr": lr,
+                        "grad_norm": float(grad_norm), "tokens_per_sec": tok_s
+                    }) + "\n")
+                    metrics.flush()
                 if step % eval_every == 0:
-                    val_loss = self._eval(model, val_loader, device, eval_batches, batch_size); metrics.write(json.dumps({"step": step, "val_loss": val_loss, "val_ppl": math.exp(min(val_loss, 20))}) + "\n"); metrics.flush(); model.train()
+                    eval_started = time.perf_counter()
+                    val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
+                    evaluation_duration += time.perf_counter() - eval_started
+                    metrics.write(json.dumps({
+                        "step": step, "val_loss": val_loss,
+                        "val_ppl": math.exp(min(val_loss, 20))
+                    }) + "\n")
+                    metrics.flush()
+                    model.train()
                     if val_loss < best_val:
-                        best_val = val_loss; save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="best", provenance=provenance, train_loader=train_loader, val_loader=val_loader)
+                        best_val = val_loss
+                        best_step = step
+                        save_started = time.perf_counter()
+                        save_checkpoint(
+                            model, optimizer, scaler, step, val_loss, t, self.ckpt_dir,
+                            tag="best", provenance=provenance,
+                            train_loader=train_loader, val_loader=val_loader,
+                            training_metadata=self._training_metadata(
+                                model, t, seed, step, total_steps, batch_size, grad_accum,
+                                seq_len, tokens_processed, start_time,
+                                evaluation_duration, checkpoint_duration
+                            ),
+                            best_step=best_step, best_val_loss=best_val,
+                        )
+                        checkpoint_duration += time.perf_counter() - save_started
                 if step % ckpt_every == 0:
-                    save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir, provenance=provenance, train_loader=train_loader, val_loader=val_loader); self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
-            val_loss = self._eval(model, val_loader, device, eval_batches, batch_size); save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final", provenance=provenance, train_loader=train_loader, val_loader=val_loader); return model, step
-        finally: metrics.close()
+                    save_started = time.perf_counter()
+                    save_checkpoint(
+                        model, optimizer, scaler, step, None, t, self.ckpt_dir,
+                        provenance=provenance, train_loader=train_loader, val_loader=val_loader,
+                        training_metadata=self._training_metadata(
+                            model, t, seed, step, total_steps, batch_size, grad_accum,
+                            seq_len, tokens_processed, start_time,
+                            evaluation_duration, checkpoint_duration
+                        ),
+                        best_step=best_step, best_val_loss=best_val,
+                    )
+                    checkpoint_duration += time.perf_counter() - save_started
+                    self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
+            final_eval_started = time.perf_counter()
+            final_val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
+            evaluation_duration += time.perf_counter() - final_eval_started
+            save_started = time.perf_counter()
+            save_checkpoint(
+                model, optimizer, scaler, step, final_val_loss, t, self.ckpt_dir,
+                tag="final", provenance=provenance,
+                train_loader=train_loader, val_loader=val_loader,
+                training_metadata=self._training_metadata(
+                    model, t, seed, step, total_steps, batch_size, grad_accum,
+                    seq_len, tokens_processed, start_time,
+                    evaluation_duration, checkpoint_duration
+                ),
+                best_step=best_step, best_val_loss=best_val, final_step=step,
+            )
+            checkpoint_duration += time.perf_counter() - save_started
+            return model, step
+        finally:
+            metrics.close()
+
+    def _training_metadata(
+        self, model, t, seed, step, total_steps, batch_size, grad_accum,
+        seq_len, tokens_processed, start_time, evaluation_duration, checkpoint_duration
+    ) -> dict:
+        return {
+            "model_parameters": _model_parameter_count(model),
+            "architecture": str(t.get("model_preset", "117M")),
+            "sequence_length": int(seq_len),
+            "batch_size": int(batch_size),
+            "effective_batch_size": int(batch_size * grad_accum),
+            "gradient_accumulation": int(grad_accum),
+            "optimizer": "AdamW",
+            "lr": float(t.get("lr_max", 3e-4)),
+            "scheduler": "cosine",
+            "precision": "float16" if torch.cuda.is_available() else "float32",
+            "seed": int(seed),
+            "total_steps": int(total_steps),
+            "step": int(step),
+            "tokens_processed": int(tokens_processed),
+            "training_duration_seconds": max(0.0, time.time() - start_time),
+            "evaluation_duration_seconds": float(evaluation_duration),
+            "checkpoint_duration_seconds": float(checkpoint_duration),
+        }
 
     @torch.no_grad()
     def _eval(self, model, loader, device, n_batches, batch_size) -> float:
@@ -238,4 +456,4 @@ class Trainer:
         for old in checkpoints[:-keep]: old.unlink(missing_ok=True); old.with_name(old.name + ".manifest.json").unlink(missing_ok=True)
 
 
-__all__ = ["Trainer", "cosine_lr", "save_checkpoint", "load_checkpoint", "latest_checkpoint"]
+__all__ = ["Trainer", "cosine_lr", "save_checkpoint", "load_checkpoint", "checkpoint_metadata", "latest_checkpoint", "best_checkpoint", "select_checkpoint"]
