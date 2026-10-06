@@ -127,7 +127,7 @@ python3 run_pipeline.py --no-resume
 
 The larger profile is preserved as `config/pipeline_config.full.yaml` and must be selected explicitly for large runs.
 
-The bootstrapper installs framework dependencies first, then installs PyTorch from the official CUDA wheel index by default. CPU-only hosts can explicitly use `python bootstrap.py --install --torch-channel cpu`, while `--torch-channel default` uses the standard PyPI PyTorch channel.
+The bootstrapper installs framework dependencies and automatically selects the official CUDA PyTorch wheel when an NVIDIA GPU is detected, otherwise the official CPU wheel. Override with `--torch-channel cpu`, `--torch-channel cuda`, or `--torch-channel default` when a specific wheel source is required.
 
 After the starter run succeeds, inspect the host before doing expensive work:
 
@@ -156,6 +156,74 @@ Final export verifies the checkpoint, tokenizer, weighted corpus, shard manifest
 For an independent, read-only lineage check, run `python scripts/validate_lineage.py --output-dir output --checkpoint <checkpoint.pt>`. It reports configuration, artifact, parent, checkpoint, and export relationships without rewriting historical evidence.
 
 The starter profile is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and explicitly choose an appropriate larger configuration.
+
+## Clone-and-run CLI
+
+Phase 10 adds one stable user-facing command: `mlframework`. It resolves the repository from its installed entry point, so commands do not depend on `C:\\Users\\Metho...`, the caller's current directory, or undocumented local edits.
+
+### Fresh clone
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/psfr4590-afk/ML-Framework.git
+cd ML-Framework
+python .\\bootstrap.py --install
+python -m pip install -e .
+mlframework doctor
+mlframework smoke
+```
+
+Linux / macOS / Termux:
+
+```bash
+git clone https://github.com/psfr4590-afk/ML-Framework.git
+cd ML-Framework
+python3 bootstrap.py --install
+python3 -m pip install -e .
+mlframework doctor
+mlframework smoke
+```
+
+After the smoke test, the operational path is:
+
+```text
+mlframework doctor
+mlframework smoke
+mlframework dataset
+mlframework train
+mlframework evaluate
+mlframework export
+mlframework infer
+mlframework status
+mlframework runs
+```
+
+The commands use the canonical starter configuration. A clean clone does not require opening a YAML file or changing an absolute path. `mlframework export` bootstraps the pinned llama.cpp checkout when needed. `mlframework infer` verifies the exported Q4_K_M artifact through llama.cpp.
+
+### Doctor
+
+`mlframework doctor` is a non-destructive host and project preflight. It reports Python, PyTorch, CUDA, GPU, VRAM, RAM, disk, tokenizer prerequisites, dataset definitions, llama.cpp, Git, and configuration. CPU-only hosts report GPU/CUDA/VRAM as a CPU fallback rather than falsely claiming GPU capability.
+
+The doctor does not recommend the old fixed model presets. Training recommendations should come from gradient testing that measures the actual hardware ceiling and choke point. The current repository still accepts preset values as configuration compatibility inputs; the doctor does not treat those labels as measured hardware capability.
+
+### Supported environment
+
+- Windows 10/11, Linux, macOS, and headless Termux are supported for the portable Python pipeline. The desktop Tk UI is Windows-oriented.
+- Python 3.11-3.14 is supported.
+- NVIDIA CUDA is optional. CPU training is supported for bounded smoke/testing runs.
+- A practical GPU deployment benefits from NVIDIA CUDA and sufficient VRAM for the selected model configuration. The doctor reports the actual detected hardware instead of inventing a preset.
+- The onboarding disk gate requires at least 8 GiB free. Expect additional storage for the Python environment, semantic-dedup model/cache, datasets, checkpoints, llama.cpp build products, and GGUF artifacts. Large training runs can require substantially more.
+- The bounded smoke run is intended as the first functional test. The approximately 1h 15m runtime shown by the doctor is an operator estimate, not a universal benchmark. Actual runtime depends on hardware, network retrieval, dataset size, and configuration.
+
+### Troubleshooting
+
+- If `mlframework` is not found after installation, reactivate the virtual environment or run `python -m pip install -e .` again.
+- If PyTorch installation fails on a GPU host, rerun bootstrap with `--torch-channel cuda`; for CPU-only hosts use `--torch-channel cpu`.
+- If `mlframework doctor` reports missing llama.cpp, run `mlframework export` to bootstrap the pinned native toolchain, or use `python scripts/verify_release.py --bootstrap-native` for the full native gate.
+- If `mlframework evaluate` reports no checkpoint, run `mlframework train` after `mlframework dataset` or run the complete `mlframework smoke`.
+- If inference reports a missing GGUF, run `mlframework export` first.
+- Never edit an absolute path copied from another machine into the repository. Runtime paths are resolved from the project root.
 
 ## Windows launch
 
