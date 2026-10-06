@@ -743,6 +743,14 @@ class Pipeline:
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
         Trainer = _load_class("pipeline.trainer.train", "Trainer")
         Trainer(self.cfg).run()
+        preflight_report = self._out / "preflight_report.json"
+        if preflight_report.is_file():
+            try:
+                self._stage_metrics["train"] = {
+                    "preflight": json.loads(preflight_report.read_text(encoding="utf-8")),
+                }
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                self._stage_metrics["train"] = {"preflight_report": str(preflight_report)}
         ckpt_dir = self._out / "checkpoints"
         candidates = sorted(ckpt_dir.glob("ckpt_best_*.pt")) or (sorted(ckpt_dir.glob("ckpt_final_*.pt")) if ckpt_dir.exists() else [])
         if not candidates:
