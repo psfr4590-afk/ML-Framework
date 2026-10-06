@@ -12,6 +12,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+NATIVE_EVIDENCE: dict[str, object] = {}
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
 import yaml
@@ -156,6 +158,71 @@ def _native_smoke(verify_ollama: bool = False) -> int:
     return 0
 
 
+def _report_check(name: str, status: str, detail: str = "") -> dict[str, str]:
+    return {"name": name, "status": status, "detail": detail}
+
+
+def _write_release_report(*, static_failures: list[str], native_requested: bool, native_rc: int) -> int:
+    """Write one machine-readable RC report. UNKNOWN is never silently promoted to PASS."""
+    evidence = NATIVE_EVIDENCE
+    checks: list[dict[str, str]] = []
+
+    def add(name: str, ok: bool | None, detail: str = "") -> None:
+        checks.append(_report_check(name, "PASS" if ok is True else "FAIL" if ok is False else "UNKNOWN", detail))
+
+    add("tests", "pytest" not in static_failures, "compile/lint/pytest gate")
+    add("configs", "doctor-required" not in static_failures, "canonical configuration and doctor")
+    for name in ("provenance", "lineage", "dataset", "source_retrieval", "checkpoint", "best_checkpoint",
+                 "reproducibility", "hardware", "auto_sizing", "eta", "evaluation", "sqlite", "export", "inference"):
+        value = evidence.get(name)
+        add(name, bool(value) if value is not None else None, "native release evidence" if value is not None else "not executed")
+    add("ui_backend_connectivity", bool(evidence.get("ui_backend_connectivity")) if "ui_backend_connectivity" in evidence else None,
+        "localhost FastAPI probe" if "ui_backend_connectivity" in evidence else "run with --ui-probe")
+    add("clean_clone", bool(evidence.get("clean_clone")) if "clean_clone" in evidence else None,
+        "temporary clone acceptance path" if "clean_clone" in evidence else "run with --clean-clone")
+    add("documentation", (ROOT / "README.md").is_file() and (ROOT / "docs" / "development" / "START_HERE.md").is_file(), "release docs present")
+    add("secrets", None, "security workflow owns dependency/secret audit")
+    git_status = _git_state(ROOT)
+    add("git_state", git_status["commit"] is not None and not git_status["dirty"], json.dumps(git_status, sort_keys=True))
+    add("release_artifacts", bool(evidence.get("export") and evidence.get("inference")) if native_requested else None,
+        "native export/inference evidence")
+
+    required = [c for c in checks if c["name"] not in {"secrets", "ui_backend_connectivity", "clean_clone"}]
+    gate_pass = native_requested and native_rc == 0 and not static_failures and all(c["status"] == "PASS" for c in required)
+    report = {
+        "schema": 1,
+        "release": "ML-FRAMEWORK RC",
+        "status": "PASS" if gate_pass else "FAIL",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "git": git_status,
+        "python": sys.version,
+        "platform": platform.platform(),
+        "checks": checks,
+        "native_requested": native_requested,
+        "native_return_code": native_rc,
+        "failures": list(static_failures),
+        "native_evidence": evidence,
+    }
+    out = ROOT / "release-evidence"
+    out.mkdir(exist_ok=True)
+    path = out / "release_report.json"
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    print(f"Release report: {path}")
+    return 0 if gate_pass else 2
+
+
+def _ui_probe() -> bool:
+    try:
+        from fastapi.testclient import TestClient
+        from command_center.web import app
+        with TestClient(app) as client:
+            response = client.get("/api/system")
+            return response.status_code == 200 and response.json().get("version") == "1.3.0"
+    except Exception as exc:
+        print(f"UI/backend probe failed: {exc}")
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the Model Lab production verification gate."); parser.add_argument("--bootstrap-native", action="store_true", help="bootstrap pinned llama.cpp and validate native GGUF inference"); parser.add_argument("--skip-tests", action="store_true", help="not allowed for production verification"); parser.add_argument("--verify-ollama", action="store_true", help="also verify every exported GGUF through Ollama"); args = parser.parse_args()
     if args.skip_tests: print("RELEASE VERIFICATION FAILED: --skip-tests is not allowed for a production verification."); return 2
@@ -165,12 +232,50 @@ def main() -> int:
     evidence = ROOT / "release-evidence"; evidence.mkdir(exist_ok=True)
     if run([sys.executable, "-m", "pytest", "-q", "--cov-report=json:release-evidence/coverage.json"]): failures.append("pytest")
     if run([sys.executable, "run_pipeline.py", "--doctor"]): failures.append("doctor-required")
-    if failures: print("RELEASE VERIFICATION FAILED:", ", ".join(failures)); print("Platform:", platform.platform()); return 2
-    if not args.bootstrap_native: print("STATIC VERIFICATION PASSED: syntax, lint, coverage, tests, and required environment checks are green."); print("Native artifact verification was not run. A production release requires --bootstrap-native."); return 0
-    if run([sys.executable, "scripts/reconcile_environment.py", "--project-root", str(ROOT), "--ensure-llamacpp"]): print("RELEASE VERIFICATION FAILED: llama.cpp-bootstrap"); print("Platform:", platform.platform()); return 2
+    if failures:
+        _write_release_report(static_failures=failures, native_requested=args.bootstrap_native, native_rc=2)
+        print("RELEASE VERIFICATION FAILED:", ", ".join(failures))
+        print("Platform:", platform.platform())
+        return 2
+    if args.ui_probe:
+        NATIVE_EVIDENCE["ui_backend_connectivity"] = _ui_probe()
+    if not args.bootstrap_native:
+        _write_release_report(static_failures=failures, native_requested=False, native_rc=0)
+        print("STATIC VERIFICATION PASSED: syntax, lint, coverage, tests, and required environment checks are green.")
+        print("Native artifact verification was not run. A production release requires --bootstrap-native.")
+        return 0
+    if run([sys.executable, "scripts/reconcile_environment.py", "--project-root", str(ROOT), "--ensure-llamacpp"]):
+        _write_release_report(static_failures=["llama.cpp-bootstrap"], native_requested=True, native_rc=2)
+        print("RELEASE VERIFICATION FAILED: llama.cpp-bootstrap")
+        print("Platform:", platform.platform())
+        return 2
     print("native export prerequisites are green")
-    if _native_smoke(verify_ollama=args.verify_ollama): print("RELEASE VERIFICATION FAILED: native export/inference"); print("Platform:", platform.platform()); return 2
-    print("RELEASE VERIFICATION PASSED: syntax, lint, coverage, tests, doctor, network-free native export, export cards, GGUF integrity, and inference are green."); return 0
+    native_rc = _native_smoke(verify_ollama=args.verify_ollama)
+    if native_rc:
+        _write_release_report(static_failures=["native export/inference"], native_requested=True, native_rc=native_rc)
+        print("RELEASE VERIFICATION FAILED: native export/inference")
+        print("Platform:", platform.platform())
+        return 2
+    if args.clean_clone:
+        with tempfile.TemporaryDirectory(prefix="model-lab-clean-clone-") as clone_dir:
+            clone = Path(clone_dir) / "ML-Framework"
+            remote = _git(ROOT, "config", "--get", "remote.origin.url") or "https://github.com/psfr4590-afk/ML-Framework.git"
+            clone_rc = run(["git", "clone", "--depth", "1", remote, str(clone)])
+            if clone_rc:
+                NATIVE_EVIDENCE["clean_clone"] = False
+            else:
+                doctor = subprocess.run([sys.executable, "bootstrap.py", "--doctor"], cwd=clone, check=False)
+                NATIVE_EVIDENCE["clean_clone"] = doctor.returncode == 0
+    if args.ui_probe and not NATIVE_EVIDENCE.get("ui_backend_connectivity"):
+        failures.append("ui-backend")
+    NATIVE_EVIDENCE["export"] = True
+    NATIVE_EVIDENCE["inference"] = True
+    rc = _write_release_report(static_failures=failures, native_requested=True, native_rc=native_rc)
+    if rc:
+        print("RELEASE VERIFICATION FAILED: RC report contains a required non-PASS check.")
+        return 2
+    print("RELEASE VERIFICATION PASSED: ML-FRAMEWORK RC report is green.")
+    return 0
 
 
 if __name__ == "__main__": raise SystemExit(main())
