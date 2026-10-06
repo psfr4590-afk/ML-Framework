@@ -187,11 +187,14 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
 def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None) -> None:
     started = retrieval_started_at or datetime.now(timezone.utc).isoformat()
     files = {name: {"path": str(value.relative_to(PROJECT_ROOT)), "sha256": _file_hash(value)} for name, value in source_paths.items()}
+    definition_hash = _hash_value({name: value.get("sha256") for name, value in files.items()})
     manifest = {
         "schema": 2,
+        "run_id": cfg.get("_run_id"),
         "dataset_group": selected_group_id or "all",
         "retrieval_started_at": started,
         "retrieval_completed_at": retrieval_completed_at,
+        "source_definition_sha256": definition_hash,
         "source_definition_files": files,
         "sources": _manifest_sources(cfg, source_paths, selected_group_id),
         "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
