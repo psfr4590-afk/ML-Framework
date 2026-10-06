@@ -277,12 +277,25 @@ class ExperimentDB:
         if not dataset_id:
             return
         report = manifest.get("dataset_report") or {}
+        report_path = self._resolve_evidence_path(str(report.get("path", ""))) if report.get("path") else self.path.parent / "runs" / run_id / "dataset_report.json"
+        report_payload: dict[str, Any] = {}
+        if report_path.is_file():
+            try:
+                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                report_payload = {}
+        dataset_stats = report_payload.get("dataset") if isinstance(report_payload.get("dataset"), dict) else {}
         self.conn.execute(
             "INSERT INTO datasets(id,run_id,dataset_group,manifest_sha256,document_count,token_count,train_tokens,validation_tokens) "
-            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dataset_group=excluded.dataset_group,manifest_sha256=excluded.manifest_sha256",
+            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dataset_group=excluded.dataset_group,manifest_sha256=excluded.manifest_sha256,"
+            "document_count=excluded.document_count,token_count=excluded.token_count,train_tokens=excluded.train_tokens,validation_tokens=excluded.validation_tokens",
             (dataset_id, run_id, identity.get("requested_group") or identity.get("group_id"),
-             report.get("sha256"), None, None, None, None),
+             report.get("sha256"), _as_int(dataset_stats.get("final_docs") or dataset_stats.get("crawled")),
+             _as_int(dataset_stats.get("tokens")), _as_int(dataset_stats.get("train_tokens")),
+             _as_int(dataset_stats.get("validation_tokens"))),
         )
+        if isinstance(report_payload.get("sources"), list):
+            self._sync_sources(run_id, report_payload["sources"], {"dataset_id": dataset_id})
 
     def _sync_sources(self, run_id: str, records: list[Any], identity: dict[str, Any]) -> None:
         dataset_id = str(identity.get("dataset_id") or "")
