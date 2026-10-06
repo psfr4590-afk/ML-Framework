@@ -111,10 +111,6 @@ def _implementation_sha256(stage: str) -> str:
 
 def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
     crawl = cfg.get("crawl", {})
-    configured_path = cfg.get("_pipeline_config_path")
-    pipeline_config = Path(configured_path) if configured_path else root / "config" / "pipeline_config.yaml"
-    if not pipeline_config.is_absolute():
-        pipeline_config = root / pipeline_config
     paths = {
         "source_weights": root / str(crawl.get("source_weights_file", "config/source_weights.yaml")),
         "dataset_groups": root / str(crawl.get("dataset_groups_file", "config/dataset_groups.yaml")),
