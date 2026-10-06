@@ -50,6 +50,7 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
     paths = {
         "Source manifest": source_manifest,
         "Weighted manifest": weighted_manifest,
+        "Weighted artifact": scratch / "04_weighted.jsonl",
         "Tokenizer manifest": tokenizer_manifest,
         "Tokenizer": tokenizer,
         "Shard manifest": shard_manifest,
@@ -65,7 +66,7 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
     tokenizer_meta = load_json(tokenizer_manifest)
     shard = load_json(shard_manifest)
 
-    weighted_ok = weighted.get("sha256") == sha256_file(scratch / "04_weighted.jsonl")
+    weighted_ok = weighted.get("sha256") == sha256_file(scratch / "04_weighted.jsonl") if (scratch / "04_weighted.jsonl").is_file() else False
     tokenizer_ok = tokenizer_meta.get("sha256") == sha256_file(tokenizer)
     shard_files_ok = True
     for item in shard.get("files", []):
