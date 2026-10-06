@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Deterministic production verification for Model Lab."""
+"""Deterministic production verification for Model Lab.
+
+The native gate runs a bounded, network-free release fixture before native inference.
+"""
 from __future__ import annotations
 
 import argparse
