@@ -222,7 +222,7 @@ def recommend_training_profile(
         batch_size=base.batch_size, grad_accum_steps=base.grad_accum_steps,
         eval_batches=base.eval_batches, eval_every_steps=base.eval_every_steps,
         checkpoint_every_steps=base.checkpoint_every_steps, precision=base.precision,
-        reason=reason if isinstance(reason, str) else "; ".join(reasons),
+        reason="; ".join(reasons),
         recommended_steps=steps, estimated_hours=hours,
         decision_reasons=tuple(reasons),
     )
