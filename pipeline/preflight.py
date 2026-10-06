@@ -16,7 +16,7 @@ from typing import Any
 
 import torch
 
-from pipeline.model_sizer import HardwareProfile, capability_candidates
+from pipeline.model_sizer import HardwareProfile
 from pipeline.shardwriter.shard_writer import ShardDataLoader
 from pipeline.trainer.model import LlamaModel, ModelConfig
 
