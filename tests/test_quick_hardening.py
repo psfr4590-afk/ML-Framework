@@ -54,6 +54,7 @@ def test_source_manifest_has_required_source_metadata(tmp_path):
     data = json.loads(target.read_text(encoding="utf-8"))
     assert data["retrieval_started_at"]
     assert data["source_definition_files"]
+    assert "pipeline_config" not in data["source_definition_files"]
     for source in data["sources"]:
         assert {"kind", "identifier", "revision", "license", "raw_source_sha256"} <= set(source)
 
