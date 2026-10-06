@@ -132,10 +132,11 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
         ("Shard lineage", shard, "shard_config_sha256"),
     )
     for name, manifest, key in stage_pairs:
-        stage_ids = (manifest.get("provenance") or {}).get("config_identities") or {}
-        ok = bool(identities.get(key)) and stage_ids.get(key) == identities.get(key)
+        stage_prov = manifest.get("provenance") or {}
+        stage_ids = stage_prov.get("config_identities") or {}
+        ok = bool(identities.get(key)) and stage_ids.get(key) == identities.get(key) and stage_prov.get("run_id") == cp.get("run_id")
         checks.append(result(name, "PASS" if ok else "FAIL",
-                             f"{key}={stage_ids.get(key)}"))
+                             f"{key}={stage_ids.get(key)} run_id={stage_prov.get('run_id')}"))
 
     source_ok = cp.get("source_manifest_sha256") == sha256_file(source_manifest)
     shard_ok = cp.get("shard_manifest_sha256") == sha256_file(shard_manifest)
