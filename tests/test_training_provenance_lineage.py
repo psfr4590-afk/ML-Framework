@@ -42,6 +42,20 @@ def test_export_provenance_rejects_source_manifest_replacement(tmp_path):
     output = tmp_path / "output"; (output / "shards").mkdir(parents=True); (output / "tokenizer").mkdir(parents=True); (tmp_path / "scratch").mkdir(); source = tmp_path / "source_manifest.json"; _source_manifest(source)
     for path, payload in ((output / "shards" / "shards.manifest.json", {"provenance": {"pipeline_config_sha256": "a"}}), (output / "tokenizer" / "tokenizer.json.manifest.json", {"provenance": {"pipeline_config_sha256": "a"}}), (tmp_path / "scratch" / "04_weighted.jsonl.manifest.json", {"provenance": {"pipeline_config_sha256": "a"}})):
         path.write_text(json.dumps(payload), encoding="utf-8")
-    provenance = {"schema": 2, "pipeline_config_sha256": "a", "train_config_sha256": "b", "model_config_sha256": "c", "shard_manifest_sha256": _sha256(output / "shards" / "shards.manifest.json"), "source_manifest_sha256": "wrong", "seed": 42}
+    provenance = {
+        "schema": 3,
+        "run_id": "fixture",
+        "config_identities": {
+            "dataset_config_sha256": "d",
+            "tokenizer_config_sha256": "t",
+            "shard_config_sha256": "s",
+            "source_definition_sha256": "x",
+        },
+        "train_config_sha256": "b",
+        "model_config_sha256": "c",
+        "shard_manifest_sha256": _sha256(output / "shards" / "shards.manifest.json"),
+        "source_manifest_sha256": "wrong",
+        "seed": 42,
+    }
     with pytest.raises(RuntimeError, match="source-manifest identity"):
         _enforce_training_provenance(output, {"provenance": provenance, "model_cfg": {"vocab_size": 8}})
