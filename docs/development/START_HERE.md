@@ -54,6 +54,43 @@ python3 run_pipeline.py --list-stages
 python3 run_pipeline.py --list-groups
 ```
 
+## Clone-and-run path
+
+The final deployment phase exposes one stable command surface:
+
+```text
+mlframework doctor
+mlframework smoke
+mlframework dataset
+mlframework train
+mlframework evaluate
+mlframework export
+mlframework infer
+mlframework status
+mlframework runs
+```
+
+From a fresh clone:
+
+```bash
+git clone https://github.com/psfr4590-afk/ML-Framework.git
+cd ML-Framework
+python3 bootstrap.py --install
+python3 -m pip install -e .
+mlframework doctor
+mlframework smoke
+```
+
+On Windows PowerShell, use `python` instead of `python3`. Bootstrap now auto-selects the CPU or CUDA PyTorch wheel from detected NVIDIA hardware unless an explicit `--torch-channel` override is supplied.
+
+The CLI resolves all repository paths from its installed entry point. It does not require a developer-specific absolute path or manual YAML edits for the starter workflow.
+
+```text
+doctor → smoke → dataset → train → evaluate → export → infer
+```
+
+The doctor is a preflight, not a claim that generated datasets or checkpoints already exist. Its Dataset and Tokenizer checks validate that the clean-clone contracts are present. llama.cpp is allowed to be a warning before native export; `mlframework export` bootstraps the pinned native dependency.
+
 ## What happens during a run
 
 The normal pipeline is intentionally linear:
