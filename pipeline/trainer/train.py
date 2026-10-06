@@ -216,9 +216,14 @@ def load_checkpoint(path: Path, model: LlamaModel, optimizer: Optional[torch.opt
     try: ckpt = torch.load(path, map_location=device or "cpu", weights_only=False)
     except TypeError: ckpt = torch.load(path, map_location=device or "cpu")
     if not isinstance(ckpt, dict) or "model" not in ckpt or "step" not in ckpt: raise RuntimeError(f"Checkpoint schema invalid: {path}")
+    if int(ckpt.get("schema", 0)) < 4: raise RuntimeError(f"Checkpoint schema too old for deterministic resume: {path}")
     model.load_state_dict(ckpt["model"])
-    if optimizer is not None and "optimizer" in ckpt: optimizer.load_state_dict(ckpt["optimizer"])
-    if scaler is not None and "scaler" in ckpt: scaler.load_state_dict(ckpt["scaler"])
+    if optimizer is not None:
+        if "optimizer" not in ckpt: raise RuntimeError("Checkpoint has no optimizer state; refusing resume")
+        optimizer.load_state_dict(ckpt["optimizer"])
+    if scaler is not None:
+        if "scaler" not in ckpt: raise RuntimeError("Checkpoint has no scaler state; refusing resume")
+        scaler.load_state_dict(ckpt["scaler"])
     loader_state = ckpt.get("loader_state") or {}
     if train_loader is not None:
         if not loader_state.get("train"): raise RuntimeError("Checkpoint has no deterministic train loader state; refusing resume")
@@ -239,6 +244,32 @@ def latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
             if stem.startswith("ckpt_") and stem[5:].isdigit(): numbered.append((int(stem[5:]), path))
     numbered.sort(key=lambda item: item[0])
     return numbered[-1][1] if numbered else None
+
+
+def checkpoint_metadata(path: Path) -> dict:
+    mp = path.with_name(path.name + ".manifest.json")
+    if not mp.is_file(): raise RuntimeError(f"Checkpoint integrity manifest missing: {mp}")
+    meta = json.loads(mp.read_text(encoding="utf-8"))
+    if meta.get("kind") != "checkpoint": raise RuntimeError(f"Invalid checkpoint manifest: {mp}")
+    if int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path):
+        raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
+    return meta
+
+
+def best_checkpoint(ckpt_dir: Path) -> Optional[Path]:
+    path = ckpt_dir / "ckpt_best.pt"
+    if not path.is_file() or not path.with_name(path.name + ".manifest.json").is_file(): return None
+    meta = checkpoint_metadata(path)
+    return path if meta.get("checkpoint_kind") == "best" and meta.get("best_step") is not None else None
+
+
+def select_checkpoint(ckpt_dir: Path, kind: str = "latest") -> Optional[Path]:
+    if kind == "latest": return latest_checkpoint(ckpt_dir)
+    if kind == "best": return best_checkpoint(ckpt_dir)
+    if kind == "final":
+        path = ckpt_dir / "ckpt_final.pt"
+        return path if path.is_file() and path.with_name(path.name + ".manifest.json").is_file() else None
+    raise ValueError(f"Unknown checkpoint selection kind: {kind!r}")
 
 
 class Trainer:
@@ -313,4 +344,4 @@ class Trainer:
         for old in checkpoints[:-keep]: old.unlink(missing_ok=True); old.with_name(old.name + ".manifest.json").unlink(missing_ok=True)
 
 
-__all__ = ["Trainer", "cosine_lr", "save_checkpoint", "load_checkpoint", "latest_checkpoint"]
+__all__ = ["Trainer", "cosine_lr", "save_checkpoint", "load_checkpoint", "checkpoint_metadata", "latest_checkpoint", "best_checkpoint", "select_checkpoint"]
