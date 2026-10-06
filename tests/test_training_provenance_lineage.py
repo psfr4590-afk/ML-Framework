@@ -117,9 +117,8 @@ def test_export_accepts_independent_stage_config_identities_without_pipeline_has
     shard_manifest.write_text(json.dumps({
         "schema": 4,
         "files": [],
-        "provenance": identities | {
+        "provenance": {"config_identities": identities | {"pipeline_config_sha256": "historical-" + "c" * 10},
             "run_id": "fixture",
-            "pipeline_config_sha256": "historical-" + "c" * 10,
             "tokenizer_sha256": _sha256(tokenizer),
         },
     }), encoding="utf-8")
