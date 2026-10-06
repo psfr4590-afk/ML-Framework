@@ -76,7 +76,7 @@ def test_dataset_session_config_binds_to_canonical_production_groups():
 def test_dataset_profiles_schema2_bind_numeric_ids_to_canonical_groups():
     path = ROOT / "config" / "dataset_profiles.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert data["schema"] == 2
+    assert data["schema"] == 3
     profiles = data["dataset_profiles"]
     assert len(profiles) == 10
     assert [item["dataset_id"] for item in profiles] == list(range(1, 11))
