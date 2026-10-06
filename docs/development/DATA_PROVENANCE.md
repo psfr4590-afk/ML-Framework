@@ -4,7 +4,7 @@ Model Lab can technically collect and transform data, but the software cannot gr
 
 ## What the pipeline records
 
-Every stage writes an integrity manifest. The manifest chain ties an artifact to its input hash, pipeline configuration hash, stage, and stage-specific configuration or source metadata. This is intended to prevent an artifact produced from one corpus/configuration from being silently reused as if it came from another.
+Every stage writes an integrity manifest. New Phase 1 manifests carry a run identity, independent dataset/tokenizer/shard/training/model configuration identities, implementation identity, input hashes, and explicit parent artifact relationships. The historical pipeline configuration hash is retained as legacy evidence, not as a universal identity. This prevents an artifact produced from one corpus/configuration from being silently reused as if it came from another.
 
 For a production dataset, retain a source manifest containing at least:
 
@@ -16,13 +16,13 @@ For a production dataset, retain a source manifest containing at least:
 - attribution requirements
 - any operator approval or restriction notes
 - raw-source artifact SHA-256
-- the Git commit and pipeline configuration used to process it
+- the Git commit, source-definition configuration identity, and exact configuration snapshot used to process it
 
 ## Export cards
 
 Every successful GGUF export now emits two auditable Markdown artifacts beside `export_manifest.json`:
 
-- `DATASET_CARD.md` — records the dataset processing lineage, available stage counts, tokenizer/shard hashes, pipeline configuration fingerprint, Git revision, and the boundary between technical provenance and legal rights.
+- `DATASET_CARD.md` — records the dataset processing lineage, available stage counts, tokenizer/shard hashes, independent configuration identities, and source-definition fingerprint, Git revision, and the boundary between technical provenance and legal rights.
 - `MODEL_CARD.md` — records model/export configuration, checkpoint and training provenance, seed where available, GGUF hashes, llama.cpp revision, and explicit evaluation/safety limitations.
 
 The generated cards are referenced and SHA-256 protected by `export_manifest.json`. Repository-level starting templates are maintained at `docs/templates/DATASET_CARD.md` and `docs/templates/MODEL_CARD.md`.
