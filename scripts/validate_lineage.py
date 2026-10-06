@@ -126,6 +126,10 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
         return checks, 2
 
     identities = cp.get("config_identities") or {}
+    snapshots = cp.get("config_snapshots") or {}
+    snapshots_ok = all((root / str(value)).is_file() for value in snapshots.values()) if snapshots else False
+    checks.append(result("Configuration snapshots", "PASS" if snapshots_ok else "FAIL",
+                         f"{len(snapshots)} immutable snapshot references"))
     stage_pairs = (
         ("Dataset lineage", weighted, "dataset_config_sha256"),
         ("Tokenizer lineage", tokenizer_meta, "tokenizer_config_sha256"),
