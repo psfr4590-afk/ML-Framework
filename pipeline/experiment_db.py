@@ -574,6 +574,16 @@ class ExperimentDB:
             "stages": [dict(r) for r in self.conn.execute("SELECT * FROM stages WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
             "artifacts": [dict(r) for r in self.conn.execute("SELECT * FROM artifacts WHERE run_id=? ORDER BY stage_name,path", (run_id,)).fetchall()],
             "configs": [dict(r) for r in self.conn.execute("SELECT * FROM configs WHERE run_id=? ORDER BY config_type", (run_id,)).fetchall()],
+            "sources": [dict(r) for r in self.conn.execute(
+                "SELECT s.*,ss.requests,ss.successes,ss.failures,ss.http_2xx,ss.http_4xx,ss.http_5xx,ss.documents,ss.retries,ss.duration_seconds "
+                "FROM sources s LEFT JOIN source_stats ss ON ss.source_id=s.id WHERE s.dataset_id=(SELECT id FROM datasets WHERE run_id=? LIMIT 1) ORDER BY s.id",
+                (run_id,)).fetchall()],
+            "checkpoints": [dict(r) for r in self.conn.execute("SELECT * FROM checkpoints WHERE run_id=? ORDER BY step", (run_id,)).fetchall()],
+            "metrics": [dict(r) for r in self.conn.execute("SELECT * FROM metrics WHERE run_id=? ORDER BY step,metric_name", (run_id,)).fetchall()],
+            "evaluations": [dict(r) for r in self.conn.execute("SELECT * FROM evaluations WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
+            "runtime_estimates": [dict(r) for r in self.conn.execute("SELECT * FROM runtime_estimates WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
+            "warnings": [dict(r) for r in self.conn.execute("SELECT * FROM warnings WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
+            "errors": [dict(r) for r in self.conn.execute("SELECT * FROM errors WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
         }
 
 
