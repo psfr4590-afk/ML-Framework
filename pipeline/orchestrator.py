@@ -15,6 +15,7 @@ import yaml
 from pipeline.config_validation import validate_config
 from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, write_manifest
 from pipeline.types import Document
+from pipeline.provenance import artifact_id, config_identities, new_run_id, snapshot_configs
 from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLookup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -276,6 +277,9 @@ class Pipeline:
         self.cfg.setdefault("train", {})["shard_dir"] = str(self._out / "shards")
         self.cfg.setdefault("export", {})["llamacpp_dir"] = str(PROJECT_ROOT / self.cfg.get("export", {}).get("llamacpp_dir", "llama.cpp"))
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
+        self.cfg["_run_id"] = new_run_id()
+        self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
+        self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
         self._resume = bool(self.cfg["pipeline"].get("resume", True)) if resume is None else bool(resume)
         self.cfg.setdefault("train", {})["resume"] = self._resume
         self._weights_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("source_weights_file", "config/source_weights.yaml")
@@ -290,11 +294,24 @@ class Pipeline:
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
     def _provenance(self, stage: str, input_path: Path | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        data: dict[str, Any] = {"schema": 2, "stage": stage, "pipeline_config_sha256": self._config_sha256, "source_definition_sha256": _hash_value(self._source_definition_hashes), "implementation_sha256": _implementation_sha256(stage)}
+        data: dict[str, Any] = {
+            "schema": 3,
+            "stage": stage,
+            "run_id": self.cfg["_run_id"],
+            "artifact_id": None,
+            "pipeline_config_sha256": self._config_sha256,
+            "config_identities": dict(self._config_identities),
+            "config_snapshots": dict(self._config_snapshots),
+            "implementation_sha256": _implementation_sha256(stage),
+        }
         if input_path is not None:
             data["input_sha256"] = sha256_file(input_path)
+            input_manifest = Path(str(input_path) + ".manifest.json")
+            if input_manifest.is_file():
+                data["parent_artifact_ids"] = [artifact_id("manifest", sha256_file(input_manifest))]
         if extra:
             data.update(extra)
+        data["artifact_id"] = artifact_id(stage, _hash_value(data))
         return data
 
     def _should_skip(self, path: Path, stage: str, provenance: dict[str, Any]) -> bool:
