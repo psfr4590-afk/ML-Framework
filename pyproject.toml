@@ -34,7 +34,7 @@ include = ["pipeline*", "command_center*", "ui*"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-exclude = [".git", ".pytest_cache", ".ruff_cache", ".runtime", "__pycache__", "datasets", "output", "scratch", "ui/screens/__init__.py.bak", "ui/screens/__init__.py.bak.20260817_094313"]
+exclude = [".git", ".pytest_cache", ".ruff_cache", ".runtime", "__pycache__", "datasets", "output", "scratch"]
 
 [tool.ruff.lint]
 select = ["E4", "F"]
