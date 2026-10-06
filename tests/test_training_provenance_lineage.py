@@ -56,6 +56,10 @@ def test_export_provenance_rejects_source_manifest_replacement(tmp_path):
         "shard_manifest_sha256": _sha256(output / "shards" / "shards.manifest.json"),
         "source_manifest_sha256": "wrong",
         "seed": 42,
+        "parent_artifact_ids": [],
+        "tokenizer_artifact_id": "fixture",
+        "dataset_artifact_id": "fixture",
+        "source_artifact_id": "fixture",
     }
     with pytest.raises(RuntimeError, match="source-manifest identity"):
         _enforce_training_provenance(output, {"provenance": provenance, "model_cfg": {"vocab_size": 8}})
