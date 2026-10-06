@@ -125,17 +125,40 @@ def _run_snapshot(run_id: str | None = None) -> dict:
         latest.setdefault(row["metric_name"], row)
     checkpoints = _rows(db, "SELECT * FROM checkpoints WHERE run_id=? ORDER BY step DESC", (rid,))
     artifacts = _rows(db, "SELECT id,stage_name,path,sha256,size_bytes,created_at FROM artifacts WHERE run_id=? ORDER BY stage_name,path", (rid,))
-    configs = _rows(db, "SELECT config_type,sha256,path FROM configs WHERE run_id=? ORDER BY config_type", (rid,))
+    configs = _rows(db, "SELECT config_type,sha256,path,snapshot_json FROM configs WHERE run_id=? ORDER BY config_type", (rid,))
+    train_config = {}
+    for cfg in configs:
+        if cfg.get("config_type") in {"train", "training"}:
+            try:
+                train_config = json.loads(cfg.get("snapshot_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                train_config = {}
     sources = _rows(db, "SELECT s.id,s.kind,s.identifier,s.revision,s.license,s.status,ss.requests,ss.successes,ss.failures,ss.documents,ss.retries,ss.duration_seconds FROM sources s LEFT JOIN source_stats ss ON ss.source_id=s.id WHERE s.dataset_id=? ORDER BY s.id", (dataset["id"],)) if dataset.get("id") else []
     warnings = _rows(db, "SELECT code,message,created_at FROM warnings WHERE run_id=? ORDER BY id DESC", (rid,))
     errors = _rows(db, "SELECT code,message,exception_type,created_at FROM errors WHERE run_id=? ORDER BY id DESC", (rid,))
     runtime = _rows(db, "SELECT * FROM runtime_estimates WHERE run_id=? ORDER BY id DESC", (rid,))
     step = next((int(r["step"]) for r in metrics if r["step"] is not None), None)
     total_steps = next((int(latest[k]["metric_value"]) for k in ("total_steps", "train.total_steps") if k in latest), None)
+    if total_steps is None:
+        raw_total = train_config.get("total_steps")
+        if raw_total is not None:
+            try:
+                total_steps = int(raw_total)
+            except (TypeError, ValueError):
+                total_steps = None
     progress = step / total_steps if step is not None and total_steps else None
     def metric_value(*names):
         return next((latest[n]["metric_value"] for n in names if n in latest), None)
     train_runtime = next((r for r in runtime if r["estimate_type"] == "training"), {})
+    hardware_rows = _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,))
+    hardware = hardware_rows[0] if hardware_rows else {}
+    if hardware.get("snapshot_json"):
+        try:
+            snapshot = json.loads(hardware["snapshot_json"])
+            if isinstance(snapshot, dict):
+                hardware["gpu_utilization"] = snapshot.get("gpu_utilization_percent", snapshot.get("gpu_utilization"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
     return {
         "run": run,
         "stage": stages,
@@ -149,7 +172,7 @@ def _run_snapshot(run_id: str | None = None) -> dict:
             "actual_seconds": train_runtime.get("actual_seconds"),
         },
         "dataset": {**dataset, "sources": sources},
-        "hardware": _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,))[0] if _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,)) else {},
+        "hardware": hardware,
         "provenance": {
             "configuration": bool(configs),
             "dataset_lineage": bool(dataset.get("manifest_sha256")),
