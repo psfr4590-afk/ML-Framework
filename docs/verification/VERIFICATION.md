@@ -1,7 +1,36 @@
 # Model Lab Verification
 
-Model Lab verification is divided into automated contract tests, Python compilation, target-machine environment checks, and human-visible desktop smoke checks.
+Model Lab verification is divided into automated contract tests, Python compilation, non-destructive environment checks, native artifact verification, and human-visible desktop smoke checks.
 
-Run `python -m pytest -q` for the automated suite. On the target Windows machine, also run `python -m pytest -q .\tests\model_lab\test_machine_environment.py`.
+## Static verification
 
-The release procedure is documented in `docs/verification/VERIFICATION_CHECKLIST.md` and `scripts/run_release_verification.ps1`.
+Run the repository-side gate:
+
+```bash
+python scripts/verify_release.py
+```
+
+This runs compilation, Ruff, pytest with coverage reporting, the project/runtime doctor, and the security gate. It does not claim native GGUF export or inference.
+
+## Full native verification
+
+Run the native gate on the machine intended to perform export/inference:
+
+```bash
+python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
+```
+
+The native gate exercises the deterministic local fixture, export integrity, native llama.cpp inference, UI/backend connectivity, and the documented clean-clone path. Its machine-readable result is written to `release-evidence/release_report.json`.
+
+## Windows checks
+
+On the target Windows machine:
+
+```powershell
+python -m pytest -q .\\tests\\model_lab\\test_machine_environment.py
+powershell -ExecutionPolicy Bypass -File .\\scripts\\run_release_verification.ps1 -IncludeMachineChecks
+```
+
+Machine-specific evidence must not be presented as a universal guarantee for other hardware.
+
+The release checklist is maintained in `docs/release/RELEASE_CHECKLIST.md` and the traceability checklist in `docs/verification/VERIFICATION_CHECKLIST.md`.
