@@ -77,7 +77,7 @@ def snapshot_configs(root: Path, cfg: dict[str, Any], identities: dict[str, Any]
         path = directory / f"{name}-{sha}.json"
         if not path.exists():
             path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        snapshots[name] = str(path)
+        snapshots[name] = str(path.relative_to(root)).replace("\\", "/")
 
     if config_path is not None and config_path.is_file():
         legacy_sha = identities.get("pipeline_config_sha256")
@@ -85,5 +85,5 @@ def snapshot_configs(root: Path, cfg: dict[str, Any], identities: dict[str, Any]
             path = directory / f"pipeline-legacy-{legacy_sha}.yaml"
             if not path.exists():
                 path.write_bytes(config_path.read_bytes())
-            snapshots["pipeline_legacy"] = str(path)
+            snapshots["pipeline_legacy"] = str(path.relative_to(root)).replace("\\", "/")
     return snapshots
