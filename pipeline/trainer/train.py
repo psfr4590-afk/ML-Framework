@@ -299,36 +299,148 @@ class Trainer:
         if max_seq_len := self.cfg.get("shard", {}).get("sequence_length"):
             if seq_len > int(max_seq_len): raise RuntimeError(f"Training seq_len={seq_len} exceeds shard sequence_length={int(max_seq_len)}; rebuild shards or enable a compatible auto-size profile")
         train_loader = ShardDataLoader(shard_dir, "train", seq_len, dtype=dtype, seed=seed); val_loader = ShardDataLoader(shard_dir, "val", seq_len, dtype=dtype, seed=seed); provenance = _provenance(self.cfg, model_cfg, shard_dir, train_cfg=t)
-        start_step, best_val = 0, float("inf")
+        start_step, best_val, best_step = 0, float("inf"), None
+        tokens_processed = 0
+        evaluation_duration = 0.0
+        checkpoint_duration = 0.0
         if bool(t.get("resume", True)):
             ckpt = latest_checkpoint(self.ckpt_dir)
             if ckpt:
-                start_step = load_checkpoint(ckpt, model, optimizer, scaler, device, expected_provenance=provenance, train_loader=train_loader, val_loader=val_loader)
-                try: payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-                except TypeError: payload = torch.load(ckpt, map_location="cpu")
-                best_val = float(payload.get("val_loss", best_val))
-        metrics_path = self.out_dir / "logs" / "metrics.jsonl"; metrics = open(metrics_path, "a", encoding="utf-8"); model.train(); optimizer.zero_grad(set_to_none=True); start_time = time.time(); step = start_step
+                start_step = load_checkpoint(
+                    ckpt, model, optimizer, scaler, device,
+                    expected_provenance=provenance,
+                    train_loader=train_loader, val_loader=val_loader,
+                )
+                try:
+                    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+                except TypeError:
+                    payload = torch.load(ckpt, map_location="cpu")
+                best_val = float(payload.get("best_val_loss", payload.get("val_loss", best_val)))
+                best_step = payload.get("best_step")
+                saved_meta = payload.get("training_metadata", {})
+                tokens_processed = int(saved_meta.get(
+                    "tokens_processed", start_step * batch_size * grad_accum * seq_len
+                ))
+                evaluation_duration = float(saved_meta.get("evaluation_duration_seconds", 0.0))
+                checkpoint_duration = float(saved_meta.get("checkpoint_duration_seconds", 0.0))
+        metrics_path = self.out_dir / "logs" / "metrics.jsonl"
+        metrics = open(metrics_path, "a", encoding="utf-8")
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        start_time = time.time()
+        step = start_step
         try:
             while step < total_steps:
                 lr = cosine_lr(step, warmup_steps, float(t.get("lr_max", 3e-4)), float(t.get("lr_min", 3e-5)), total_steps)
-                for group in optimizer.param_groups: group["lr"] = lr
+                for group in optimizer.param_groups:
+                    group["lr"] = lr
                 accum_loss = 0.0
                 for _ in range(grad_accum):
-                    x, y = train_loader.next_batch(batch_size); x, y = x.to(device), y.to(device)
+                    x, y = train_loader.next_batch(batch_size)
+                    x, y = x.to(device), y.to(device)
                     with torch.autocast(device_type=device.type, dtype=self.amp_dtype, enabled=(device.type == "cuda")):
-                        _, loss = model(x, y); loss = loss / grad_accum
-                    scaler.scale(loss).backward(); accum_loss += loss.item()
-                scaler.unscale_(optimizer); grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip); scaler.step(optimizer); scaler.update(); optimizer.zero_grad(set_to_none=True); step += 1
+                        _, loss = model(x, y)
+                        loss = loss / grad_accum
+                    scaler.scale(loss).backward()
+                    accum_loss += loss.item()
+                scaler.unscale_(optimizer)
+                grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                step += 1
+                tokens_processed += batch_size * grad_accum * seq_len
                 if step % 10 == 0:
-                    elapsed = max(time.time() - start_time, 1e-6); tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed; metrics.write(json.dumps({"step": step, "train_loss": accum_loss, "lr": lr, "grad_norm": float(grad_norm), "tokens_per_sec": tok_s}) + "\n"); metrics.flush()
+                    elapsed = max(time.time() - start_time, 1e-6)
+                    tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed
+                    metrics.write(json.dumps({
+                        "step": step, "train_loss": accum_loss, "lr": lr,
+                        "grad_norm": float(grad_norm), "tokens_per_sec": tok_s
+                    }) + "\n")
+                    metrics.flush()
                 if step % eval_every == 0:
-                    val_loss = self._eval(model, val_loader, device, eval_batches, batch_size); metrics.write(json.dumps({"step": step, "val_loss": val_loss, "val_ppl": math.exp(min(val_loss, 20))}) + "\n"); metrics.flush(); model.train()
+                    eval_started = time.perf_counter()
+                    val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
+                    evaluation_duration += time.perf_counter() - eval_started
+                    metrics.write(json.dumps({
+                        "step": step, "val_loss": val_loss,
+                        "val_ppl": math.exp(min(val_loss, 20))
+                    }) + "\n")
+                    metrics.flush()
+                    model.train()
                     if val_loss < best_val:
-                        best_val = val_loss; save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="best", provenance=provenance, train_loader=train_loader, val_loader=val_loader)
+                        best_val = val_loss
+                        best_step = step
+                        save_started = time.perf_counter()
+                        save_checkpoint(
+                            model, optimizer, scaler, step, val_loss, t, self.ckpt_dir,
+                            tag="best", provenance=provenance,
+                            train_loader=train_loader, val_loader=val_loader,
+                            training_metadata=self._training_metadata(
+                                model, t, seed, step, total_steps, batch_size, grad_accum,
+                                seq_len, tokens_processed, start_time,
+                                evaluation_duration, checkpoint_duration
+                            ),
+                            best_step=best_step, best_val_loss=best_val,
+                        )
+                        checkpoint_duration += time.perf_counter() - save_started
                 if step % ckpt_every == 0:
-                    save_checkpoint(model, optimizer, scaler, step, best_val, t, self.ckpt_dir, provenance=provenance, train_loader=train_loader, val_loader=val_loader); self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
-            val_loss = self._eval(model, val_loader, device, eval_batches, batch_size); save_checkpoint(model, optimizer, scaler, step, val_loss, t, self.ckpt_dir, tag="final", provenance=provenance, train_loader=train_loader, val_loader=val_loader); return model, step
-        finally: metrics.close()
+                    save_started = time.perf_counter()
+                    save_checkpoint(
+                        model, optimizer, scaler, step, None, t, self.ckpt_dir,
+                        provenance=provenance, train_loader=train_loader, val_loader=val_loader,
+                        training_metadata=self._training_metadata(
+                            model, t, seed, step, total_steps, batch_size, grad_accum,
+                            seq_len, tokens_processed, start_time,
+                            evaluation_duration, checkpoint_duration
+                        ),
+                        best_step=best_step, best_val_loss=best_val,
+                    )
+                    checkpoint_duration += time.perf_counter() - save_started
+                    self._prune_checkpoints(self.ckpt_dir, keep=keep_checkpoints)
+            final_eval_started = time.perf_counter()
+            final_val_loss = self._eval(model, val_loader, device, eval_batches, batch_size)
+            evaluation_duration += time.perf_counter() - final_eval_started
+            save_started = time.perf_counter()
+            save_checkpoint(
+                model, optimizer, scaler, step, final_val_loss, t, self.ckpt_dir,
+                tag="final", provenance=provenance,
+                train_loader=train_loader, val_loader=val_loader,
+                training_metadata=self._training_metadata(
+                    model, t, seed, step, total_steps, batch_size, grad_accum,
+                    seq_len, tokens_processed, start_time,
+                    evaluation_duration, checkpoint_duration
+                ),
+                best_step=best_step, best_val_loss=best_val, final_step=step,
+            )
+            checkpoint_duration += time.perf_counter() - save_started
+            return model, step
+        finally:
+            metrics.close()
+
+    def _training_metadata(
+        self, model, t, seed, step, total_steps, batch_size, grad_accum,
+        seq_len, tokens_processed, start_time, evaluation_duration, checkpoint_duration
+    ) -> dict:
+        return {
+            "model_parameters": _model_parameter_count(model),
+            "architecture": str(t.get("model_preset", "117M")),
+            "sequence_length": int(seq_len),
+            "batch_size": int(batch_size),
+            "effective_batch_size": int(batch_size * grad_accum),
+            "gradient_accumulation": int(grad_accum),
+            "optimizer": "AdamW",
+            "lr": float(t.get("lr_max", 3e-4)),
+            "scheduler": "cosine",
+            "precision": "float16" if torch.cuda.is_available() else "float32",
+            "seed": int(seed),
+            "total_steps": int(total_steps),
+            "step": int(step),
+            "tokens_processed": int(tokens_processed),
+            "training_duration_seconds": max(0.0, time.time() - start_time),
+            "evaluation_duration_seconds": float(evaluation_duration),
+            "checkpoint_duration_seconds": float(checkpoint_duration),
+        }
 
     @torch.no_grad()
     def _eval(self, model, loader, device, n_batches, batch_size) -> float:
