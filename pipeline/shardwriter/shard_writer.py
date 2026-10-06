@@ -55,6 +55,8 @@ class ShardWriter:
             "shards_written": 0,
             "train_shards": 0,
             "val_shards": 0,
+            "train_docs": 0,
+            "val_docs": 0,
         }
 
     def _tokenize_doc(self, text: str) -> list[int]:
@@ -182,6 +184,7 @@ class ShardWriter:
                     shard_idx += 1
             if shard_buf:
                 self._write_shard(shard_buf, shard_idx, split)
+            self.stats["train_docs" if split == "train" else "val_docs"] = docs_in_split
             log.info("%s split: %d documents", split, docs_in_split)
 
         if not wrote_any:
