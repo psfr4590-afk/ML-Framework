@@ -20,12 +20,13 @@ dependencies = [
 
 [project.scripts]
 mlab = "run_pipeline:main"
+mlframework = "mlframework:main"
 mlab-command-center = "run_command_center:main"
 mlab-launch = "launch:main"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["run_pipeline", "run_command_center", "launch"]
+py-modules = ["run_pipeline", "run_command_center", "launch", "mlframework"]
 
 [tool.setuptools.packages.find]
 include = ["pipeline*", "command_center*", "ui*"]
