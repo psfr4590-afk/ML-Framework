@@ -36,7 +36,7 @@ export_manifest.json + cards → release evidence
 ### 1. Checkpoint Validation (`export_gguf.py:_enforce_training_provenance`)
 
 Before export, the system validates:
-- **Checkpoint provenance fields** (required): schema, pipeline_config_sha256, train_config_sha256, model_config_sha256, shard_manifest_sha256, source_manifest_sha256, seed
+- **Checkpoint provenance fields** (required): schema 3, run_id, independent configuration identities, train_config_sha256, model_config_sha256, shard_manifest_sha256, source_manifest_sha256, seed, and explicit upstream artifact IDs
 - **Artifact chain integrity**:
   - shard_manifest.json matches shard_manifest_sha256
   - tokenizer.json.manifest.json matches tokenizer metadata
