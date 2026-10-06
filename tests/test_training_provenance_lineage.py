@@ -59,3 +59,73 @@ def test_export_provenance_rejects_source_manifest_replacement(tmp_path):
     }
     with pytest.raises(RuntimeError, match="source-manifest identity"):
         _enforce_training_provenance(output, {"provenance": provenance, "model_cfg": {"vocab_size": 8}})
+
+
+def test_export_accepts_independent_stage_config_identities_without_pipeline_hash_equality(tmp_path):
+    import hashlib
+
+    output = tmp_path / "output"
+    (output / "shards").mkdir(parents=True)
+    (output / "tokenizer").mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    source = tmp_path / "source_manifest.json"
+    tokenizer = output / "tokenizer" / "tokenizer.json"
+    tokenizer.write_text(json.dumps({"model": {"vocab": {str(i): i for i in range(8)}}}), encoding="utf-8")
+
+    identities = {
+        "dataset_config_sha256": "d" * 64,
+        "tokenizer_config_sha256": "t" * 64,
+        "shard_config_sha256": "s" * 64,
+        "source_definition_sha256": hashlib.sha256(b"{}").hexdigest(),
+    }
+    source.write_text(json.dumps({
+        "schema": 2,
+        "run_id": "fixture",
+        "dataset_group": "fixture",
+        "retrieval_started_at": "t",
+        "retrieval_completed_at": "t",
+        "source_definition_files": {},
+        "sources": [{"kind": "local", "identifier": "fixture", "revision": "embedded", "license": "test", "raw_source_sha256": None, "dataset_group": "fixture"}],
+        "source_definition_sha256": identities["source_definition_sha256"],
+        "rights_note": "test",
+    }), encoding="utf-8")
+
+    def manifest(path: Path, provenance: dict):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        path.with_name(path.name + ".manifest.json").write_text(json.dumps({
+            "schema": 2, "kind": "fixture", "path": str(path), "size": path.stat().st_size,
+            "sha256": _sha256(path), "provenance": provenance,
+        }), encoding="utf-8")
+
+    manifest(scratch / "04_weighted.jsonl", {
+        "config_identities": identities | {"pipeline_config_sha256": "historical-" + "a" * 10},
+    })
+    manifest(output / "tokenizer" / "tokenizer.json", {
+        "config_identities": identities | {"pipeline_config_sha256": "historical-" + "b" * 10},
+    })
+    shard_manifest = output / "shards" / "shards.manifest.json"
+    shard_manifest.write_text(json.dumps({
+        "schema": 4,
+        "files": [],
+        "provenance": identities | {
+            "pipeline_config_sha256": "historical-" + "c" * 10,
+            "tokenizer_sha256": _sha256(tokenizer),
+        },
+    }), encoding="utf-8")
+
+    payload = {
+        "provenance": {
+            "schema": 3,
+            "run_id": "fixture",
+            "config_identities": identities,
+            "train_config_sha256": "b" * 64,
+            "model_config_sha256": "c" * 64,
+            "shard_manifest_sha256": _sha256(shard_manifest),
+            "source_manifest_sha256": _sha256(source),
+            "seed": 42,
+        },
+        "model_cfg": {"vocab_size": 8},
+    }
+    _enforce_training_provenance(output, payload)
