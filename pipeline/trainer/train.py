@@ -63,6 +63,12 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
     train_sha = stable_hash(effective_train_cfg)
     shard_manifest = Path(shard_dir) / "shards.manifest.json"
     shard_manifest_artifact_id = artifact_id("shard-manifest", sha256_file(shard_manifest))
+    tokenizer_manifest = Path(shard_dir).parent / "tokenizer" / "tokenizer.json.manifest.json"
+    weighted_manifest = Path(shard_dir).parent.parent / "scratch" / "04_weighted.jsonl.manifest.json"
+    source_manifest = Path(cfg.get("_source_manifest_path") or Path(shard_dir).parent.parent / "source_manifest.json")
+    tokenizer_artifact_id = artifact_id("tokenizer-manifest", sha256_file(tokenizer_manifest)) if tokenizer_manifest.is_file() else None
+    dataset_artifact_id = artifact_id("dataset-manifest", sha256_file(weighted_manifest)) if weighted_manifest.is_file() else None
+    source_artifact_id = artifact_id("source-manifest", sha256_file(source_manifest)) if source_manifest.is_file() else None
 
     provenance = {
         "schema": 3,
@@ -73,7 +79,10 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
         "shard_manifest_sha256": shard_sha,
         "source_manifest_sha256": source_sha,
         "seed": int(effective_train_cfg.get("seed", 42)),
-        "parent_artifact_ids": [shard_manifest_artifact_id],
+        "parent_artifact_ids": [x for x in (shard_manifest_artifact_id, tokenizer_artifact_id, dataset_artifact_id, source_artifact_id) if x],
+        "tokenizer_artifact_id": tokenizer_artifact_id,
+        "dataset_artifact_id": dataset_artifact_id,
+        "source_artifact_id": source_artifact_id,
     }
     if cfg.get("_pipeline_config_sha256"):
         provenance["pipeline_config_sha256"] = cfg["_pipeline_config_sha256"]
