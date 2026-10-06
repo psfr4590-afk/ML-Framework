@@ -309,6 +309,7 @@ class Pipeline:
             "run_id": self.cfg["_run_id"],
             "artifact_id": None,
             "pipeline_config_sha256": self._config_sha256,
+            "config_paths": {"pipeline": str(self._cfg_path.relative_to(PROJECT_ROOT)).replace("\\", "/")},
             "config_identities": dict(self._config_identities),
             "config_snapshots": dict(self._config_snapshots),
             "implementation_sha256": _implementation_sha256(stage),
