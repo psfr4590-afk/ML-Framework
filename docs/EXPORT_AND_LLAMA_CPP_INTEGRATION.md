@@ -1,6 +1,6 @@
-# Export and llama.cpp Integration
+# Export, llama.cpp, and Ollama Integration
 
-This document maps how Model Lab exports trained checkpoints to GGUF format and verifies them against the llama.cpp inference engine.
+This document maps the Phase 9 deployment chain: checkpoint → Hugging Face-compatible checkpoint → F16/Q4_K_M/Q5_K_M/Q8_0 GGUF → llama.cpp → Ollama.
 
 ## Architecture Overview
 
@@ -147,6 +147,8 @@ Writes `output/gguf/export_manifest.json`:
 
 ### 7. GGUF Inference Validation (`scripts/verify_gguf.py`)
 
+Phase 9 validates GGUF metadata before generation, including architecture, embedded context length, tokenizer metadata, and BOS/EOS/PAD special-token IDs when expected values are supplied. It also requests llama.cpp tensor validation before generation.
+
 **Input**: Final GGUF artifact and llama-cli executable
 
 **Execution**:
@@ -216,13 +218,18 @@ llama-cli -m model.gguf -p "Hello" -n 1 --single-turn --no-display-prompt --simp
 | **Inference test** | Single-token generation; proves model loads and can generate output |
 | **Export cards** | Auditable markdown; not used for verification, but retained as evidence |
 
+## Ollama Deployment Validation
+
+`scripts/verify_ollama.py` validates the exported GGUF through an external Ollama runtime. It creates a temporary model from the generated Modelfile, loads it, runs generation, and verifies `ollama show` succeeds. The full native release gate can run this for every quantization with `--verify-ollama`.
+
 ## Known Limitations
 
-1. **Inference test is minimal**: Single token on prompt "Hello" proves loading and generation, but not quality/convergence
+1. **Inference test is an execution gate**: It proves loading, tokenizer metadata, tensor integrity, context configuration, and generation. It does not prove quality or convergence
 2. **Quantization is lossy**: Q4_K_M reduces precision; users should test on their target tasks
 3. **Native gate is slow**: llama.cpp build can take 5–30 minutes depending on platform
 4. **Android/Termux**: Serialized build (single-threaded) may take even longer
-5. **Release evidence is platform-specific**: The native gate output includes platform, Python version, and build-time facts; final release may require re-runs on target platforms
+5. **Ollama is host-dependent**: Ollama verification requires a separately installed Ollama runtime and is intentionally an explicit deployment-gate option.
+6. **Release evidence is platform-specific**: The native gate output includes platform, Python version, and build-time facts; final release may require re-runs on target platforms
 
 ## Files and Entry Points
 
