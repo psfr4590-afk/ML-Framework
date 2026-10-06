@@ -1,6 +1,7 @@
 """Phase 10 CLI contract tests."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import mlframework
@@ -39,7 +40,7 @@ def test_default_gguf_prefers_q4_manifest(tmp_path, monkeypatch):
     gguf.parent.mkdir(parents=True)
     manifest = gguf.parent / "export_manifest.json"
     manifest.write_text(
-        '{"artifacts":{"Q4_K_M":{"artifact":{"path":"%s"}}}}' % gguf,
+        json.dumps({"artifacts": {"Q4_K_M": {"artifact": {"path": str(gguf)}}}}),
         encoding="utf-8",
     )
     assert mlframework._default_gguf() == gguf
