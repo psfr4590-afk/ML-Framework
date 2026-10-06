@@ -205,7 +205,7 @@ def recommend_training_profile(
     if hardware.gpu_memory_gb and hardware.gpu_memory_gb < 4:
         reasons.append("VRAM < 4 GB")
     if seq_len != base.seq_len:
-        reasons.append(f"sequence length capped to {seq_len} by shard geometry")
+        reasons.append(f"sequence length explicitly capped to {seq_len}")
     steps = max(1, int(configured_steps))
     tokens_per_step = base.batch_size * base.grad_accum_steps * seq_len
     if total_tokens is not None and total_tokens > 0:
@@ -228,4 +228,22 @@ def recommend_training_profile(
     )
 
 
-__all__ = ["HardwareProfile", "TrainingProfile", "profile_hardware", "estimate_total_tokens", "recommend_training_profile"]
+def capability_candidates(hardware: HardwareProfile) -> tuple[tuple[str, int], ...]:
+    """Return an expandable capability-probe matrix.
+
+    These are probe points, not claims about hardware limits. The preflight
+    benchmark determines which combinations actually work.
+    """
+    if not hardware.cuda_available or hardware.gpu_count == 0:
+        return (("85M", 256), ("85M", 512))
+    return (
+        ("85M", 128), ("85M", 256), ("85M", 512), ("85M", 768), ("85M", 1024),
+        ("117M", 256), ("117M", 512), ("117M", 768), ("117M", 1024),
+        ("360M", 256), ("360M", 512), ("360M", 768), ("360M", 1024),
+    )
+
+
+__all__ = [
+    "HardwareProfile", "TrainingProfile", "profile_hardware",
+    "estimate_total_tokens", "recommend_training_profile", "capability_candidates",
+]
