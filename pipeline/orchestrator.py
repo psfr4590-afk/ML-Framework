@@ -206,10 +206,10 @@ def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path],
 def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, expected_source_definition_paths: dict[str, Path] | None = None) -> bool:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        required = {"schema", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_files", "sources", "rights_note"}
+        required = {"schema", "run_id", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_sha256", "source_definition_files", "sources", "rights_note"}
         if not isinstance(data, dict) or not required <= set(data):
             return False
-        if int(data["schema"]) != 2 or not data["retrieval_started_at"] or not data["retrieval_completed_at"]:
+        if int(data["schema"]) != 2 or not data["run_id"] or not data["retrieval_started_at"] or not data["retrieval_completed_at"] or not data["source_definition_sha256"]:
             return False
         manifest_group = str(data["dataset_group"])
         if expected_group_id is not None and manifest_group != expected_group_id:
