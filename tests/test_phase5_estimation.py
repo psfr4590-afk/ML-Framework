@@ -107,7 +107,6 @@ def test_preflight_report_persists_benchmark_and_estimate(tmp_path):
 
 def test_trainer_blocks_training_when_preflight_fails(monkeypatch, tmp_path):
     import pytest
-    from pipeline import trainer as trainer_package
     from pipeline.trainer import train as train_module
     from pipeline.model_sizer import HardwareProfile
     from pipeline.preflight import PreflightResult
