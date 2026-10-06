@@ -14,6 +14,8 @@ from typing import Any
 
 from pipeline.experiment_db import ExperimentDB
 
+from pipeline.experiment_db import ExperimentDB
+
 STATES = {"PENDING", "RUNNING", "PASS", "WARN", "FAILED", "SKIPPED", "DEGRADED"}
 
 
@@ -179,6 +181,7 @@ class RunTracker:
         temporary = self.path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(self.manifest, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         os.replace(temporary, self.path)
+        self.db.sync_manifest(self.manifest)
         self.db.sync_manifest(self.manifest)
 
     def _record_paths(self, values: list[Path]) -> list[dict[str, Any]]:
