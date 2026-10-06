@@ -76,6 +76,7 @@ ML-Framework/
 - [Project State](docs/development/PROJECT_STATE.md)
 - [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md)
 - [Source of Truth](docs/development/SYNC_SOURCE_OF_TRUTH.md)
+- [SQLite Experiment Store](docs/development/EXPERIMENT_STORE.md)
 - [Release Checklist](docs/release/RELEASE_CHECKLIST.md)
 - [Release Readiness](docs/release/RELEASE_READINESS_PLAN.md)
 - [Release Verification](docs/release/RELEASE_VERIFICATION_REPORT.md)
