@@ -16,6 +16,7 @@ from pipeline.config_validation import validate_config
 from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, write_manifest
 from pipeline.types import Document
 from pipeline.provenance import artifact_id, config_identities, new_run_id, snapshot_configs
+from pipeline.run_tracking import RunTracker
 from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLookup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -300,6 +301,54 @@ class Pipeline:
             run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
         self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
         self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
+        dataset_meta = {}
+        if self._dataset_root is not None:
+            meta_path = self._dataset_root / "dataset.json"
+            if meta_path.is_file():
+                dataset_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        dataset_identity = {
+            "dataset_id": f"dataset_{self.dataset_id:03d}" if self.dataset_id is not None else f"dataset:{self._config_identities['dataset_config_sha256'][:16]}",
+            "group_id": dataset_meta.get("group_id"),
+            "catalog_profile": dataset_meta.get("profile", {}),
+            "config_identity": self._config_identities.get("dataset_config_sha256"),
+        }
+        experiment_seed = {
+            "dataset_id": dataset_identity["dataset_id"],
+            "dataset_config_sha256": self._config_identities.get("dataset_config_sha256"),
+            "tokenizer_config_sha256": self._config_identities.get("tokenizer_config_sha256"),
+            "shard_config_sha256": self._config_identities.get("shard_config_sha256"),
+            "model_config_sha256": self._config_identities.get("model_config_sha256"),
+            "train_config_sha256": self._config_identities.get("train_config_sha256"),
+        }
+        experiment_id = "exp:" + hashlib.sha256(
+            json.dumps(experiment_seed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+        source_identity = {
+            "definition_sha256": self._config_identities.get("source_definition_sha256"),
+            "definition_files": self._source_definition_hashes,
+            "sources": _manifest_sources(self.cfg, self._source_definition_paths),
+        }
+        manifest_path = self._out / "runs" / self.cfg["_run_id"] / "run_manifest.json"
+        if self._resume and manifest_path.is_file():
+            existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if existing.get("final_status") not in {"PASS", "WARN", "FAILED", "DEGRADED"}:
+                self._run_tracker = RunTracker.resume(PROJECT_ROOT, self._out, manifest_path)
+            else:
+                self.cfg["_run_id"] = new_run_id()
+                run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
+                self._run_tracker = RunTracker(
+                    PROJECT_ROOT, self._out, run_id=self.cfg["_run_id"],
+                    dataset_id=dataset_identity["dataset_id"], experiment_id=experiment_id,
+                    configuration=self._config_identities, dataset_identity=dataset_identity,
+                    source_identity=source_identity,
+                )
+        else:
+            self._run_tracker = RunTracker(
+                PROJECT_ROOT, self._out, run_id=self.cfg["_run_id"],
+                dataset_id=dataset_identity["dataset_id"], experiment_id=experiment_id,
+                configuration=self._config_identities, dataset_identity=dataset_identity,
+                source_identity=source_identity,
+            )
         self._source_manifest_path = self._out.parent / "source_manifest.json"
         self._weights = SourceWeightLookup(str(self._weights_path))
         self._signals = DomainSignalTracker(self._weights.signal_gate_config())
@@ -527,11 +576,26 @@ class Pipeline:
         exp = self.cfg.get("export", {})
         exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
 
+    def _run_stage(self, name: str, fn, inputs: list[Path] | None = None):
+        self._run_tracker.start_stage(name, inputs=[p for p in (inputs or []) if p is not None and p.exists()])
+        try:
+            result = fn()
+            outputs = [result] if isinstance(result, Path) else []
+            self._run_tracker.finish_stage(name, outputs=outputs)
+            return result
+        except BaseException as exc:
+            self._run_tracker.fail_stage(name, exc)
+            self._run_tracker.finish_run("FAILED")
+            raise
+
     def run(self, stages: str = "all", dataset_group: str | None = None):
         stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
         if stages == "all":
             configured = self.cfg.get("stages", {}) or {}
-            requested = [stage for stage in stage_names if bool(configured.get(stage, configured.get("semantic_dedup", False) if stage == "dedup" else False))]
+            requested = [
+                stage for stage in stage_names
+                if bool(configured.get(stage, configured.get("semantic_dedup", False) if stage == "dedup" else False))
+            ]
         else:
             requested = [s.strip() for s in stages.split(",") if s.strip()]
         unknown = [s for s in requested if s not in stage_names]
@@ -539,22 +603,43 @@ class Pipeline:
             raise ValueError(f"Unknown stages: {unknown}")
         if not requested:
             raise ValueError("No enabled pipeline stages are configured")
+
+        self._run_tracker.manifest["dataset_identity"]["requested_group"] = dataset_group or "all"
+        for stage in requested:
+            self._run_tracker.manifest["stages"].setdefault(stage, {
+                "run_id": self._run_tracker.run_id, "status": "PENDING",
+                "start": None, "end": None, "duration_seconds": None,
+                "warnings": [], "errors": [], "inputs": [], "outputs": [], "artifact_hashes": {},
+            })
+        self._run_tracker._write()
+
         artifacts: dict[str, Any] = {}
         if "crawl" in requested:
-            artifacts["crawl"] = self.stage_crawl(dataset_group)
+            artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
         if "clean" in requested:
-            artifacts["clean"] = self.stage_clean(artifacts.get("crawl", self._scratch / "01_crawled.jsonl"))
+            inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
+            artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
         if "dedup" in requested:
-            artifacts["dedup"] = self.stage_embed_dedup(artifacts.get("clean", self._scratch / "02_cleaned.jsonl"))
+            inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
+            artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
         if "weight" in requested:
-            artifacts["weight"] = self.stage_weight(artifacts.get("dedup", self._scratch / "03_deduped.jsonl"))
+            inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
+            artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
         if "tokenize" in requested:
-            artifacts["tokenizer"] = self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl"))
+            inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+            artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
         if "shard" in requested:
-            artifacts["shard"] = self.stage_shard(artifacts.get("weight", self._scratch / "04_weighted.jsonl"), artifacts.get("tokenizer") or self.stage_tokenize(artifacts.get("weight", self._scratch / "04_weighted.jsonl")))
+            corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+            tokenizer = artifacts.get("tokenizer") or self._out / "tokenizer"
+            artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus, tokenizer])
         if "train" in requested:
-            artifacts["train"] = self.stage_train()
+            inp = artifacts.get("shard", self._out / "shards")
+            artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
         if "export" in requested:
-            artifacts["export"] = self.stage_export()
-        log.info("Pipeline completed stages=%s", requested)
+            artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
+
+        statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
+        final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")
+        self._run_tracker.finish_run(final_status)
+        log.info("Pipeline completed stages=%s run_id=%s", requested, self._run_tracker.run_id)
         return artifacts
