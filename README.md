@@ -2,18 +2,17 @@
 
 **ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: an end-to-end, local-first system for building training datasets, training a model, and exporting it for local inference.
 
-The repository is at **release-candidate (RC) source readiness**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. The latest `main` commit has passed Linux CI, Windows CI, Security, and CodeQL; the native release gate remains a separate execution-dependent requirement before a production release is claimed.
+The repository is at **release-candidate (RC) source readiness**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. Workflow results are authoritative for the exact commit being evaluated; this document deliberately does not hard-code a current-green status.
 
 **Termux native-toolchain evidence (2026-09-29):** on Android 16 / aarch64, the pinned llama.cpp checkout at `b95502b...` was configured and built successfully through the `llama-quantize` target. The resulting Android ELF executable was started successfully and its help output enumerated the supported quantization types. This verifies the native quantizer itself on that target; it does **not** replace the complete Python release gate or an end-to-end Model Lab export/inference run.
 
 ## RC status
 
-**Current branch:** `main`  
-**Automated gate state:** latest `main` CI, Security, and CodeQL checks are green.  
 **Package version:** `1.3.0`  
-**PRs #22 and #24:** merged
+**Source of truth:** `main`  
+**Release posture:** RC source-ready; production release evidence remains execution-dependent.
 
-The repository has completed the current hardening and regression-repair work represented by those merges. The remaining release evidence is execution-dependent, not a missing implementation contract:
+The repository contains the implementation and release machinery. Automated workflow results, native verification, and production attestations must be evaluated against the exact commit being released. Historical reports are evidence of past work, not current status.
 
 - the native release gate must complete successfully for the exact release commit;
 - `python scripts/verify_release.py --bootstrap-native` must complete successfully;
@@ -60,6 +59,7 @@ ML-Framework/
 ├── bootstrap.py           # Canonical environment setup
 ├── run_pipeline.py        # Pipeline entry point
 ├── run_command_center.py  # Command center entry point
+├── mlframework.py          # Stable clone-and-run CLI
 ├── command_center/        # Local API/control backend
 ├── config/                # Starter, smoke, full, and dataset configs
 ├── pipeline/              # Crawl → export implementation
@@ -263,7 +263,7 @@ python scripts/verify_release.py --bootstrap-native
 
 The native gate additionally reconciles the pinned llama.cpp toolchain and runs a deterministic, network-free fixture through tokenization, sharding, training, GGUF export, export-card generation, GGUF integrity verification, and native llama.cpp inference.
 
-A successful RC candidate should have this command pass before release approval.
+A release candidate should have this command pass on the exact commit being approved.
 
 ## Security and release evidence
 
@@ -279,7 +279,7 @@ The release evidence generator records the resolved dependency environment and S
 
 ## GitHub Actions
 
-The repository contains separate CI, security, and release workflows.
+The repository contains separate CI, security, and release workflows. Their results are the authoritative source for current validation state.
 
 - CI covers Linux and Windows Python 3.11 and 3.14 environments, bootstrap doctor, dependency consistency, Ruff, compilation, tests/coverage, and the Windows PowerShell bootstrap contract.
 - Security runs the repository security gate on `main` pushes and pull requests and can also be dispatched manually.
