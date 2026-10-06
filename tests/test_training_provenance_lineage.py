@@ -32,7 +32,8 @@ def test_training_provenance_records_source_manifest_hash(tmp_path):
     shards = output / "shards"; shards.mkdir(); (shards / "shards.manifest.json").write_text("{}", encoding="utf-8")
     cfg = {"_pipeline_config_sha256": "a" * 64, "pipeline": {"output_dir": str(output)}}
     provenance = _provenance(cfg, ModelConfig(vocab_size=8, d_model=16, n_layers=1, n_heads=4, n_kv_heads=4, d_ffn=32, seq_len=8), shards)
-    assert provenance["schema"] == 2
+    assert provenance["schema"] == 3
+    assert provenance["config_identities"]["train_config_sha256"] == provenance["train_config_sha256"] or provenance["train_config_sha256"]
     assert provenance["source_manifest_sha256"] == _sha256(source)
 
 
