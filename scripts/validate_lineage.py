@@ -65,6 +65,20 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
     tokenizer_meta = load_json(tokenizer_manifest)
     shard = load_json(shard_manifest)
 
+    weighted_ok = weighted.get("sha256") == sha256_file(scratch / "04_weighted.jsonl")
+    tokenizer_ok = tokenizer_meta.get("sha256") == sha256_file(tokenizer)
+    shard_files_ok = True
+    for item in shard.get("files", []):
+        shard_path = root / "shards" / str(item.get("name", ""))
+        if not shard_path.is_file() or item.get("sha256") != sha256_file(shard_path):
+            shard_files_ok = False
+            break
+    checks.extend([
+        result("Weighted artifact", "PASS" if weighted_ok else "FAIL", str(weighted.get("sha256", ""))),
+        result("Tokenizer artifact", "PASS" if tokenizer_ok else "FAIL", str(tokenizer_meta.get("sha256", ""))),
+        result("Shard artifacts", "PASS" if shard_files_ok else "FAIL", str(len(shard.get("files", []))) + " files"),
+    ])
+
     checkpoint_meta = None
     if checkpoint is None:
         candidates = sorted((root / "checkpoints").glob("ckpt_*.pt.manifest.json"))
