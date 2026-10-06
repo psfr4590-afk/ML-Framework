@@ -101,7 +101,7 @@ def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> N
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("Required provenance manifest is invalid; refusing export") from exc
 
-    if int(source_data.get("schema", -1)) != 2 or not source_data.get("retrieval_started_at") or not source_data.get("retrieval_completed_at") or not source_data.get("sources"):
+    if int(source_data.get("schema", -1)) < 2 or not source_data.get("retrieval_started_at") or not source_data.get("retrieval_completed_at") or not source_data.get("sources"):
         raise RuntimeError("Source manifest is incomplete; refusing export")
 
     source_definition_hashes = {
