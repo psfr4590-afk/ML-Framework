@@ -577,7 +577,11 @@ class Pipeline:
         exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
 
     def _run_stage(self, name: str, fn, inputs: list[Path] | None = None):
-        self._run_tracker.start_stage(name, inputs=[p for p in (inputs or []) if p is not None and p.exists()])
+        tracked_inputs = [
+            p for p in (inputs or [])
+            if isinstance(p, (str, Path)) and Path(p).exists()
+        ]
+        self._run_tracker.start_stage(name, inputs=[Path(p) for p in tracked_inputs])
         try:
             result = fn()
             outputs = [result] if isinstance(result, Path) else []
