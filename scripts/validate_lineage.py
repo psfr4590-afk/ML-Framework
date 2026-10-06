@@ -138,7 +138,7 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
         checks.append(result(name, "PASS" if ok else "FAIL",
                              f"{key}={stage_ids.get(key)} run_id={stage_prov.get('run_id')}"))
 
-    source_ok = cp.get("source_manifest_sha256") == sha256_file(source_manifest)
+    source_ok = cp.get("source_manifest_sha256") == sha256_file(source_manifest) and source.get("run_id") == cp.get("run_id")
     shard_ok = cp.get("shard_manifest_sha256") == sha256_file(shard_manifest)
     tokenizer_ok = (shard.get("provenance") or {}).get("tokenizer_sha256") == sha256_file(tokenizer)
     checks.extend([
