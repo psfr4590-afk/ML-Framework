@@ -6,7 +6,10 @@ import importlib
 import inspect
 import json
 import logging
+import os
+import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -17,6 +20,7 @@ from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, 
 from pipeline.types import Document
 from pipeline.provenance import artifact_id, config_identities, new_run_id, snapshot_configs
 from pipeline.run_tracking import RunTracker
+from pipeline.observability import classify_source_status, source_record, stage_counts, throughput, write_dataset_report
 from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLookup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -188,12 +192,12 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
     return sources
 
 
-def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None) -> None:
+def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None, retrieval_sources: list[dict[str, Any]] | None = None) -> None:
     started = retrieval_started_at or datetime.now(timezone.utc).isoformat()
     files = {name: {"path": _project_relative_path(value), "sha256": _file_hash(value)} for name, value in source_paths.items()}
     definition_hash = _hash_value({name: value.get("sha256") for name, value in files.items()})
     manifest = {
-        "schema": 2,
+        "schema": 3,
         "run_id": cfg.get("_run_id") or "standalone-source-definition",
         "dataset_group": selected_group_id or "all",
         "retrieval_started_at": started,
@@ -201,6 +205,7 @@ def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path],
         "source_definition_sha256": definition_hash,
         "source_definition_files": files,
         "sources": _manifest_sources(cfg, source_paths, selected_group_id),
+        "retrieval": list(retrieval_sources or []),
         "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,7 +218,7 @@ def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, 
         required = {"schema", "run_id", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_sha256", "source_definition_files", "sources", "rights_note"}
         if not isinstance(data, dict) or not required <= set(data):
             return False
-        if int(data["schema"]) != 2 or not data["run_id"] or not data["retrieval_started_at"] or not data["retrieval_completed_at"] or not data["source_definition_sha256"]:
+        if int(data["schema"]) < 2 or not data["run_id"] or not data["retrieval_started_at"] or not data["retrieval_completed_at"] or not data["source_definition_sha256"]:
             return False
         manifest_group = str(data["dataset_group"])
         if expected_group_id is not None and manifest_group != expected_group_id:
@@ -352,6 +357,8 @@ class Pipeline:
         self._source_manifest_path = self._out.parent / "source_manifest.json"
         self._weights = SourceWeightLookup(str(self._weights_path))
         self._signals = DomainSignalTracker(self._weights.signal_gate_config())
+        self._stage_metrics: dict[str, dict[str, Any]] = {}
+        self._source_observability: list[dict[str, Any]] = []
         _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
@@ -419,31 +426,169 @@ class Pipeline:
                 raise ValueError(f"Unknown dataset group id: {only_group}")
         out = self._scratch / (f"01_crawled__{only_group}.jsonl" if self.dataset_id is None and only_group else "01_crawled.jsonl")
         selected_group = groups[0] if len(groups) == 1 else None
-        provenance = self._provenance("crawl", extra={"source_weights_sha256": _file_hash(self._weights_path), "dataset_groups_sha256": _file_hash(self._dataset_groups_path), "dataset_group": selected_group_id or "all", "dataset_group_sha256": _hash_value(selected_group) if selected_group else None})
-        if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(self._source_manifest_path, selected_group_id or "all", self._source_definition_paths):
+        provenance = self._provenance("crawl", extra={
+            "source_weights_sha256": _file_hash(self._weights_path),
+            "dataset_groups_sha256": _file_hash(self._dataset_groups_path),
+            "dataset_group": selected_group_id or "all",
+            "dataset_group_sha256": _hash_value(selected_group) if selected_group else None,
+        })
+        if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(
+            self._source_manifest_path, selected_group_id or "all", self._source_definition_paths
+        ):
+            self._stage_metrics["crawl"] = stage_counts(None, out)
+            self._stage_metrics["crawl"].update({"removed_count": 0, "removal_reasons": {}})
             return out
+
         retrieval_started = datetime.now(timezone.utc).isoformat()
-        _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths, selected_group_id=selected_group_id or "all", retrieval_started_at=retrieval_started, retrieval_completed_at=None)
+        _write_source_manifest(
+            self._source_manifest_path, self.cfg, self._source_definition_paths,
+            selected_group_id=selected_group_id or "all",
+            retrieval_started_at=retrieval_started,
+            retrieval_completed_at=None,
+        )
+        source_records: list[dict[str, Any]] = []
+
+        def run_crawler(group: dict, kind: str, definition: dict[str, Any], crawler_cfg: dict[str, Any]) -> Iterator[Document]:
+            started = time.perf_counter()
+            display_name = str(definition.get("display_name") or definition.get("repo") or definition.get("identifier") or kind)
+            identifier = str(definition.get("identifier") or display_name)
+            configured = {
+                "kind": kind,
+                "display_name": display_name,
+                "identifier": identifier,
+                "revision": definition.get("revision"),
+                "license": definition.get("license", "unknown"),
+                "dataset_group": str(group.get("id", "default")),
+            }
+            if kind == "google":
+                key = os.getenv(crawler_cfg.get("google", {}).get("api_key_env", "GOOGLE_API_KEY"), "")
+                cx = os.getenv(crawler_cfg.get("google", {}).get("cx_env", "GOOGLE_CX"), "")
+                if not key or not cx:
+                    source_records.append(source_record(configured=configured, retrieved=False, status="DISABLED", stats={}))
+                    return
+            module_map = {
+                "web": ("pipeline.crawler.web_crawler", "WebCrawler"),
+                "github": ("pipeline.crawler.github_crawler", "GitHubCrawler"),
+                "arxiv": ("pipeline.crawler.arxiv_crawler", "ArxivCrawler"),
+                "huggingface": ("pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler"),
+                "google": ("pipeline.crawler.google_crawler", "GoogleCrawler"),
+            }
+            module, klass = module_map[kind]
+            crawler = _load_class(module, klass)(crawler_cfg, self._weights, self._signals)
+            yielded = 0
+            try:
+                for doc in crawler.crawl():
+                    yielded += 1
+                    doc.meta["dataset_group"] = group.get("id", "default")
+                    yield doc
+            finally:
+                elapsed = time.perf_counter() - started
+                stats = crawler.observability()
+                stats["duration_seconds"] = elapsed
+                stats["document_count"] = max(int(stats.get("document_count", 0)), yielded)
+                status = classify_source_status(
+                    enabled=True,
+                    documents=int(stats["document_count"]),
+                    errors=int(crawler.stats.get("errors", 0)),
+                    skipped=int(crawler.stats.get("skipped", 0)),
+                    rate_limited=int(stats.get("rate_limited", 0)),
+                )
+                source_records.append(source_record(
+                    configured=configured,
+                    retrieved=bool(stats["document_count"] or stats["request_count"]),
+                    status=status,
+                    stats=stats,
+                ))
+
         def stream() -> Iterator[Document]:
-            crawler_specs = (("web", "pipeline.crawler.web_crawler", "WebCrawler", True), ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True), ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True), ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", True), ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False))
             for group in groups:
                 merged = dict(cfg)
                 for key in ("web", "github", "arxiv", "huggingface", "google"):
                     merged[key] = {**cfg.get(key, {}), **group.get(key, {})}
                 merged["sources"] = group.get("sources", cfg.get("sources", {}))
                 gid = group.get("id", "default")
-                for source, module, klass, default_enabled in crawler_specs:
-                    if not bool(merged.get("sources", {}).get(source, default_enabled)):
+
+                if bool(merged.get("sources", {}).get("web", True)):
+                    seeds = list(merged.get("web", {}).get("seed_urls", []) or [])
+                    for seed in seeds:
+                        web_cfg = dict(merged)
+                        web_cfg["web"] = dict(merged.get("web", {}))
+                        web_cfg["web"]["seed_urls"] = [seed]
+                        yield from run_crawler(group, "web", {
+                            "identifier": str(seed),
+                            "display_name": urlparse(str(seed)).netloc or str(seed),
+                        }, web_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "web", "display_name": "web", "identifier": f"group:{gid}:web", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
+                for kind in ("github", "arxiv"):
+                    enabled = bool(merged.get("sources", {}).get(kind, True))
+                    if not enabled:
+                        source_records.append(source_record(
+                            configured={"kind": kind, "display_name": kind, "identifier": f"group:{gid}:{kind}", "dataset_group": str(gid), "license": "unknown"},
+                            retrieved=False, status="DISABLED", stats={},
+                        ))
                         continue
-                    crawler = _load_class(module, klass)(merged, self._weights, self._signals)
-                    for doc in crawler.crawl():
-                        doc.meta["dataset_group"] = gid
-                        yield doc
+                    yield from run_crawler(group, kind, {"identifier": f"group:{gid}:{kind}", "display_name": kind}, merged)
+
+                if bool(merged.get("sources", {}).get("huggingface", True)):
+                    datasets = merged.get("huggingface", {}).get("datasets", []) or []
+                    for item in datasets:
+                        if isinstance(item, str):
+                            item = {"repo": item}
+                        if not isinstance(item, dict):
+                            continue
+                        hf_cfg = dict(merged)
+                        hf_cfg["huggingface"] = dict(merged.get("huggingface", {}))
+                        hf_cfg["huggingface"]["datasets"] = [item]
+                        repo_name = str(item.get("repo", "huggingface"))
+                        yield from run_crawler(group, "huggingface", {
+                            "identifier": repo_name,
+                            "display_name": repo_name,
+                            "revision": item.get("revision"),
+                            "license": item.get("license", "unknown"),
+                        }, hf_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "huggingface", "display_name": "HuggingFace", "identifier": f"group:{gid}:huggingface", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
+                if bool(merged.get("sources", {}).get("google", False)):
+                    queries = list(merged.get("google", {}).get("queries", []) or [])
+                    for query in queries:
+                        google_cfg = dict(merged)
+                        google_cfg["google"] = dict(merged.get("google", {}))
+                        google_cfg["google"]["queries"] = [query]
+                        yield from run_crawler(group, "google", {
+                            "identifier": str(query),
+                            "display_name": "Google",
+                        }, google_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "google", "display_name": "Google", "identifier": f"group:{gid}:google", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
         count = atomic_jsonl_write(out, lambda: (doc.to_jsonl() for doc in stream()))
         if count == 0:
+            self._source_observability = source_records
             raise RuntimeError(f"Crawl produced no documents: {out}")
-        _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths, selected_group_id=selected_group_id or "all", retrieval_started_at=retrieval_started, retrieval_completed_at=datetime.now(timezone.utc).isoformat())
+
+        self._source_observability = source_records
+        _write_source_manifest(
+            self._source_manifest_path, self.cfg, self._source_definition_paths,
+            selected_group_id=selected_group_id or "all",
+            retrieval_started_at=retrieval_started,
+            retrieval_completed_at=datetime.now(timezone.utc).isoformat(),
+            retrieval_sources=source_records,
+        )
         write_manifest(out, kind="crawl", rows=count, provenance=provenance)
+        self._stage_metrics["crawl"] = stage_counts(None, out)
+        self._stage_metrics["crawl"].update({"removal_reasons": {}, "source_count": len(source_records)})
         log.info("Wrote %d docs → %s", count, out)
         return out
 
@@ -467,6 +612,13 @@ class Pipeline:
                 doc.char_count = len(doc.text)
                 yield doc
         _jsonl_write(cleaned(), out, kind="clean", provenance=provenance)
+        self._stage_metrics["clean"] = stage_counts(in_path, out)
+        self._stage_metrics["clean"]["removal_reasons"] = {
+            "too_short": cleaner.stats["dropped_short"],
+            "too_long": cleaner.stats["dropped_long"],
+            "duplicate": cleaner.stats["dropped_dedup"],
+            "refusal": cleaner.stats["dropped_refusal"],
+        }
         return out
 
     def stage_embed_dedup(self, in_path: Path, out_path: Path | None = None) -> Path:
@@ -490,6 +642,8 @@ class Pipeline:
                     yield doc
             yield from deduper.stream(unique_docs(), buffer_size=buffer_size)
         _jsonl_write(stream(), out, kind="dedup", provenance=provenance)
+        self._stage_metrics["dedup"] = stage_counts(in_path, out)
+        self._stage_metrics["dedup"]["removal_reasons"] = {"semantic_duplicate": int(deduper.stats.get("dropped", 0))}
         return out
 
     def stage_weight(self, in_path: Path, out_path: Path | None = None) -> Path:
@@ -503,6 +657,8 @@ class Pipeline:
             raise RuntimeError(f"Weight input failed integrity validation: {in_path}")
         weighter = _load_class("pipeline.weighter.weighter", "DomainWeighter")(str(weights_path), strategy=weight_cfg.get("strategy", "upsample"))
         _jsonl_write(weighter.apply(_jsonl_read(in_path)), out, kind="weight", provenance=provenance)
+        self._stage_metrics["weight"] = stage_counts(in_path, out)
+        self._stage_metrics["weight"]["removal_reasons"] = {}
         return out
 
     def stage_tokenize(self, corpus_path: Path):
@@ -516,6 +672,15 @@ class Pipeline:
             raise RuntimeError(f"Tokenizer input failed integrity validation: {corpus_path}")
         tokenizer = trainer.train(corpus_path)
         write_manifest(marker, kind="tokenizer", provenance=provenance, extra={"vocab_size": tokenizer.get_vocab_size()})
+        self._stage_metrics["tokenize"] = stage_counts(corpus_path, None)
+        self._stage_metrics["tokenize"].update({
+            "document_count": self._stage_metrics["tokenize"].get("input_document_count"),
+            "removed_count": 0,
+            "removal_reasons": {},
+            "token_count": None,
+            "token_count_status": "materialized during shard stage",
+            "vocab_size": tokenizer.get_vocab_size(),
+        })
         return tokenizer
 
     def stage_shard(self, corpus_path: Path, tokenizer) -> Path:
@@ -550,11 +715,24 @@ class Pipeline:
         shard_dir.mkdir(parents=True, exist_ok=True)
         for old in shard_dir.glob("shard_*.bin"):
             old.unlink(missing_ok=True)
-        Writer(shard_cfg, tokenizer).write(corpus_path)
+        writer = Writer(shard_cfg, tokenizer)
+        writer.write(corpus_path)
         paths = sorted(shard_dir.glob("shard_*.bin"))
         if not paths:
             raise RuntimeError("Shard stage produced no shard files")
         marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8")
+        self._stage_metrics["shard"] = stage_counts(corpus_path, None)
+        writer_stats = getattr(writer, "stats", {})
+        self._stage_metrics["shard"].update({
+            "document_count": int(writer_stats.get("docs_processed", self._stage_metrics["shard"].get("input_document_count", 0))),
+            "removed_count": 0,
+            "removal_reasons": {},
+            "token_count": writer_stats.get("total_tokens"),
+            "train_document_count": int(writer_stats.get("train_docs", 0)),
+            "validation_document_count": int(writer_stats.get("val_docs", 0)),
+            "train_shards": int(writer_stats.get("train_shards", len(paths))),
+            "validation_shards": int(writer_stats.get("val_shards", 0)),
+        })
         return shard_dir
 
     def stage_train(self) -> Path:
@@ -582,10 +760,17 @@ class Pipeline:
             if isinstance(p, (str, Path)) and Path(p).exists()
         ]
         self._run_tracker.start_stage(name, inputs=[Path(p) for p in tracked_inputs])
+        started = time.perf_counter()
         try:
             result = fn()
+            elapsed = time.perf_counter() - started
             outputs = [result] if isinstance(result, Path) else []
-            self._run_tracker.finish_stage(name, outputs=outputs)
+            metrics = dict(self._stage_metrics.get(name, {}))
+            metrics["duration_seconds"] = round(elapsed, 6)
+            metrics["throughput_docs_per_second"] = throughput(metrics.get("document_count"), elapsed)
+            if name == "crawl":
+                self._run_tracker.manifest["source_observability"] = list(self._source_observability)
+            self._run_tracker.finish_stage(name, outputs=outputs, metrics=metrics)
             return result
         except BaseException as exc:
             self._run_tracker.fail_stage(name, exc)
@@ -609,12 +794,14 @@ class Pipeline:
             raise ValueError("No enabled pipeline stages are configured")
 
         self._run_tracker.manifest["dataset_identity"]["requested_group"] = dataset_group or "all"
-        for stage in requested:
+        for stage in stage_names:
             self._run_tracker.manifest["stages"].setdefault(stage, {
                 "run_id": self._run_tracker.run_id, "status": "PENDING",
                 "start": None, "end": None, "duration_seconds": None,
                 "warnings": [], "errors": [], "inputs": [], "outputs": [], "artifact_hashes": {},
             })
+            if stage not in requested:
+                self._run_tracker.manifest["stages"][stage]["status"] = "SKIPPED"
         self._run_tracker._write()
 
         artifacts: dict[str, Any] = {}
@@ -644,6 +831,17 @@ class Pipeline:
 
         statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
         final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")
+        report_path = self._out / "runs" / self._run_tracker.run_id / "dataset_report.json"
+        write_dataset_report(
+            report_path,
+            run_id=self._run_tracker.run_id,
+            stage_metrics=dict(self._stage_metrics),
+            sources=list(self._source_observability),
+        )
+        self._run_tracker.manifest["dataset_report"] = {
+            "path": str(report_path.resolve()),
+            "sha256": sha256_file(report_path),
+        }
         self._run_tracker.finish_run(final_status)
-        log.info("Pipeline completed stages=%s run_id=%s", requested, self._run_tracker.run_id)
+        log.info("Pipeline completed stages=%s run_id=%s dataset_report=%s", requested, self._run_tracker.run_id, report_path)
         return artifacts

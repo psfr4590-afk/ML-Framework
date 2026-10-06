@@ -28,11 +28,22 @@ class GitHubCrawler(BaseCrawler):
     def _request(self, path: str, params: dict | None = None):
         try:
             resp = self.session.get(urljoin(self.base, path), params=params, timeout=self.timeout)
+        except requests.RequestException as exc:
+            self.record_request_error()
+            self.stats["errors"] += 1
+            log.warning("GitHub request failed: %s", exc)
+            return None
+        self.record_response(resp)
+        try:
             resp.raise_for_status()
             self.stats["fetched"] += 1
             return resp.json()
         except requests.RequestException as exc:
+            if resp.status_code == 403 and resp.headers.get("X-RateLimit-Remaining") == "0":
+                self.stats["rate_limited"] += 1
             self.stats["errors"] += 1
+            log.warning("GitHub request failed: %s", exc)
+            return None
             log.warning("GitHub request failed: %s", exc)
             return None
 

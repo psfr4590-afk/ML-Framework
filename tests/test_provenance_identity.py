@@ -97,7 +97,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
         retrieval_completed_at="2026-01-01T00:01:00+00:00",
     )
     data = json.loads(target.read_text(encoding="utf-8"))
-    assert data["schema"] == 2
+    assert data["schema"] == 3
     assert data["dataset_group"] == "swe_cs_systems"
     assert data["retrieval_started_at"]
     assert data["retrieval_completed_at"]

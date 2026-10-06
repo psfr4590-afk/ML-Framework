@@ -159,7 +159,7 @@ class HuggingFaceCrawler(BaseCrawler):
                     if self.weight_lookup:
                         doc = self._apply_weights(doc)
                     else:
-                        doc = self._record_retrieval_identity(doc)
+                        doc = self.record_document(doc)
                     yield doc
 
                 if required and fetched_for_definition == 0:

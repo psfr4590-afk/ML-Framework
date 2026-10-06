@@ -187,8 +187,10 @@ class WebCrawler(BaseCrawler):
             domain = parsed.netloc.lower()
             self._polite_wait(domain)
             for attempt in range(self.retries + 1):
+                response = None
                 try:
                     response = self._pinned_get(current_url, addresses)
+                    self.record_response(response)
                     if response.is_redirect or response.is_permanent_redirect:
                         location = response.headers.get("Location")
                         response.close()
@@ -201,6 +203,7 @@ class WebCrawler(BaseCrawler):
                             return None
                         break
                     if response.status_code == 429:
+                        self.record_retry()
                         retry_after = response.headers.get("Retry-After")
                         wait = float(retry_after) if retry_after and retry_after.isdigit() else self.backoff * (attempt + 1)
                         response.close()
@@ -212,7 +215,10 @@ class WebCrawler(BaseCrawler):
                 except requests.RequestException as exc:
                     last = exc
                     self.stats["errors"] += 1
+                    if "response" not in locals() or response is None:
+                        self.record_request_error()
                     if attempt < self.retries:
+                        self.record_retry()
                         time.sleep(self.backoff * (attempt + 1))
             else:
                 break
