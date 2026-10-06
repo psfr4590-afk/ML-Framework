@@ -793,12 +793,14 @@ class Pipeline:
             raise ValueError("No enabled pipeline stages are configured")
 
         self._run_tracker.manifest["dataset_identity"]["requested_group"] = dataset_group or "all"
-        for stage in requested:
+        for stage in stage_names:
             self._run_tracker.manifest["stages"].setdefault(stage, {
                 "run_id": self._run_tracker.run_id, "status": "PENDING",
                 "start": None, "end": None, "duration_seconds": None,
                 "warnings": [], "errors": [], "inputs": [], "outputs": [], "artifact_hashes": {},
             })
+            if stage not in requested:
+                self._run_tracker.manifest["stages"][stage]["status"] = "SKIPPED"
         self._run_tracker._write()
 
         artifacts: dict[str, Any] = {}
@@ -828,6 +830,17 @@ class Pipeline:
 
         statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
         final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")
+        report_path = self._out / "runs" / self._run_tracker.run_id / "dataset_report.json"
+        write_dataset_report(
+            report_path,
+            run_id=self._run_tracker.run_id,
+            stage_metrics=dict(self._stage_metrics),
+            sources=list(self._source_observability),
+        )
+        self._run_tracker.manifest["dataset_report"] = {
+            "path": str(report_path.resolve()),
+            "sha256": sha256_file(report_path),
+        }
         self._run_tracker.finish_run(final_status)
-        log.info("Pipeline completed stages=%s run_id=%s", requested, self._run_tracker.run_id)
+        log.info("Pipeline completed stages=%s run_id=%s dataset_report=%s", requested, self._run_tracker.run_id, report_path)
         return artifacts
