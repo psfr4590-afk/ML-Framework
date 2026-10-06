@@ -185,10 +185,12 @@ def _write_release_report(*, static_failures: list[str], native_requested: bool,
     add("secrets", bool(secret_value) if secret_value is not None else None, "security gate")
     git_status = _git_state(ROOT)
     add("git_state", git_status["commit"] is not None and not git_status["dirty"], json.dumps(git_status, sort_keys=True))
-    add("release_artifacts", bool(evidence.get("export") and evidence.get("inference")) if native_requested else None,
-        "native export/inference evidence")
+    package_artifacts = sorted((ROOT / "dist").glob("*"))
+    release_artifacts_ok = bool(evidence.get("export") and evidence.get("inference")) and all(p.is_file() and p.stat().st_size > 0 for p in package_artifacts)
+    add("release_artifacts", release_artifacts_ok if native_requested else None,
+        f"native export/inference plus {len(package_artifacts)} package artifact(s)")
 
-    required = [c for c in checks if c["name"] not in {"ui_backend_connectivity", "clean_clone"}]
+    required = checks
     gate_pass = native_requested and native_rc == 0 and not static_failures and all(c["status"] == "PASS" for c in required)
     report = {
         "schema": 1,
