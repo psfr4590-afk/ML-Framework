@@ -111,12 +111,17 @@ def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> N
     if source_definition_sha != identities["source_definition_sha256"]:
         raise RuntimeError("Source-definition configuration identity does not match the checkpoint lineage; refusing export")
 
+    if source_data.get("run_id") != provenance["run_id"]:
+        raise RuntimeError("Checkpoint → source manifest run identity mismatch; refusing export")
+
     for label, data, identity_key in (
         ("tokenizer", tokenizer_data, "tokenizer_config_sha256"),
         ("weighted", weighted_data, "dataset_config_sha256"),
         ("shards", shard_data, "shard_config_sha256"),
     ):
         stage_prov = data.get("provenance") or {}
+        if stage_prov.get("run_id") != provenance["run_id"]:
+            raise RuntimeError(f"{label} run identity does not match the checkpoint lineage; refusing export")
         stage_ids = stage_prov.get("config_identities") or {}
         if stage_ids.get(identity_key) != identities[identity_key]:
             raise RuntimeError(
