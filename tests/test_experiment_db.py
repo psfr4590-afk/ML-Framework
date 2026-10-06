@@ -82,6 +82,7 @@ def test_external_evidence_is_projected_into_sqlite(tmp_path):
     output.mkdir()
     db = ExperimentDB(output / "experiment.db")
     manifest = _manifest()
+    manifest["metrics"] = {}
     manifest["metrics"]["train"] = {
         "val_loss": 1.25,
         "step": 20,
