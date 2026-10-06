@@ -15,6 +15,7 @@ import yaml
 from pipeline.config_validation import validate_config
 from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, write_manifest
 from pipeline.types import Document
+from pipeline.provenance import artifact_id, config_identities, new_run_id, snapshot_configs
 from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLookup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -108,14 +109,17 @@ def _implementation_sha256(stage: str) -> str:
     return digest.hexdigest()
 
 
+def _project_relative_path(path: Path) -> str:
+    """Return a stable project-relative path when possible, otherwise an absolute path."""
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path.resolve()).replace("\\", "/")
+
+
 def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
     crawl = cfg.get("crawl", {})
-    configured_path = cfg.get("_pipeline_config_path")
-    pipeline_config = Path(configured_path) if configured_path else root / "config" / "pipeline_config.yaml"
-    if not pipeline_config.is_absolute():
-        pipeline_config = root / pipeline_config
     paths = {
-        "pipeline_config": pipeline_config,
         "source_weights": root / str(crawl.get("source_weights_file", "config/source_weights.yaml")),
         "dataset_groups": root / str(crawl.get("dataset_groups_file", "config/dataset_groups.yaml")),
         "dataset_profiles": root / str(crawl.get("dataset_profiles_file", "config/dataset_profiles.yaml")),
@@ -185,12 +189,15 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
 
 def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None) -> None:
     started = retrieval_started_at or datetime.now(timezone.utc).isoformat()
-    files = {name: {"path": str(value.relative_to(PROJECT_ROOT)), "sha256": _file_hash(value)} for name, value in source_paths.items()}
+    files = {name: {"path": _project_relative_path(value), "sha256": _file_hash(value)} for name, value in source_paths.items()}
+    definition_hash = _hash_value({name: value.get("sha256") for name, value in files.items()})
     manifest = {
         "schema": 2,
+        "run_id": cfg.get("_run_id") or "standalone-source-definition",
         "dataset_group": selected_group_id or "all",
         "retrieval_started_at": started,
         "retrieval_completed_at": retrieval_completed_at,
+        "source_definition_sha256": definition_hash,
         "source_definition_files": files,
         "sources": _manifest_sources(cfg, source_paths, selected_group_id),
         "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
@@ -202,10 +209,10 @@ def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path],
 def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, expected_source_definition_paths: dict[str, Path] | None = None) -> bool:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        required = {"schema", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_files", "sources", "rights_note"}
+        required = {"schema", "run_id", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_sha256", "source_definition_files", "sources", "rights_note"}
         if not isinstance(data, dict) or not required <= set(data):
             return False
-        if int(data["schema"]) != 2 or not data["retrieval_started_at"] or not data["retrieval_completed_at"]:
+        if int(data["schema"]) != 2 or not data["run_id"] or not data["retrieval_started_at"] or not data["retrieval_completed_at"] or not data["source_definition_sha256"]:
             return False
         manifest_group = str(data["dataset_group"])
         if expected_group_id is not None and manifest_group != expected_group_id:
@@ -253,6 +260,7 @@ class Pipeline:
         self.cfg = _load_config(self._cfg_path)
         self.cfg["_project_root"] = str(PROJECT_ROOT)
         self.cfg["_pipeline_config_path"] = str(self._cfg_path)
+        self.cfg["_pipeline_config_relative_path"] = _project_relative_path(self._cfg_path)
         validate_config(self.cfg)
         self.dataset_id = dataset_id
         configured_out = Path(self.cfg["pipeline"].get("output_dir", "output"))
@@ -283,6 +291,15 @@ class Pipeline:
         self._clean_config_path = PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")
         self._source_definition_paths = _source_definition_paths(self.cfg, PROJECT_ROOT)
         self._source_definition_hashes = {name: _file_hash(path) for name, path in self._source_definition_paths.items()}
+        run_id_path = self._out / "provenance" / "run_id.txt"
+        if run_id_path.is_file() and run_id_path.read_text(encoding="utf-8").strip():
+            self.cfg["_run_id"] = run_id_path.read_text(encoding="utf-8").strip()
+        else:
+            self.cfg["_run_id"] = new_run_id()
+            run_id_path.parent.mkdir(parents=True, exist_ok=True)
+            run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
+        self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
+        self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
         self._source_manifest_path = self._out.parent / "source_manifest.json"
         self._weights = SourceWeightLookup(str(self._weights_path))
         self._signals = DomainSignalTracker(self._weights.signal_gate_config())
@@ -290,11 +307,25 @@ class Pipeline:
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
     def _provenance(self, stage: str, input_path: Path | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        data: dict[str, Any] = {"schema": 2, "stage": stage, "pipeline_config_sha256": self._config_sha256, "source_definition_sha256": _hash_value(self._source_definition_hashes), "implementation_sha256": _implementation_sha256(stage)}
+        data: dict[str, Any] = {
+            "schema": 3,
+            "stage": stage,
+            "run_id": self.cfg["_run_id"],
+            "artifact_id": None,
+            "pipeline_config_sha256": self._config_sha256,
+            "config_paths": {"pipeline": _project_relative_path(self._cfg_path)},
+            "config_identities": dict(self._config_identities),
+            "config_snapshots": dict(self._config_snapshots),
+            "implementation_sha256": _implementation_sha256(stage),
+        }
         if input_path is not None:
             data["input_sha256"] = sha256_file(input_path)
+            input_manifest = Path(str(input_path) + ".manifest.json")
+            if input_manifest.is_file():
+                data["parent_artifact_ids"] = [artifact_id("manifest", sha256_file(input_manifest))]
         if extra:
             data.update(extra)
+        data["artifact_id"] = artifact_id(stage, _hash_value(data))
         return data
 
     def _should_skip(self, path: Path, stage: str, provenance: dict[str, Any]) -> bool:
@@ -445,7 +476,12 @@ class Pipeline:
         marker = shard_dir / "shards.manifest.json"
         tok_cfg = self.cfg.get("tokenizer", {})
         tokenizer_path = Path(tok_cfg["output_path"]) / "tokenizer.json" if tok_cfg.get("output_path") else None
-        provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size()})
+        tokenizer_manifest = Path(str(tokenizer_path) + ".manifest.json") if tokenizer_path else None
+        tokenizer_artifact = artifact_id("tokenizer-manifest", sha256_file(tokenizer_manifest)) if tokenizer_manifest and tokenizer_manifest.is_file() else None
+        provenance = self._provenance("shard", corpus_path, {"shard_config_sha256": _hash_value(shard_cfg), "tokenizer_sha256": _file_hash(tokenizer_path), "tokenizer_vocab_size": tokenizer.get_vocab_size(), "tokenizer_artifact_id": tokenizer_artifact})
+        if tokenizer_artifact:
+            provenance["parent_artifact_ids"] = list(dict.fromkeys(provenance.get("parent_artifact_ids", []) + [tokenizer_artifact]))
+            provenance["artifact_id"] = artifact_id("shard", _hash_value(provenance))
         if self._resume and marker.exists():
             try:
                 data = json.loads(marker.read_text(encoding="utf-8"))

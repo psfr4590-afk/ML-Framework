@@ -23,7 +23,11 @@ Every source used for a production run must have an auditable source manifest. P
 
 - Source manifest: `[SOURCE_MANIFEST]`
 - Source manifest SHA-256: `[SOURCE_MANIFEST_SHA256]`
-- Pipeline configuration SHA-256: `[PIPELINE_CONFIG_SHA256]`
+- Pipeline configuration SHA-256 (legacy compatibility evidence): `[PIPELINE_CONFIG_SHA256]`
+- Dataset configuration SHA-256: `[DATASET_CONFIG_SHA256]`
+- Tokenizer configuration SHA-256: `[TOKENIZER_CONFIG_SHA256]`
+- Shard configuration SHA-256: `[SHARD_CONFIG_SHA256]`
+- Source-definition configuration SHA-256: `[SOURCE_DEFINITION_SHA256]`
 - Git commit: `[GIT_COMMIT]`
 
 For each source, retain its URL or identifier, retrieval time, revision, license or usage terms, attribution requirements, operator restrictions, and raw-source SHA-256.

@@ -64,7 +64,7 @@ Each stage reads a verified artifact from the previous stage and writes a new ar
 
 Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring the model weights and accidentally replaying a different token sequence. Checkpoints without the required deterministic state or matching provenance are rejected rather than silently resumed.
 
-Final export is stricter still. The checkpoint must carry the canonical pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity. The current tokenizer, weighted-corpus manifest, and shard manifest must belong to the same pipeline configuration. A mismatch stops export before an artifact can be presented as a valid model.
+Final export is stricter still. The checkpoint carries independent dataset, tokenizer, shard, training, model, and source-definition identities, plus explicit upstream artifact relationships. The current tokenizer, weighted-corpus manifest, and shard manifest must be compatible with those identities. A mismatch stops export before an artifact can be presented as a valid model. Historical checkpoints using the former pipeline-wide identity are preserved as legacy evidence rather than rewritten.
 
 The starter profile uses a small real crawl and only two training steps. It is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and then explicitly choose an appropriate larger configuration.
 

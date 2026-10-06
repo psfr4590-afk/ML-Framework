@@ -150,7 +150,9 @@ Each stage reads a verified artifact from the previous stage and writes a new ar
 
 Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring model weights.
 
-Final export verifies the checkpoint, tokenizer, weighted corpus, shard manifest, source manifest, pipeline configuration identity, training/model configuration identities, seed, and shard-manifest identity before conversion. A mismatch stops export rather than allowing an inconsistent artifact to be presented as a valid model.
+Final export verifies the checkpoint, tokenizer, weighted corpus, shard manifest, source manifest, independent configuration identities, seed, and explicit artifact relationships before conversion. The historical pipeline-wide configuration hash is retained as legacy evidence but is no longer treated as the identity of every stage. A mismatch stops export rather than allowing an inconsistent artifact to be presented as a valid model.
+
+For an independent, read-only lineage check, run `python scripts/validate_lineage.py --output-dir output --checkpoint <checkpoint.pt>`. It reports configuration, artifact, parent, checkpoint, and export relationships without rewriting historical evidence.
 
 The starter profile is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and explicitly choose an appropriate larger configuration.
 

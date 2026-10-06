@@ -51,28 +51,104 @@ def _load_checkpoint(path: Path) -> tuple[dict[str, torch.Tensor], ModelConfig, 
 
 
 def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> None:
-    """Refuse export unless the checkpoint and retained upstream artifacts agree."""
+    """Refuse export unless the checkpoint and retained upstream artifacts form a verified lineage."""
     provenance = payload.get("provenance") or {}
-    required = ("schema", "pipeline_config_sha256", "train_config_sha256", "model_config_sha256", "shard_manifest_sha256", "source_manifest_sha256", "seed")
+    schema = int(provenance.get("schema", -1))
+    if schema < 3:
+        raise RuntimeError(
+            "Checkpoint uses legacy provenance schema; configuration lineage is historical and cannot "
+            "be upgraded in place. Preserve the checkpoint as legacy evidence and retrain only when a "
+            "new reproducible checkpoint is required."
+        )
+
+    required = (
+        "schema", "run_id", "config_identities", "train_config_sha256",
+        "model_config_sha256", "shard_manifest_sha256", "source_manifest_sha256", "seed", "parent_artifact_ids", "tokenizer_artifact_id", "dataset_artifact_id", "source_artifact_id",
+    )
     missing = [key for key in required if key not in provenance or provenance[key] in (None, "")]
-    if missing: raise RuntimeError(f"Checkpoint provenance is incomplete; refusing export: {missing}")
+    if missing:
+        raise RuntimeError(f"Checkpoint provenance is incomplete; refusing export: {missing}")
+
+    identities = provenance["config_identities"]
+    if not isinstance(identities, dict):
+        raise RuntimeError("Checkpoint configuration identities are invalid; refusing export")
+    for key in ("dataset_config_sha256", "tokenizer_config_sha256", "shard_config_sha256", "source_definition_sha256"):
+        if not identities.get(key):
+            raise RuntimeError(f"Checkpoint is missing {key}; refusing export")
+
     shard_manifest = output_dir / "shards" / "shards.manifest.json"
     tokenizer_manifest = output_dir / "tokenizer" / "tokenizer.json.manifest.json"
     weighted_manifest = output_dir.parent / "scratch" / "04_weighted.jsonl.manifest.json"
     source_manifest = output_dir.parent / "source_manifest.json"
     for path in (shard_manifest, tokenizer_manifest, weighted_manifest, source_manifest):
-        if not path.is_file(): raise RuntimeError(f"Required provenance artifact is missing; refusing export: {path}")
-    if sha256_file(source_manifest) != provenance["source_manifest_sha256"]: raise RuntimeError("Checkpoint source-manifest identity does not match current source manifest; refusing export")
-    try:
-        shard_data = json.loads(shard_manifest.read_text(encoding="utf-8")); tokenizer_data = json.loads(tokenizer_manifest.read_text(encoding="utf-8")); weighted_data = json.loads(weighted_manifest.read_text(encoding="utf-8")); source_data = json.loads(source_manifest.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc: raise RuntimeError("Required provenance manifest is invalid; refusing export") from exc
-    if int(source_data.get("schema", -1)) != 2 or not source_data.get("retrieval_started_at") or not source_data.get("retrieval_completed_at") or not source_data.get("sources"): raise RuntimeError("Source manifest is incomplete; refusing export")
-    if sha256_file(shard_manifest) != provenance["shard_manifest_sha256"]: raise RuntimeError("Checkpoint shard-manifest identity does not match current shards; refusing export")
-    for label, data in (("tokenizer", tokenizer_data), ("weighted", weighted_data), ("shards", shard_data)):
-        stage_prov = data.get("provenance") or {}
-        if stage_prov.get("pipeline_config_sha256") != provenance["pipeline_config_sha256"]: raise RuntimeError(f"{label} provenance does not belong to the checkpoint pipeline configuration; refusing export")
-    if int(tokenizer_data.get("vocab_size", -1)) != int(payload["model_cfg"].get("vocab_size", -2)): raise RuntimeError("Tokenizer/model vocabulary provenance mismatch; refusing export")
+        if not path.is_file():
+            raise RuntimeError(f"Required provenance artifact is missing; refusing export: {path}")
 
+    if sha256_file(source_manifest) != provenance["source_manifest_sha256"]:
+        raise RuntimeError("Checkpoint source-manifest identity does not match current source manifest; refusing export")
+    if sha256_file(shard_manifest) != provenance["shard_manifest_sha256"]:
+        raise RuntimeError("Checkpoint shard-manifest identity does not match current shards; refusing export")
+
+    try:
+        shard_data = json.loads(shard_manifest.read_text(encoding="utf-8"))
+        tokenizer_data = json.loads(tokenizer_manifest.read_text(encoding="utf-8"))
+        weighted_data = json.loads(weighted_manifest.read_text(encoding="utf-8"))
+        source_data = json.loads(source_manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Required provenance manifest is invalid; refusing export") from exc
+
+    if int(source_data.get("schema", -1)) != 2 or not source_data.get("retrieval_started_at") or not source_data.get("retrieval_completed_at") or not source_data.get("sources"):
+        raise RuntimeError("Source manifest is incomplete; refusing export")
+
+    source_definition_hashes = {
+        name: value.get("sha256")
+        for name, value in (source_data.get("source_definition_files") or {}).items()
+        if isinstance(value, dict)
+    }
+    source_definition_sha = __import__("hashlib").sha256(
+        json.dumps(source_definition_hashes, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    if source_definition_sha != identities["source_definition_sha256"]:
+        raise RuntimeError("Source-definition configuration identity does not match the checkpoint lineage; refusing export")
+
+    if source_data.get("run_id") != provenance["run_id"]:
+        raise RuntimeError("Checkpoint → source manifest run identity mismatch; refusing export")
+
+    for label, data, identity_key in (
+        ("tokenizer", tokenizer_data, "tokenizer_config_sha256"),
+        ("weighted", weighted_data, "dataset_config_sha256"),
+        ("shards", shard_data, "shard_config_sha256"),
+    ):
+        stage_prov = data.get("provenance") or {}
+        if stage_prov.get("run_id") != provenance["run_id"]:
+            raise RuntimeError(f"{label} run identity does not match the checkpoint lineage; refusing export")
+        stage_ids = stage_prov.get("config_identities") or {}
+        if stage_ids.get(identity_key) != identities[identity_key]:
+            raise RuntimeError(
+                f"{label} configuration identity does not match the checkpoint lineage; refusing export"
+            )
+
+    tokenizer_sha = sha256_file(output_dir / "tokenizer" / "tokenizer.json")
+    if (shard_data.get("provenance") or {}).get("tokenizer_sha256") != tokenizer_sha:
+        raise RuntimeError("Shard → tokenizer artifact relationship is invalid; refusing export")
+
+    expected_parents = {
+        f"shard-manifest:{sha256_file(shard_manifest)}",
+        f"tokenizer-manifest:{sha256_file(tokenizer_manifest)}",
+        f"dataset-manifest:{sha256_file(weighted_manifest)}",
+        f"source-manifest:{sha256_file(source_manifest)}",
+    }
+    actual_parents = set(provenance.get("parent_artifact_ids") or [])
+    if not expected_parents <= actual_parents:
+        raise RuntimeError("Checkpoint parent artifact lineage is incomplete; refusing export")
+    if provenance.get("tokenizer_artifact_id") != f"tokenizer-manifest:{sha256_file(tokenizer_manifest)}":
+        raise RuntimeError("Checkpoint → tokenizer artifact relationship is invalid; refusing export")
+    if provenance.get("dataset_artifact_id") != f"dataset-manifest:{sha256_file(weighted_manifest)}":
+        raise RuntimeError("Checkpoint → dataset artifact relationship is invalid; refusing export")
+    if provenance.get("source_artifact_id") != f"source-manifest:{sha256_file(source_manifest)}":
+        raise RuntimeError("Checkpoint → source artifact relationship is invalid; refusing export")
+    if int(tokenizer_data.get("vocab_size", -1)) != int(payload["model_cfg"].get("vocab_size", -2)):
+        raise RuntimeError("Tokenizer/model vocabulary provenance mismatch; refusing export")
 
 def _hf_config(cfg: ModelConfig, model_name: str) -> dict[str, Any]:
     return {"architectures":["LlamaForCausalLM"],"model_type":"llama","torch_dtype":"float32","vocab_size":cfg.vocab_size,"hidden_size":cfg.d_model,"intermediate_size":cfg.d_ffn,"num_hidden_layers":cfg.n_layers,"num_attention_heads":cfg.n_heads,"num_key_value_heads":cfg.n_kv_heads,"max_position_embeddings":cfg.seq_len,"rms_norm_eps":cfg.norm_eps,"rope_theta":cfg.rope_theta,"attention_bias":cfg.bias,"mlp_bias":cfg.bias,"tie_word_embeddings":True,"bos_token_id":2,"eos_token_id":3,"pad_token_id":0,"transformers_version":"4.0+","_name_or_path":model_name}
@@ -169,7 +245,7 @@ def export_checkpoint(output_dir: str | Path, llamacpp_dir: str | Path, quant: s
     if not isinstance(vocab, dict) or len(vocab) != cfg.vocab_size: raise RuntimeError(f"Tokenizer vocab ({len(vocab) if isinstance(vocab, dict) else 'invalid'}) does not match model vocab_size ({cfg.vocab_size})")
     hf_dir = output_dir / "export" / "hf"; gguf_dir = output_dir / "gguf"; _write_hf_checkpoint(state, cfg, hf_dir, model_name); _tokenizer_files(tokenizer_dir, hf_dir); converter = _find_converter(llamacpp_dir); f16 = _convert_to_f16(converter, hf_dir, gguf_dir); final = f16 if quant == "F16" else _quantize(f16, _find_quantizer(llamacpp_dir), quant, gguf_dir)
     modelfile = gguf_dir / "Modelfile"; modelfile.write_text(f"FROM {final.name}\n\nPARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER repeat_penalty 1.1\n", encoding="utf-8")
-    manifest = {"schema": 3, "checkpoint": str(ckpt), "checkpoint_step": int(payload.get("step", 0)), "model_name": model_name, "model_config": cfg.to_dict(), "quantization": quant, "llamacpp_dir": str(llamacpp_dir), "converter": str(converter), "converter_version": _llama_version(llamacpp_dir), "hf_dir": str(hf_dir), "f16_gguf": str(f16), "final_gguf": str(final), "final_gguf_sha256": sha256_file(final), "final_gguf_size": final.stat().st_size, "f16_gguf_sha256": sha256_file(f16), "modelfile": str(modelfile), "training_provenance": payload.get("provenance") or {}}
+    manifest = {"schema": 3, "checkpoint": str(ckpt), "checkpoint_sha256": sha256_file(ckpt), "checkpoint_step": int(payload.get("step", 0)), "model_name": model_name, "model_config": cfg.to_dict(), "quantization": quant, "llamacpp_dir": str(llamacpp_dir), "converter": str(converter), "converter_version": _llama_version(llamacpp_dir), "hf_dir": str(hf_dir), "f16_gguf": str(f16), "final_gguf": str(final), "final_gguf_sha256": sha256_file(final), "final_gguf_size": final.stat().st_size, "f16_gguf_sha256": sha256_file(f16), "modelfile": str(modelfile), "training_provenance": payload.get("provenance") or {}}
     card_paths = write_export_cards(output_dir, manifest, payload); manifest["dataset_card"] = card_paths["dataset_card"]; manifest["model_card"] = card_paths["model_card"]; manifest["dataset_card_sha256"] = sha256_file(Path(card_paths["dataset_card"])); manifest["model_card_sha256"] = sha256_file(Path(card_paths["model_card"])); _atomic_json(gguf_dir / "export_manifest.json", manifest); log.info("Export complete: %s", final); return manifest
 
 

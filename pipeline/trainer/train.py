@@ -19,6 +19,7 @@ import torch.nn as nn
 from pipeline.integrity import sha256_file
 from pipeline.model_sizer import estimate_total_tokens, profile_hardware, recommend_training_profile
 from pipeline.shardwriter.shard_writer import ShardDataLoader
+from pipeline.provenance import config_identities, artifact_id, stable_hash
 from pipeline.trainer.model import LlamaModel, ModelConfig
 
 log = logging.getLogger("trainer")
@@ -41,26 +42,55 @@ def _source_manifest_hash(cfg: dict) -> Optional[str]:
 
 
 def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: Optional[dict] = None) -> dict:
-    pipeline_sha = cfg.get("_pipeline_config_sha256")
-    if not pipeline_sha:
-        raise RuntimeError("Training provenance requires the canonical pipeline configuration SHA-256")
-    shard_sha = _shard_manifest_hash(shard_dir)
-    if not shard_sha:
-        raise RuntimeError(f"Training provenance requires a valid shard manifest: {shard_dir}")
+    """Build checkpoint provenance without treating the pipeline config as universal identity."""
     source_sha = _source_manifest_hash(cfg)
     if not source_sha:
         raise RuntimeError("Training provenance requires the completed source manifest")
+    shard_sha = _shard_manifest_hash(shard_dir)
+    if not shard_sha:
+        raise RuntimeError(f"Training provenance requires a valid shard manifest: {shard_dir}")
+
     effective_train_cfg = dict(train_cfg if train_cfg is not None else cfg.get("train", {}))
     effective_train_cfg["_source_manifest_sha256"] = source_sha
-    return {
-        "schema": 2,
-        "pipeline_config_sha256": pipeline_sha,
-        "train_config_sha256": _stable_hash(effective_train_cfg),
-        "model_config_sha256": _stable_hash(model_cfg.to_dict()),
+    identities = dict(cfg.get("_config_identities") or {})
+    if not identities:
+        identities = config_identities(
+            cfg,
+            pipeline_sha256=cfg.get("_pipeline_config_sha256"),
+            source_definition_hashes=cfg.get("_source_definition_hashes") or {},
+        )
+    model_sha = stable_hash(model_cfg.to_dict())
+    train_sha = stable_hash(effective_train_cfg)
+    identities["train_config_sha256"] = train_sha
+    identities["model_config_sha256"] = model_sha
+    shard_manifest = Path(shard_dir) / "shards.manifest.json"
+    shard_manifest_artifact_id = artifact_id("shard-manifest", sha256_file(shard_manifest))
+    tokenizer_manifest = Path(shard_dir).parent / "tokenizer" / "tokenizer.json.manifest.json"
+    weighted_manifest = Path(shard_dir).parent.parent / "scratch" / "04_weighted.jsonl.manifest.json"
+    source_manifest = Path(cfg.get("_source_manifest_path") or Path(shard_dir).parent.parent / "source_manifest.json")
+    tokenizer_artifact_id = artifact_id("tokenizer-manifest", sha256_file(tokenizer_manifest)) if tokenizer_manifest.is_file() else None
+    dataset_artifact_id = artifact_id("dataset-manifest", sha256_file(weighted_manifest)) if weighted_manifest.is_file() else None
+    source_artifact_id = artifact_id("source-manifest", sha256_file(source_manifest)) if source_manifest.is_file() else None
+
+    provenance = {
+        "schema": 3,
+        "run_id": cfg.get("_run_id"),
+        "config_identities": identities,
+        "config_paths": {"pipeline": str(cfg.get("_pipeline_config_relative_path") or cfg.get("_pipeline_config_path") or "").replace("\\", "/")},
+        "config_snapshots": dict(cfg.get("_config_snapshots") or {}),
+        "train_config_sha256": train_sha,
+        "model_config_sha256": model_sha,
         "shard_manifest_sha256": shard_sha,
         "source_manifest_sha256": source_sha,
         "seed": int(effective_train_cfg.get("seed", 42)),
+        "parent_artifact_ids": [x for x in (shard_manifest_artifact_id, tokenizer_artifact_id, dataset_artifact_id, source_artifact_id) if x],
+        "tokenizer_artifact_id": tokenizer_artifact_id,
+        "dataset_artifact_id": dataset_artifact_id,
+        "source_artifact_id": source_artifact_id,
     }
+    if cfg.get("_pipeline_config_sha256"):
+        provenance["pipeline_config_sha256"] = cfg["_pipeline_config_sha256"]
+    return provenance
 
 
 def _seed_everything(seed: int) -> None:

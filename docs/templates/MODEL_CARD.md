@@ -21,7 +21,11 @@
 - Dataset card: `[DATASET_CARD]`
 - Dataset/provenance manifest: `[DATASET_PROVENANCE]`
 - Training provenance: `[TRAINING_PROVENANCE]`
-- Pipeline configuration SHA-256: `[PIPELINE_CONFIG_SHA256]`
+- Pipeline configuration SHA-256 (legacy compatibility evidence): `[PIPELINE_CONFIG_SHA256]`
+- Dataset configuration SHA-256: `[DATASET_CONFIG_SHA256]`
+- Tokenizer configuration SHA-256: `[TOKENIZER_CONFIG_SHA256]`
+- Training configuration SHA-256: `[TRAIN_CONFIG_SHA256]`
+- Model configuration SHA-256: `[MODEL_CONFIG_SHA256]`
 - Shard manifest SHA-256: `[SHARD_MANIFEST_SHA256]`
 
 ## Training procedure

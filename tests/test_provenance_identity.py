@@ -49,10 +49,10 @@ def test_source_definition_paths_include_dataset_profile_catalog():
     assert paths["dataset_profiles"].is_file()
 
 
-def test_source_definition_paths_bind_to_selected_config():
+def test_source_definition_paths_exclude_training_pipeline_config():
     cfg = _load_config("pipeline_config.smoke.yaml")
     paths = _source_definition_paths(cfg, ROOT)
-    assert paths["pipeline_config"] == (ROOT / "config" / "pipeline_config.smoke.yaml").resolve()
+    assert "pipeline_config" not in paths
 
 
 def test_dataset_session_config_binds_to_canonical_production_groups():
@@ -101,7 +101,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
     assert data["dataset_group"] == "swe_cs_systems"
     assert data["retrieval_started_at"]
     assert data["retrieval_completed_at"]
-    assert data["source_definition_files"]["pipeline_config"]["sha256"]
+    assert "pipeline_config" not in data["source_definition_files"]
     assert data["source_definition_files"]["dataset_profiles"]["sha256"]
     assert data["sources"]
     group = next(item for item in yaml.safe_load((ROOT / "config/dataset_groups.yaml").read_text(encoding="utf-8"))["dataset_groups"] if item["id"] == "swe_cs_systems")
