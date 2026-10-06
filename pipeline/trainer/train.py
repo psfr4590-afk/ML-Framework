@@ -61,6 +61,8 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
         )
     model_sha = stable_hash(model_cfg.to_dict())
     train_sha = stable_hash(effective_train_cfg)
+    identities["train_config_sha256"] = train_sha
+    identities["model_config_sha256"] = model_sha
     shard_manifest = Path(shard_dir) / "shards.manifest.json"
     shard_manifest_artifact_id = artifact_id("shard-manifest", sha256_file(shard_manifest))
     tokenizer_manifest = Path(shard_dir).parent / "tokenizer" / "tokenizer.json.manifest.json"
