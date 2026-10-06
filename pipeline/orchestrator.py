@@ -722,15 +722,16 @@ class Pipeline:
             raise RuntimeError("Shard stage produced no shard files")
         marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8")
         self._stage_metrics["shard"] = stage_counts(corpus_path, None)
+        writer_stats = getattr(writer, "stats", {})
         self._stage_metrics["shard"].update({
-            "document_count": int(writer.stats["docs_processed"]),
+            "document_count": int(writer_stats.get("docs_processed", self._stage_metrics["shard"].get("input_document_count", 0))),
             "removed_count": 0,
             "removal_reasons": {},
-            "token_count": int(writer.stats["total_tokens"]),
-            "train_document_count": int(writer.stats.get("train_docs", 0)),
-            "validation_document_count": int(writer.stats.get("val_docs", 0)),
-            "train_shards": int(writer.stats["train_shards"]),
-            "validation_shards": int(writer.stats["val_shards"]),
+            "token_count": writer_stats.get("total_tokens"),
+            "train_document_count": int(writer_stats.get("train_docs", 0)),
+            "validation_document_count": int(writer_stats.get("val_docs", 0)),
+            "train_shards": int(writer_stats.get("train_shards", len(paths))),
+            "validation_shards": int(writer_stats.get("val_shards", 0)),
         })
         return shard_dir
 
