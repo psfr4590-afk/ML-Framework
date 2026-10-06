@@ -1,26 +1,25 @@
 # Model Lab Release Candidate / Production Release Checklist
 
-A release candidate is a source-tree candidate plus reproducible evidence. A production release requires the additional target-environment gates.
+A release candidate is a source-tree candidate plus reproducible evidence. A production release requires the additional target-environment gates. This checklist is intentionally reset for each release candidate; checked items are not permanent claims about the current `main` branch.
 
 ## 1. Repository and automated gates
 
-- [x] Current RC source state identified on `main`; release commit must be frozen before tagging
-- [x] Linux CI passes on the current `main` source state
-- [x] Windows CI passes on the current `main` source state
-- [x] Windows PowerShell bootstrap contract passes
-- [x] `python -m compileall -q .` passes in CI
-- [x] `python -m pytest -q` passes with the declared coverage threshold
-- [x] `python run_pipeline.py --doctor` has no required failures
-- [x] Security gate passes: secret scan, `pip check`, `pip-audit`
-- [x] CodeQL analysis passes on the current `main` source state
-- [x] No unintended generated artifacts, credentials, caches, or native build products are tracked
+- [ ] Exact release commit identified and frozen before tagging
+- [ ] Linux CI passes on the exact release commit
+- [ ] Windows CI passes on the exact release commit
+- [ ] Windows PowerShell bootstrap contract passes
+- [ ] `python -m compileall -q .` passes in CI
+- [ ] `python -m pytest -q` passes in CI
+- [ ] `python run_pipeline.py --doctor` has no required failures
+- [ ] Security gate passes: secret scan, `pip check`, `pip-audit`
+- [ ] CodeQL analysis passes on the exact release commit
+- [ ] No unintended generated artifacts, credentials, caches, or native build products are tracked
 
 ## 2. Native release gate
 
-- [ ] Pinned llama.cpp bootstrap completed and commit is `b95502b...`
+- [ ] Pinned llama.cpp bootstrap completed and the expected revision is recorded
 - [ ] `convert_hf_to_gguf.py` exists in the pinned checkout
 - [ ] `llama-quantize` exists when quantized export is enabled
-- [x] Termux/Android native quantizer smoke evidence recorded for 2026-09-29: Android 16/aarch64 executable starts successfully
 - [ ] Deterministic network-free release fixture completes
 - [ ] Tokenizer and shard contracts pass
 - [ ] Reduced training run writes a checkpoint and integrity manifest

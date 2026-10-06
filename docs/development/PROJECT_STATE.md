@@ -1,7 +1,7 @@
 # Model Lab — Project State
 
 **Version:** 1.3.0  
-**Release posture:** Release-candidate preparation  
+**Release posture:** RC source-ready; production release unverified  
 **Source of truth:** the current public `main` branch
 
 ## Identity
@@ -57,17 +57,17 @@ The current release controls include:
 
 ## Current release boundary
 
-The repository is being prepared as an RC, not represented as a production release.
+The repository is maintained as an RC source candidate, not represented as a production release. Current CI/security/CodeQL results must always be read from GitHub for the exact commit under review.
 
 The implementation and repository-side release machinery are present. The remaining release evidence is execution-dependent:
 
-1. CI/security must be green for the exact RC commit.
+1. CI, security, and CodeQL must be green for the exact RC commit.
 2. `python scripts/verify_release.py --bootstrap-native` must pass.
 3. Native GGUF inference validation must be recorded as passed.
 4. Release evidence must include dependency freeze, SBOM, provenance, export manifest, integrity checks, and inference results.
 5. A real production training run remains a separate operational validation and is not implied by the bounded release smoke.
 
-Historical verification reports remain useful as audit history but do not override current code or current release evidence.
+Historical verification reports remain useful as audit history but do not override current code or current release evidence. The release checklist is a procedure, not a permanent record of current PASS state.
 
 ## Native dependency
 
