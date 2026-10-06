@@ -236,48 +236,5 @@ def main(argv: list[str] | None = None) -> int:
         print(f"GGUF VERIFICATION FAILED: {exc}")
         return 2
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Load a GGUF with llama.cpp and generate one token"
-    )
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--llama-cli", required=False)
-    parser.add_argument("--llamacpp-dir", required=False)
-    parser.add_argument("--manifest")
-    parser.add_argument("--prompt", default="Hello")
-    args = parser.parse_args(argv)
-
-    if bool(args.llama_cli) == bool(args.llamacpp_dir):
-        parser.error(
-            "provide exactly one of --llama-cli or --llamacpp-dir"
-        )
-
-    try:
-        cli = (
-            Path(args.llama_cli).resolve()
-            if args.llama_cli
-            else _find_cli(Path(args.llamacpp_dir).resolve())
-        )
-
-        result = verify_gguf(args.model, cli, args.prompt)
-
-        if args.manifest:
-            manifest_path = Path(args.manifest).resolve()
-            manifest = (
-                json.loads(manifest_path.read_text(encoding="utf-8"))
-                if manifest_path.is_file()
-                else {}
-            )
-            manifest["inference_validation"] = result
-            _atomic_json(manifest_path, manifest)
-
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0
-
-    except Exception as exc:
-        print(f"GGUF VERIFICATION FAILED: {exc}")
-        return 2
-
-
 if __name__ == "__main__":
     raise SystemExit(main())
