@@ -101,7 +101,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
     assert data["dataset_group"] == "swe_cs_systems"
     assert data["retrieval_started_at"]
     assert data["retrieval_completed_at"]
-    assert data["source_definition_files"]["pipeline_config"]["sha256"]
+    assert "pipeline_config" not in data["source_definition_files"]
     assert data["source_definition_files"]["dataset_profiles"]["sha256"]
     assert data["sources"]
     group = next(item for item in yaml.safe_load((ROOT / "config/dataset_groups.yaml").read_text(encoding="utf-8"))["dataset_groups"] if item["id"] == "swe_cs_systems")
