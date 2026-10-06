@@ -75,8 +75,8 @@ if (-not $Quant) {
     throw "llama-quantize.exe was not built"
 }
 
-if (-not $App) {
-    throw "llama.exe was not built"
+if (-not $Cli) {
+    throw "llama-cli.exe was not built"
 }
 
 Write-Host "`n=== LLAMA.CPP READY ===" -ForegroundColor Green
