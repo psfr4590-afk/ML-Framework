@@ -277,9 +277,6 @@ class Pipeline:
         self.cfg.setdefault("train", {})["shard_dir"] = str(self._out / "shards")
         self.cfg.setdefault("export", {})["llamacpp_dir"] = str(PROJECT_ROOT / self.cfg.get("export", {}).get("llamacpp_dir", "llama.cpp"))
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
-        self.cfg["_run_id"] = new_run_id()
-        self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
-        self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
         self._resume = bool(self.cfg["pipeline"].get("resume", True)) if resume is None else bool(resume)
         self.cfg.setdefault("train", {})["resume"] = self._resume
         self._weights_path = PROJECT_ROOT / self.cfg.get("crawl", {}).get("source_weights_file", "config/source_weights.yaml")
@@ -287,6 +284,9 @@ class Pipeline:
         self._clean_config_path = PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")
         self._source_definition_paths = _source_definition_paths(self.cfg, PROJECT_ROOT)
         self._source_definition_hashes = {name: _file_hash(path) for name, path in self._source_definition_paths.items()}
+        self.cfg["_run_id"] = new_run_id()
+        self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
+        self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
         self._source_manifest_path = self._out.parent / "source_manifest.json"
         self._weights = SourceWeightLookup(str(self._weights_path))
         self._signals = DomainSignalTracker(self._weights.signal_gate_config())
