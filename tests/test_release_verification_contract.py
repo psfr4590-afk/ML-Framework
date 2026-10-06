@@ -22,7 +22,13 @@ class _Proc:
 def test_verify_gguf_runs_one_token_generation(monkeypatch, tmp_path: Path):
     model = tmp_path / "model.gguf"
     cli = tmp_path / "llama-cli"
-    _write_gguf(model, [("general.architecture", 8, "llama")])
+    _write_gguf(
+        model,
+        [
+            ("general.architecture", 8, "llama"),
+            ("tokenizer.ggml.model", 8, "fixture"),
+        ],
+    )
     cli.write_bytes(b"executable")
     seen: dict[str, object] = {}
 
@@ -48,7 +54,13 @@ def test_verify_gguf_runs_one_token_generation(monkeypatch, tmp_path: Path):
 def test_verify_gguf_rejects_empty_generation(monkeypatch, tmp_path: Path):
     model = tmp_path / "model.gguf"
     cli = tmp_path / "llama-cli"
-    _write_gguf(model, [("general.architecture", 8, "llama")])
+    _write_gguf(
+        model,
+        [
+            ("general.architecture", 8, "llama"),
+            ("tokenizer.ggml.model", 8, "fixture"),
+        ],
+    )
     cli.write_bytes(b"executable")
 
     class EmptyProc:
