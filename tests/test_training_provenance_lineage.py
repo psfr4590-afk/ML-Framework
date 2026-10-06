@@ -100,10 +100,10 @@ def test_export_accepts_independent_stage_config_identities_without_pipeline_has
         }), encoding="utf-8")
 
     manifest(scratch / "04_weighted.jsonl", {
-        "config_identities": identities | {"pipeline_config_sha256": "historical-" + "a" * 10},
+        "run_id": "fixture", "config_identities": identities | {"pipeline_config_sha256": "historical-" + "a" * 10},
     })
     manifest(output / "tokenizer" / "tokenizer.json", {
-        "config_identities": identities | {"pipeline_config_sha256": "historical-" + "b" * 10},
+        "run_id": "fixture", "config_identities": identities | {"pipeline_config_sha256": "historical-" + "b" * 10},
     })
     tokenizer_manifest = output / "tokenizer" / "tokenizer.json.manifest.json"
     tokenizer_manifest_data = json.loads(tokenizer_manifest.read_text(encoding="utf-8"))
@@ -114,6 +114,7 @@ def test_export_accepts_independent_stage_config_identities_without_pipeline_has
         "schema": 4,
         "files": [],
         "provenance": identities | {
+            "run_id": "fixture",
             "pipeline_config_sha256": "historical-" + "c" * 10,
             "tokenizer_sha256": _sha256(tokenizer),
         },
