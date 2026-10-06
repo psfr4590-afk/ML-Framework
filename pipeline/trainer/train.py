@@ -62,6 +62,7 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
     model_sha = stable_hash(model_cfg.to_dict())
     train_sha = stable_hash(effective_train_cfg)
     shard_manifest = Path(shard_dir) / "shards.manifest.json"
+    shard_manifest_artifact_id = artifact_id("shard-manifest", sha256_file(shard_manifest))
 
     provenance = {
         "schema": 3,
@@ -72,7 +73,7 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
         "shard_manifest_sha256": shard_sha,
         "source_manifest_sha256": source_sha,
         "seed": int(effective_train_cfg.get("seed", 42)),
-        "parent_artifact_ids": [artifact_id("manifest", stable_hash(shard_sha))],
+        "parent_artifact_ids": [shard_manifest_artifact_id],
     }
     if cfg.get("_pipeline_config_sha256"):
         provenance["pipeline_config_sha256"] = cfg["_pipeline_config_sha256"]
