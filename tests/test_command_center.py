@@ -77,3 +77,20 @@ def test_credential_api_does_not_return_secret():
             assert "do-not-return" not in listing.text
     finally:
         credentials.path = original
+
+
+def test_dashboard_api_exposes_persisted_observability():
+    with TestClient(app, client=LOOPBACK_CLIENT) as client:
+        response = client.get("/api/dashboard")
+        assert response.status_code == 200
+        body = response.json()
+        assert set(["run", "stage", "training", "dataset", "hardware", "provenance", "checkpoints", "artifacts", "warnings", "errors"]) <= set(body)
+
+
+def test_run_list_and_missing_run_contract():
+    with TestClient(app, client=LOOPBACK_CLIENT) as client:
+        response = client.get("/api/runs")
+        assert response.status_code == 200
+        assert "runs" in response.json()
+        missing = client.get("/api/runs/does-not-exist")
+        assert missing.status_code == 404

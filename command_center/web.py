@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
+from datetime import datetime, timezone
 import platform
 import sys
 
@@ -11,6 +13,8 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .runner import stop
+from .config import ROOT
+from pipeline.experiment_db import ExperimentDB
 from .service import add, credential_delete, credential_list, credential_set, credential_test, groups, ingest, init, stage, status
 from .store import store
 from .security import MAX_REQUEST_BYTES, validate_tail_lines
@@ -93,6 +97,125 @@ def index():
 def system():
     return {"application":"M²S Model Training Pipeline","version":"1.3.0","platform":sys.platform,"python":sys.version.split()[0],"machine":platform.machine(),"stages":list(store.STAGES) if hasattr(store,"STAGES") else ["crawl","clean","dedup","weight","tokenize","shard","train","export"],"security":{"api_access":"localhost-only","mutation_control":"custom-header"}}
 
+
+
+def _experiment_db() -> ExperimentDB:
+    return ExperimentDB(ROOT / "output" / "experiment.db")
+
+
+def _rows(db: ExperimentDB, query: str, params: tuple = ()) -> list[dict]:
+    return [dict(row) for row in db.conn.execute(query, params).fetchall()]
+
+
+def _latest_run(db: ExperimentDB) -> dict | None:
+    rows = _rows(db, "SELECT * FROM runs ORDER BY started_at DESC LIMIT 1")
+    return rows[0] if rows else None
+
+
+def _run_snapshot(run_id: str | None = None) -> dict:
+    db = _experiment_db()
+    run = db.get_run(run_id) if run_id else _latest_run(db)
+    if not run:
+        return {"run": None, "stage": [], "training": {}, "dataset": {}, "hardware": {}, "provenance": {}, "checkpoints": [], "artifacts": [], "warnings": [], "errors": []}
+    rid = run["id"]
+    dataset_rows = _rows(db, "SELECT * FROM datasets WHERE run_id=? ORDER BY id LIMIT 1", (rid,))
+    dataset = dataset_rows[0] if dataset_rows else {}
+    stages = _rows(db, "SELECT * FROM stages WHERE run_id=? ORDER BY id", (rid,))
+    metrics = _rows(db, "SELECT step,metric_name,metric_value,metric_unit,recorded_at FROM metrics WHERE run_id=? ORDER BY step DESC,id DESC", (rid,))
+    latest = {}
+    for row in metrics:
+        latest.setdefault(row["metric_name"], row)
+    checkpoints = _rows(db, "SELECT * FROM checkpoints WHERE run_id=? ORDER BY step DESC", (rid,))
+    artifacts = _rows(db, "SELECT id,stage_name,path,sha256,size_bytes,created_at FROM artifacts WHERE run_id=? ORDER BY stage_name,path", (rid,))
+    configs = _rows(db, "SELECT config_type,sha256,path,snapshot_json FROM configs WHERE run_id=? ORDER BY config_type", (rid,))
+    train_config = {}
+    for cfg in configs:
+        if cfg.get("config_type") in {"train", "training"}:
+            try:
+                train_config = json.loads(cfg.get("snapshot_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                train_config = {}
+    sources = _rows(db, "SELECT s.id,s.kind,s.identifier,s.revision,s.license,s.status,ss.requests,ss.successes,ss.failures,ss.documents,ss.retries,ss.duration_seconds FROM sources s LEFT JOIN source_stats ss ON ss.source_id=s.id WHERE s.dataset_id=? ORDER BY s.id", (dataset["id"],)) if dataset.get("id") else []
+    warnings = _rows(db, "SELECT code,message,created_at FROM warnings WHERE run_id=? ORDER BY id DESC", (rid,))
+    errors = _rows(db, "SELECT code,message,exception_type,created_at FROM errors WHERE run_id=? ORDER BY id DESC", (rid,))
+    runtime = _rows(db, "SELECT * FROM runtime_estimates WHERE run_id=? ORDER BY id DESC", (rid,))
+    step = next((int(r["step"]) for r in metrics if r["step"] is not None), None)
+    total_steps = next((int(latest[k]["metric_value"]) for k in ("total_steps", "train.total_steps") if k in latest), None)
+    if total_steps is None:
+        raw_total = train_config.get("total_steps")
+        if raw_total is not None:
+            try:
+                total_steps = int(raw_total)
+            except (TypeError, ValueError):
+                total_steps = None
+    progress = step / total_steps if step is not None and total_steps else None
+    def metric_value(*names):
+        return next((latest[n]["metric_value"] for n in names if n in latest), None)
+    train_runtime = next((r for r in runtime if r["estimate_type"] == "training"), {})
+    elapsed_seconds = None
+    if run.get("started_at"):
+        try:
+            start = datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(run["completed_at"].replace("Z", "+00:00")) if run.get("completed_at") else datetime.now(timezone.utc)
+            elapsed_seconds = max(0.0, (end - start).total_seconds())
+        except (TypeError, ValueError):
+            elapsed_seconds = None
+    eta_seconds = None
+    if progress and progress > 0 and elapsed_seconds is not None and not run.get("completed_at"):
+        eta_seconds = max(0.0, elapsed_seconds * (1.0 - progress) / progress)
+    hardware_rows = _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,))
+    hardware = hardware_rows[0] if hardware_rows else {}
+    if hardware.get("snapshot_json"):
+        try:
+            snapshot = json.loads(hardware["snapshot_json"])
+            if isinstance(snapshot, dict):
+                hardware["gpu_utilization"] = snapshot.get("gpu_utilization_percent", snapshot.get("gpu_utilization"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return {
+        "run": run,
+        "stage": stages,
+        "training": {
+            "step": step, "total_steps": total_steps, "progress": progress,
+            "loss": metric_value("loss", "train.loss", "train_loss"),
+            "validation_loss": metric_value("val_loss", "validation_loss", "train.val_loss"),
+            "best_loss": next((c["best_val_loss"] for c in checkpoints if c["best_val_loss"] is not None), None),
+            "tokens_per_sec": metric_value("tokens_per_sec", "tokens/sec", "train.tokens_per_sec"),
+            "estimated_seconds": train_runtime.get("estimated_seconds"),
+            "actual_seconds": train_runtime.get("actual_seconds"),
+            "elapsed_seconds": elapsed_seconds,
+            "eta_seconds": eta_seconds,
+        },
+        "dataset": {**dataset, "sources": sources, "model": train_config.get("model_preset") or train_config.get("model_name")},
+        "hardware": hardware,
+        "provenance": {
+            "configuration": bool(configs),
+            "dataset_lineage": bool(dataset.get("manifest_sha256")),
+            "tokenizer": any(a["stage_name"] == "tokenize" and a["sha256"] for a in artifacts),
+            "checkpoint": bool(checkpoints),
+            "artifact_integrity": bool(artifacts) and all(a["sha256"] for a in artifacts),
+            "configs": configs,
+        },
+        "checkpoints": checkpoints, "artifacts": artifacts, "warnings": warnings, "errors": errors,
+    }
+
+
+@app.get("/api/runs")
+def api_runs(limit: int = 20):
+    return {"runs": _experiment_db().search_runs(limit=max(1, min(int(limit), 100)))}
+
+
+@app.get("/api/runs/{run_id}")
+def api_run(run_id: str):
+    snapshot = _run_snapshot(run_id)
+    if not snapshot["run"]:
+        raise HTTPException(404, {"code": "NOT_FOUND", "message": "Run not found"})
+    return snapshot
+
+
+@app.get("/api/dashboard")
+def api_dashboard():
+    return _run_snapshot()
 
 @app.get("/api/datasets")
 def datasets(): return status()
