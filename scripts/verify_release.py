@@ -227,7 +227,10 @@ def _ui_probe() -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the Model Lab production verification gate."); parser.add_argument("--bootstrap-native", action="store_true", help="bootstrap pinned llama.cpp and validate native GGUF inference"); parser.add_argument("--skip-tests", action="store_true", help="not allowed for production verification"); parser.add_argument("--verify-ollama", action="store_true", help="also verify every exported GGUF through Ollama"); args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Run the Model Lab production verification gate."); parser.add_argument("--bootstrap-native", action="store_true", help="bootstrap pinned llama.cpp and validate native GGUF inference"); parser.add_argument("--skip-tests", action="store_true", help="not allowed for production verification"); parser.add_argument("--verify-ollama", action="store_true", help="also verify every exported GGUF through Ollama")
+    parser.add_argument("--ui-probe", action="store_true", help="probe the localhost FastAPI backend")
+    parser.add_argument("--clean-clone", action="store_true", help="exercise the documented clone/install/doctor/smoke path in a temporary clone")
+    args = parser.parse_args()
     if args.skip_tests: print("RELEASE VERIFICATION FAILED: --skip-tests is not allowed for a production verification."); return 2
     failures: list[str] = []; compile_targets = ["pipeline", "command_center", "scripts", "ui", "run_pipeline.py", "run_command_center.py", "launch.py"]
     if run([sys.executable, "-m", "compileall", "-q", *compile_targets]): failures.append("compileall")
