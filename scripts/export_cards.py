@@ -67,7 +67,10 @@ def write_export_cards(output_dir: str | Path, export_manifest: dict[str, Any], 
     if not config_ids:
         for _, (_, manifest) in stages.items():
             if manifest:
-                config_ids = (manifest.get("provenance") or {}).get("config_identities") or {}
+                stage_prov = manifest.get("provenance") or {}
+                config_ids = stage_prov.get("config_identities") or {}
+                if not config_ids and stage_prov.get("pipeline_config_sha256"):
+                    config_ids = {"pipeline_config_sha256": stage_prov.get("pipeline_config_sha256")}
                 if config_ids:
                     break
     source_manifest = output_dir.parent / "source_manifest.json"
