@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pipeline.experiment_db import ExperimentDB
+
+
 STATES = {"PENDING", "RUNNING", "PASS", "WARN", "FAILED", "SKIPPED", "DEGRADED"}
 
 
@@ -122,6 +125,8 @@ class RunTracker:
         self.experiment_id = str(experiment_id)
         self.run_dir = self.output_dir / "runs" / self.run_id
         self.path = self.run_dir / "run_manifest.json"
+        self.database_path = self.output_dir / "experiment.db"
+        self.db = ExperimentDB(self.database_path)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         now = _now()
         self.manifest = {
@@ -162,6 +167,8 @@ class RunTracker:
         obj.experiment_id = str(data["experiment_id"])
         obj.run_dir = manifest_path.parent
         obj.path = manifest_path
+        obj.database_path = obj.output_dir / "experiment.db"
+        obj.db = ExperimentDB(obj.database_path)
         obj.manifest = data
         obj.manifest["timestamps"]["updated"] = _now()
         obj.manifest["final_status"] = "RUNNING"
@@ -173,6 +180,8 @@ class RunTracker:
         temporary = self.path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(self.manifest, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         os.replace(temporary, self.path)
+        self.db.sync_manifest(self.manifest)
+        self.db.sync_manifest(self.manifest)
 
     def _record_paths(self, values: list[Path]) -> list[dict[str, Any]]:
         records = []
