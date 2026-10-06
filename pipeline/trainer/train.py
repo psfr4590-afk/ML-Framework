@@ -74,7 +74,7 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
         "schema": 3,
         "run_id": cfg.get("_run_id"),
         "config_identities": identities,
-        "config_paths": {"pipeline": str(cfg.get("_pipeline_config_path", "")).replace("\\", "/")},
+        "config_paths": {"pipeline": str(cfg.get("_pipeline_config_relative_path") or cfg.get("_pipeline_config_path") or "").replace("\\", "/")},
         "config_snapshots": dict(cfg.get("_config_snapshots") or {}),
         "train_config_sha256": train_sha,
         "model_config_sha256": model_sha,
