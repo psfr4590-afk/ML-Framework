@@ -32,10 +32,12 @@ class GoogleCrawler(BaseCrawler):
             params = {"key": api_key, "cx": cx, "q": query, "num": min(10, int(self.google.get("num", 10)))}
             try:
                 resp = self.session.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=self.timeout)
+                self.record_response(resp)
                 resp.raise_for_status()
                 payload = resp.json()
                 self.stats["fetched"] += 1
             except (requests.RequestException, ValueError) as exc:
+                self.record_request_error()
                 self.stats["errors"] += 1
                 log.warning("Google search failed for %r: %s", query, exc)
                 continue
