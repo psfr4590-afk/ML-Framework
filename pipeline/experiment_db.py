@@ -8,9 +8,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from pipeline.integrity import sha256_file
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -250,6 +251,7 @@ class ExperimentDB:
         self._sync_metrics(run_id, stages)
         self._sync_artifacts(run_id, manifest.get("artifacts") or [])
         self._sync_warnings_errors(run_id, manifest.get("warnings") or [], manifest.get("errors") or [])
+        self._sync_external_evidence(run_id, manifest)
         self.conn.commit()
 
     def _sync_hardware(self, run_id: str, hardware: dict[str, Any]) -> None:
@@ -275,12 +277,25 @@ class ExperimentDB:
         if not dataset_id:
             return
         report = manifest.get("dataset_report") or {}
+        report_path = self._resolve_evidence_path(str(report.get("path", ""))) if report.get("path") else self.path.parent / "runs" / run_id / "dataset_report.json"
+        report_payload: dict[str, Any] = {}
+        if report_path.is_file():
+            try:
+                report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                report_payload = {}
+        dataset_stats = report_payload.get("dataset") if isinstance(report_payload.get("dataset"), dict) else {}
         self.conn.execute(
             "INSERT INTO datasets(id,run_id,dataset_group,manifest_sha256,document_count,token_count,train_tokens,validation_tokens) "
-            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dataset_group=excluded.dataset_group,manifest_sha256=excluded.manifest_sha256",
+            "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET dataset_group=excluded.dataset_group,manifest_sha256=excluded.manifest_sha256,"
+            "document_count=excluded.document_count,token_count=excluded.token_count,train_tokens=excluded.train_tokens,validation_tokens=excluded.validation_tokens",
             (dataset_id, run_id, identity.get("requested_group") or identity.get("group_id"),
-             report.get("sha256"), None, None, None, None),
+             report.get("sha256"), _as_int(dataset_stats.get("final_docs") or dataset_stats.get("crawled")),
+             _as_int(dataset_stats.get("tokens")), _as_int(dataset_stats.get("train_tokens")),
+             _as_int(dataset_stats.get("validation_tokens"))),
         )
+        if isinstance(report_payload.get("sources"), list):
+            self._sync_sources(run_id, report_payload["sources"], {"dataset_id": dataset_id})
 
     def _sync_sources(self, run_id: str, records: list[Any], identity: dict[str, Any]) -> None:
         dataset_id = str(identity.get("dataset_id") or "")
@@ -295,20 +310,32 @@ class ExperimentDB:
             cur = self.conn.execute(
                 "INSERT INTO sources(dataset_id,kind,identifier,revision,license,raw_source_sha256,status) VALUES(?,?,?,?,?,?,?)",
                 (dataset_id, source.get("kind"), source.get("identifier") or source.get("display_name"),
-                 source.get("revision"), source.get("license", "unknown"), source.get("raw_source_sha256"),
+                 source.get("revision"), source.get("license_status") or source.get("license", "unknown"), source.get("raw_source_sha256") or source.get("source_hash"),
                  record.get("status") or source.get("status")),
             )
             source_id = cur.lastrowid
             stats = record.get("stats") if isinstance(record.get("stats"), dict) else {}
-            if stats:
-                self.conn.execute(
-                    "INSERT INTO source_stats(source_id,requests,successes,failures,http_2xx,http_4xx,http_5xx,documents,retries,duration_seconds) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (source_id, _as_int(stats.get("requests")), _as_int(stats.get("successes")),
-                     _as_int(stats.get("failures")), _as_int(stats.get("http_2xx")), _as_int(stats.get("http_4xx")),
-                     _as_int(stats.get("http_5xx")), _as_int(stats.get("documents")), _as_int(stats.get("retries")),
-                     _as_float(stats.get("duration_seconds"))),
-                )
+            if not stats:
+                codes = record.get("http_status_codes") if isinstance(record.get("http_status_codes"), dict) else {}
+                stats = {
+                    "requests": record.get("request_count", 0),
+                    "successes": record.get("successful_requests", 0),
+                    "failures": record.get("failed_requests", 0),
+                    "http_2xx": sum(int(v) for k, v in codes.items() if 200 <= int(k) < 300),
+                    "http_4xx": sum(int(v) for k, v in codes.items() if 400 <= int(k) < 500),
+                    "http_5xx": sum(int(v) for k, v in codes.items() if 500 <= int(k) < 600),
+                    "documents": record.get("document_count", 0),
+                    "retries": record.get("retry_count", 0),
+                    "duration_seconds": record.get("duration_seconds", 0.0),
+                }
+            self.conn.execute(
+                "INSERT INTO source_stats(source_id,requests,successes,failures,http_2xx,http_4xx,http_5xx,documents,retries,duration_seconds) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (source_id, _as_int(stats.get("requests")), _as_int(stats.get("successes")),
+                 _as_int(stats.get("failures")), _as_int(stats.get("http_2xx")), _as_int(stats.get("http_4xx")),
+                 _as_int(stats.get("http_5xx")), _as_int(stats.get("documents")), _as_int(stats.get("retries")),
+                 _as_float(stats.get("duration_seconds"))),
+            )
 
     def _sync_configs(self, run_id: str, configs: dict[str, Any]) -> None:
         for kind, value in configs.items():
@@ -369,6 +396,137 @@ class ExperimentDB:
                  None, None, _json(item)),
             )
 
+    def _resolve_evidence_path(self, value: str | Path) -> Path:
+        path = Path(value)
+        candidates = [path]
+        if not path.is_absolute():
+            candidates.extend((self.path.parent / path, self.path.parent.parent / path))
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate.resolve()
+        return path
+
+    def _sync_source_manifest(self, run_id: str, manifest: dict[str, Any]) -> None:
+        source_path = self._resolve_evidence_path(str((manifest.get("dataset_report") or {}).get("source_manifest", "")))
+        if not source_path.is_file():
+            source_path = self.path.parent.parent / "source_manifest.json"
+        if not source_path.is_file():
+            return
+        try:
+            payload = json.loads(source_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return
+        dataset_id = str((manifest.get("dataset_identity") or {}).get("dataset_id") or manifest.get("dataset_id") or "")
+        if not dataset_id:
+            return
+        records = payload.get("retrieval") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            return
+        self._sync_sources(run_id, records, {"dataset_id": dataset_id})
+        self.conn.execute(
+            "UPDATE datasets SET manifest_sha256=? WHERE id=?",
+            (sha256_file(source_path), dataset_id),
+        )
+
+    def _sync_checkpoints(self, run_id: str) -> None:
+        checkpoint_dir = self.path.parent / "checkpoints"
+        if not checkpoint_dir.is_dir():
+            return
+        self.conn.execute("DELETE FROM checkpoints WHERE run_id=?", (run_id,))
+        for mp in sorted(checkpoint_dir.glob("ckpt_*.pt.manifest.json")):
+            try:
+                meta = json.loads(mp.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+            path = mp.with_name(mp.name.removesuffix(".manifest.json"))
+            artifact_id = f"{run_id}:checkpoint:{path.name}"
+            self.conn.execute(
+                "INSERT INTO artifacts(id,run_id,stage_name,path,sha256,size_bytes,created_at,parent_artifact_id,metadata_json) "
+                "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET sha256=excluded.sha256,size_bytes=excluded.size_bytes,metadata_json=excluded.metadata_json",
+                (artifact_id, run_id, "train", str(path), meta.get("sha256"), meta.get("size"), None, None, _json(meta)),
+            )
+            self.conn.execute(
+                "INSERT INTO checkpoints(run_id,artifact_id,step,val_loss,best_val_loss,is_best,is_final,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (run_id, artifact_id, _as_int(meta.get("step")), _as_float(meta.get("val_loss")),
+                 _as_float(meta.get("best_val_loss")), int(meta.get("checkpoint_kind") == "best"),
+                 int(meta.get("checkpoint_kind") == "final"), None),
+            )
+
+    def _sync_live_metrics(self, run_id: str) -> None:
+        metrics_path = self.path.parent / "logs" / "metrics.jsonl"
+        if not metrics_path.is_file():
+            return
+        self.conn.execute("DELETE FROM metrics WHERE run_id=? AND step IS NOT NULL", (run_id,))
+        try:
+            lines = metrics_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(row, dict) or row.get("step") is None:
+                continue
+            step = _as_int(row.get("step"))
+            recorded_at = row.get("timestamp") or row.get("recorded_at")
+            for name, value in row.items():
+                if name in {"step", "timestamp", "recorded_at"} or not isinstance(value, (int, float)):
+                    continue
+                self.conn.execute(
+                    "INSERT INTO metrics(run_id,step,metric_name,metric_value,metric_unit,recorded_at) VALUES(?,?,?,?,?,?)",
+                    (run_id, step, name, float(value), None, recorded_at),
+                )
+
+    def _sync_preflight_and_runtime(self, run_id: str, manifest: dict[str, Any]) -> None:
+        report_path = self.path.parent / "preflight_report.json"
+        if not report_path.is_file():
+            return
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return
+        estimate = report.get("estimate") if isinstance(report.get("estimate"), dict) else {}
+        if estimate:
+            self.conn.execute("DELETE FROM runtime_estimates WHERE run_id=? AND estimate_type='preflight'", (run_id,))
+            self.conn.execute(
+                "INSERT INTO runtime_estimates(run_id,estimate_type,estimated_seconds,actual_seconds,tokens_per_second,steps_per_second,created_at) VALUES(?,?,?,?,?,?,?)",
+                (run_id, "preflight", _as_float(estimate.get("estimated_duration_seconds")), None,
+                 _as_float((report.get("benchmark") or {}).get("tokens_per_sec")), None, None),
+            )
+        for stage_name, stage in (manifest.get("stages") or {}).items():
+            if stage_name != "train" or not isinstance(stage, dict):
+                continue
+            train_metrics = (manifest.get("metrics") or {}).get("train") if isinstance(manifest.get("metrics"), dict) else None
+            if isinstance(train_metrics, dict):
+                actual = _as_float(train_metrics.get("training_duration_seconds"))
+                initial = _as_float(train_metrics.get("initial_estimate_seconds"))
+                if actual is not None or initial is not None:
+                    self.conn.execute("DELETE FROM runtime_estimates WHERE run_id=? AND estimate_type='training'", (run_id,))
+                    self.conn.execute(
+                        "INSERT INTO runtime_estimates(run_id,estimate_type,estimated_seconds,actual_seconds,tokens_per_second,steps_per_second,created_at) VALUES(?,?,?,?,?,?,?)",
+                        (run_id, "training", initial, actual, _as_float(train_metrics.get("tokens_per_sec")), _as_float(train_metrics.get("steps_per_sec")), stage.get("end")),
+                    )
+
+    def _sync_evaluations(self, run_id: str, manifest: dict[str, Any]) -> None:
+        self.conn.execute("DELETE FROM evaluations WHERE run_id=?", (run_id,))
+        train = (manifest.get("metrics") or {}).get("train") if isinstance(manifest.get("metrics"), dict) else None
+        if not isinstance(train, dict):
+            return
+        val_loss = train.get("val_loss")
+        if isinstance(val_loss, (int, float)):
+            self.conn.execute(
+                "INSERT INTO evaluations(run_id,name,status,score,step,artifact_id,details_json) VALUES(?,?,?,?,?,?,?)",
+                (run_id, "validation_loss", "PASS", float(val_loss), _as_int(train.get("step")), None, _json({"metric": "val_loss"})),
+            )
+
+    def _sync_external_evidence(self, run_id: str, manifest: dict[str, Any]) -> None:
+        self._sync_source_manifest(run_id, manifest)
+        self._sync_live_metrics(run_id)
+        self._sync_checkpoints(run_id)
+        self._sync_preflight_and_runtime(run_id, manifest)
+        self._sync_evaluations(run_id, manifest)
+
     def _sync_warnings_errors(self, run_id: str, warnings: list[Any], errors: list[Any]) -> None:
         self.conn.execute("DELETE FROM warnings WHERE run_id=?", (run_id,))
         self.conn.execute("DELETE FROM errors WHERE run_id=?", (run_id,))
@@ -416,6 +574,16 @@ class ExperimentDB:
             "stages": [dict(r) for r in self.conn.execute("SELECT * FROM stages WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
             "artifacts": [dict(r) for r in self.conn.execute("SELECT * FROM artifacts WHERE run_id=? ORDER BY stage_name,path", (run_id,)).fetchall()],
             "configs": [dict(r) for r in self.conn.execute("SELECT * FROM configs WHERE run_id=? ORDER BY config_type", (run_id,)).fetchall()],
+            "sources": [dict(r) for r in self.conn.execute(
+                "SELECT s.*,ss.requests,ss.successes,ss.failures,ss.http_2xx,ss.http_4xx,ss.http_5xx,ss.documents,ss.retries,ss.duration_seconds "
+                "FROM sources s LEFT JOIN source_stats ss ON ss.source_id=s.id WHERE s.dataset_id=(SELECT id FROM datasets WHERE run_id=? LIMIT 1) ORDER BY s.id",
+                (run_id,)).fetchall()],
+            "checkpoints": [dict(r) for r in self.conn.execute("SELECT * FROM checkpoints WHERE run_id=? ORDER BY step", (run_id,)).fetchall()],
+            "metrics": [dict(r) for r in self.conn.execute("SELECT * FROM metrics WHERE run_id=? ORDER BY step,metric_name", (run_id,)).fetchall()],
+            "evaluations": [dict(r) for r in self.conn.execute("SELECT * FROM evaluations WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
+            "runtime_estimates": [dict(r) for r in self.conn.execute("SELECT * FROM runtime_estimates WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
+            "warnings": [dict(r) for r in self.conn.execute("SELECT * FROM warnings WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
+            "errors": [dict(r) for r in self.conn.execute("SELECT * FROM errors WHERE run_id=? ORDER BY id", (run_id,)).fetchall()],
         }
 
 

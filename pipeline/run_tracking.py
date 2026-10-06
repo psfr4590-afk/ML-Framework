@@ -181,7 +181,6 @@ class RunTracker:
         temporary.write_text(json.dumps(self.manifest, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         os.replace(temporary, self.path)
         self.db.sync_manifest(self.manifest)
-        self.db.sync_manifest(self.manifest)
 
     def _record_paths(self, values: list[Path]) -> list[dict[str, Any]]:
         records = []
