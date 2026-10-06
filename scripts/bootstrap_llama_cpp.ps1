@@ -65,10 +65,10 @@ $Quant = Get-ChildItem -Path $Build `
     -Filter "llama-quantize.exe" |
     Select-Object -First 1
 
-$App = Get-ChildItem -Path $Build `
+$Cli = Get-ChildItem -Path $Build `
     -Recurse `
     -File `
-    -Filter "llama.exe" |
+    -Filter "llama-cli.exe" |
     Select-Object -First 1
 
 if (-not $Quant) {
