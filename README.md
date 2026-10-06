@@ -329,3 +329,16 @@ The native bootstrap uses a reduced Android-safe build profile under Termux and 
 The repository does **not** claim that a production dataset has been crawled, that a useful model has converged, that external-source training rights have been legally certified, or that target-hardware native inference has passed merely because the source tree is healthy.
 
 Those are runtime and operational facts. The release process requires evidence for them rather than substituting documentation, historical test counts, or placeholder artifacts.
+
+
+## RC release gate
+
+After the ten implementation phases, the release candidate is accepted only by the full release gate:
+
+```bash
+python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
+```
+
+This produces `release-evidence/release_report.json`, a single machine-readable report covering functional evidence, provenance and lineage, dataset/source retrieval, checkpoints, reproducibility, hardware and auto-sizing, ETA, evaluation, SQLite, UI/backend connectivity, GGUF export/inference, clean-clone acceptance, documentation, secrets, Git state, and release artifacts.
+
+A release is **PASS** only when the required checks are explicitly PASS. `UNKNOWN` evidence is not silently treated as success.
