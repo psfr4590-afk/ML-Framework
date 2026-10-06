@@ -68,7 +68,7 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
     checkpoint_meta = None
     if checkpoint is None:
         candidates = sorted((root / "checkpoints").glob("ckpt_*.pt.manifest.json"))
-        checkpoint = Path(candidates[-1]).with_suffix("") if candidates else None
+        checkpoint = Path(str(candidates[-1]).removesuffix(".manifest.json")) if candidates else None
     if checkpoint is not None:
         checkpoint = checkpoint.resolve()
         manifest_path = Path(str(checkpoint) + ".manifest.json")
