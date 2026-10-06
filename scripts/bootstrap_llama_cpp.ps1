@@ -56,7 +56,7 @@ Write-Host "`n=== BUILDING NATIVE ARTIFACTS ===" -ForegroundColor Cyan
 
 cmake --build $Build `
     --config Release `
-    --target llama-quantize llama-app `
+    --target llama-quantize llama-cli `
     --parallel
 
 $Quant = Get-ChildItem -Path $Build `
