@@ -90,7 +90,7 @@ def _native_smoke(verify_ollama: bool = False) -> int:
                 if not final_gguf.is_file() or final_gguf.stat().st_size <= 0:
                     print(f"Missing final GGUF artifact for {quant}: {final_gguf}")
                     return 2
-                if sha256_file(final_gguf) != record["artifact"]["sha256"]:
+                if _sha256(final_gguf) != record["artifact"]["sha256"]:
                     print(f"GGUF hash mismatch for {quant}: {final_gguf}")
                     return 2
                 if not artifact_manifest.is_file():
@@ -101,7 +101,7 @@ def _native_smoke(verify_ollama: bool = False) -> int:
                 if not required <= set(per_export):
                     print(f"Export manifest is incomplete for {quant}: {artifact_manifest}")
                     return 2
-                if per_export["artifact"].get("sha256") != sha256_file(final_gguf):
+                if per_export["artifact"].get("sha256") != _sha256(final_gguf):
                     print(f"Per-export artifact hash mismatch for {quant}")
                     return 2
                 for key in ("dataset_card", "model_card"):
@@ -109,7 +109,7 @@ def _native_smoke(verify_ollama: bool = False) -> int:
                     if not card.is_file() or card.stat().st_size <= 0:
                         print(f"Missing export card: {key}: {card}")
                         return 2
-                    if manifest.get(f"{key}_sha256") != sha256_file(card):
+                    if manifest.get(f"{key}_sha256") != _sha256(card):
                         print(f"Export card hash mismatch: {key}: {card}")
                         return 2
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
