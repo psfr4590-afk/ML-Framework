@@ -297,20 +297,32 @@ class ExperimentDB:
             cur = self.conn.execute(
                 "INSERT INTO sources(dataset_id,kind,identifier,revision,license,raw_source_sha256,status) VALUES(?,?,?,?,?,?,?)",
                 (dataset_id, source.get("kind"), source.get("identifier") or source.get("display_name"),
-                 source.get("revision"), source.get("license", "unknown"), source.get("raw_source_sha256"),
+                 source.get("revision"), source.get("license_status") or source.get("license", "unknown"), source.get("raw_source_sha256") or source.get("source_hash"),
                  record.get("status") or source.get("status")),
             )
             source_id = cur.lastrowid
             stats = record.get("stats") if isinstance(record.get("stats"), dict) else {}
-            if stats:
-                self.conn.execute(
-                    "INSERT INTO source_stats(source_id,requests,successes,failures,http_2xx,http_4xx,http_5xx,documents,retries,duration_seconds) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (source_id, _as_int(stats.get("requests")), _as_int(stats.get("successes")),
-                     _as_int(stats.get("failures")), _as_int(stats.get("http_2xx")), _as_int(stats.get("http_4xx")),
-                     _as_int(stats.get("http_5xx")), _as_int(stats.get("documents")), _as_int(stats.get("retries")),
-                     _as_float(stats.get("duration_seconds"))),
-                )
+            if not stats:
+                codes = record.get("http_status_codes") if isinstance(record.get("http_status_codes"), dict) else {}
+                stats = {
+                    "requests": record.get("request_count", 0),
+                    "successes": record.get("successful_requests", 0),
+                    "failures": record.get("failed_requests", 0),
+                    "http_2xx": sum(int(v) for k, v in codes.items() if 200 <= int(k) < 300),
+                    "http_4xx": sum(int(v) for k, v in codes.items() if 400 <= int(k) < 500),
+                    "http_5xx": sum(int(v) for k, v in codes.items() if 500 <= int(k) < 600),
+                    "documents": record.get("document_count", 0),
+                    "retries": record.get("retry_count", 0),
+                    "duration_seconds": record.get("duration_seconds", 0.0),
+                }
+            self.conn.execute(
+                "INSERT INTO source_stats(source_id,requests,successes,failures,http_2xx,http_4xx,http_5xx,documents,retries,duration_seconds) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (source_id, _as_int(stats.get("requests")), _as_int(stats.get("successes")),
+                 _as_int(stats.get("failures")), _as_int(stats.get("http_2xx")), _as_int(stats.get("http_4xx")),
+                 _as_int(stats.get("http_5xx")), _as_int(stats.get("documents")), _as_int(stats.get("retries")),
+                 _as_float(stats.get("duration_seconds"))),
+            )
 
     def _sync_configs(self, run_id: str, configs: dict[str, Any]) -> None:
         for kind, value in configs.items():
