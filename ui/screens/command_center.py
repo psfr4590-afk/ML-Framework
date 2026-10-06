@@ -65,8 +65,9 @@ class CommandCenterScreen(tk.Frame):
         return card_frame, grid
 
     def _metric_grid(self, parent, values):
+        row = len(parent.grid_slaves()) // max(len(values), 1)
         for i, (name, value, accent) in enumerate(values):
-            metric(parent, name, value, accent).grid(row=0, column=i, sticky="nsew", padx=4)
+            metric(parent, name, value, accent).grid(row=row, column=i, sticky="nsew", padx=4)
 
     def refresh(self):
         self._clear()
@@ -94,6 +95,7 @@ class CommandCenterScreen(tk.Frame):
             ("Stage", next((s.get("stage_name") for s in stages if s.get("status") == "RUNNING"), "—"), ACCENT),
         ])
         self._label(c, "Dataset", dataset.get("dataset_group") or run.get("dataset_id") or "—")
+        self._label(c, "Model", dataset.get("model") or "—")
         self._label(c, "Git", f"{run.get('git_branch') or '—'} · {run.get('git_sha') or '—'}")
 
         c, g = self._section("TRAINING")
@@ -111,19 +113,19 @@ class CommandCenterScreen(tk.Frame):
         ])
         self._metric_grid(g, [
             ("Tokens/sec", _fmt(training.get("tokens_per_sec")), TEXT),
-            ("Estimated sec", _fmt(training.get("estimated_seconds")), TEXT),
-            ("Actual sec", _fmt(training.get("actual_seconds")), TEXT),
+            ("ETA", _fmt(training.get("eta_seconds"), " s"), TEXT),
+            ("Elapsed", _fmt(training.get("elapsed_seconds"), " s"), TEXT),
         ])
 
         c, g = self._section("DATASET")
         self._metric_grid(g, [
-            ("Documents", f"{int(dataset.get('document_count') or 0):,}", TEXT),
-            ("Tokens", f"{int(dataset.get('token_count') or 0):,}", TEXT),
+            ("Documents", f"{int(dataset['document_count']):,}" if dataset.get("document_count") is not None else "—", TEXT),
+            ("Tokens", f"{int(dataset['token_count']):,}" if dataset.get("token_count") is not None else "—", TEXT),
             ("Sources", len(dataset.get("sources") or []), TEXT),
         ])
         self._metric_grid(g, [
-            ("Train Tokens", f"{int(dataset.get('train_tokens') or 0):,}", TEXT),
-            ("Validation Tokens", f"{int(dataset.get('validation_tokens') or 0):,}", TEXT),
+            ("Train Tokens", f"{int(dataset['train_tokens']):,}" if dataset.get("train_tokens") is not None else "—", TEXT),
+            ("Validation Tokens", f"{int(dataset['validation_tokens']):,}" if dataset.get("validation_tokens") is not None else "—", TEXT),
             ("Warnings", len(warnings), WARNING if warnings else SUCCESS),
         ])
 
@@ -136,7 +138,7 @@ class CommandCenterScreen(tk.Frame):
         self._metric_grid(g, [
             ("VRAM", _fmt(hardware.get("gpu_memory_gb"), " GB"), TEXT),
             ("CUDA", hardware.get("cuda_version") or "—", TEXT),
-            ("GPU Utilization", "Not persisted", MUTED),
+            ("GPU Utilization", f"{hardware['gpu_utilization']:.1f}%" if isinstance(hardware.get("gpu_utilization"), (int, float)) else "Not persisted", TEXT if hardware.get("gpu_utilization") is not None else MUTED),
         ])
 
         c, g = self._section("PROVENANCE")
