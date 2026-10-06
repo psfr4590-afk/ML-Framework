@@ -6,7 +6,10 @@ import importlib
 import inspect
 import json
 import logging
+import os
+import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -17,6 +20,7 @@ from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, 
 from pipeline.types import Document
 from pipeline.provenance import artifact_id, config_identities, new_run_id, snapshot_configs
 from pipeline.run_tracking import RunTracker
+from pipeline.observability import classify_source_status, source_record, stage_counts, throughput, write_dataset_report
 from pipeline.crawler.source_scorer import DomainSignalTracker, SourceWeightLookup
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -352,6 +356,8 @@ class Pipeline:
         self._source_manifest_path = self._out.parent / "source_manifest.json"
         self._weights = SourceWeightLookup(str(self._weights_path))
         self._signals = DomainSignalTracker(self._weights.signal_gate_config())
+        self._stage_metrics: dict[str, dict[str, Any]] = {}
+        self._source_observability: list[dict[str, Any]] = []
         _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
@@ -419,31 +425,168 @@ class Pipeline:
                 raise ValueError(f"Unknown dataset group id: {only_group}")
         out = self._scratch / (f"01_crawled__{only_group}.jsonl" if self.dataset_id is None and only_group else "01_crawled.jsonl")
         selected_group = groups[0] if len(groups) == 1 else None
-        provenance = self._provenance("crawl", extra={"source_weights_sha256": _file_hash(self._weights_path), "dataset_groups_sha256": _file_hash(self._dataset_groups_path), "dataset_group": selected_group_id or "all", "dataset_group_sha256": _hash_value(selected_group) if selected_group else None})
-        if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(self._source_manifest_path, selected_group_id or "all", self._source_definition_paths):
+        provenance = self._provenance("crawl", extra={
+            "source_weights_sha256": _file_hash(self._weights_path),
+            "dataset_groups_sha256": _file_hash(self._dataset_groups_path),
+            "dataset_group": selected_group_id or "all",
+            "dataset_group_sha256": _hash_value(selected_group) if selected_group else None,
+        })
+        if self._should_skip(out, "crawl", provenance) and _source_manifest_is_valid(
+            self._source_manifest_path, selected_group_id or "all", self._source_definition_paths
+        ):
+            self._stage_metrics["crawl"] = stage_counts(None, out)
+            self._stage_metrics["crawl"].update({"removed_count": 0, "removal_reasons": {}})
             return out
+
         retrieval_started = datetime.now(timezone.utc).isoformat()
-        _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths, selected_group_id=selected_group_id or "all", retrieval_started_at=retrieval_started, retrieval_completed_at=None)
+        _write_source_manifest(
+            self._source_manifest_path, self.cfg, self._source_definition_paths,
+            selected_group_id=selected_group_id or "all",
+            retrieval_started_at=retrieval_started,
+            retrieval_completed_at=None,
+        )
+        source_records: list[dict[str, Any]] = []
+
+        def run_crawler(group: dict, kind: str, definition: dict[str, Any], crawler_cfg: dict[str, Any]) -> Iterator[Document]:
+            started = time.perf_counter()
+            display_name = str(definition.get("display_name") or definition.get("repo") or definition.get("identifier") or kind)
+            identifier = str(definition.get("identifier") or display_name)
+            configured = {
+                "kind": kind,
+                "display_name": display_name,
+                "identifier": identifier,
+                "revision": definition.get("revision"),
+                "license": definition.get("license", "unknown"),
+                "dataset_group": str(group.get("id", "default")),
+            }
+            if kind == "google":
+                key = os.getenv(crawler_cfg.get("google", {}).get("api_key_env", "GOOGLE_API_KEY"), "")
+                cx = os.getenv(crawler_cfg.get("google", {}).get("cx_env", "GOOGLE_CX"), "")
+                if not key or not cx:
+                    source_records.append(source_record(configured=configured, retrieved=False, status="DISABLED", stats={}))
+                    return
+            module_map = {
+                "web": ("pipeline.crawler.web_crawler", "WebCrawler"),
+                "github": ("pipeline.crawler.github_crawler", "GitHubCrawler"),
+                "arxiv": ("pipeline.crawler.arxiv_crawler", "ArxivCrawler"),
+                "huggingface": ("pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler"),
+                "google": ("pipeline.crawler.google_crawler", "GoogleCrawler"),
+            }
+            module, klass = module_map[kind]
+            crawler = _load_class(module, klass)(crawler_cfg, self._weights, self._signals)
+            yielded = 0
+            try:
+                for doc in crawler.crawl():
+                    yielded += 1
+                    doc.meta["dataset_group"] = group.get("id", "default")
+                    yield doc
+            finally:
+                elapsed = time.perf_counter() - started
+                stats = crawler.observability()
+                stats["duration_seconds"] = elapsed
+                stats["document_count"] = max(int(stats.get("document_count", 0)), yielded)
+                status = classify_source_status(
+                    enabled=True,
+                    documents=int(stats["document_count"]),
+                    errors=int(crawler.stats.get("errors", 0)),
+                    skipped=int(crawler.stats.get("skipped", 0)),
+                    rate_limited=int(stats.get("rate_limited", 0)),
+                )
+                source_records.append(source_record(
+                    configured=configured,
+                    retrieved=bool(stats["document_count"] or stats["request_count"]),
+                    status=status,
+                    stats=stats,
+                ))
+
         def stream() -> Iterator[Document]:
-            crawler_specs = (("web", "pipeline.crawler.web_crawler", "WebCrawler", True), ("github", "pipeline.crawler.github_crawler", "GitHubCrawler", True), ("arxiv", "pipeline.crawler.arxiv_crawler", "ArxivCrawler", True), ("huggingface", "pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler", True), ("google", "pipeline.crawler.google_crawler", "GoogleCrawler", False))
             for group in groups:
                 merged = dict(cfg)
                 for key in ("web", "github", "arxiv", "huggingface", "google"):
                     merged[key] = {**cfg.get(key, {}), **group.get(key, {})}
                 merged["sources"] = group.get("sources", cfg.get("sources", {}))
                 gid = group.get("id", "default")
-                for source, module, klass, default_enabled in crawler_specs:
-                    if not bool(merged.get("sources", {}).get(source, default_enabled)):
+
+                if bool(merged.get("sources", {}).get("web", True)):
+                    seeds = list(merged.get("web", {}).get("seed_urls", []) or [])
+                    for seed in seeds:
+                        web_cfg = dict(merged)
+                        web_cfg["web"] = dict(merged.get("web", {}))
+                        web_cfg["web"]["seed_urls"] = [seed]
+                        yield from run_crawler(group, "web", {
+                            "identifier": str(seed),
+                            "display_name": urlparse(str(seed)).netloc or str(seed),
+                        }, web_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "web", "display_name": "web", "identifier": f"group:{gid}:web", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
+                for kind in ("github", "arxiv"):
+                    enabled = bool(merged.get("sources", {}).get(kind, True))
+                    if not enabled:
+                        source_records.append(source_record(
+                            configured={"kind": kind, "display_name": kind, "identifier": f"group:{gid}:{kind}", "dataset_group": str(gid), "license": "unknown"},
+                            retrieved=False, status="DISABLED", stats={},
+                        ))
                         continue
-                    crawler = _load_class(module, klass)(merged, self._weights, self._signals)
-                    for doc in crawler.crawl():
-                        doc.meta["dataset_group"] = gid
-                        yield doc
+                    yield from run_crawler(group, kind, {"identifier": f"group:{gid}:{kind}", "display_name": kind}, merged)
+
+                if bool(merged.get("sources", {}).get("huggingface", True)):
+                    datasets = merged.get("huggingface", {}).get("datasets", []) or []
+                    for item in datasets:
+                        if isinstance(item, str):
+                            item = {"repo": item}
+                        if not isinstance(item, dict):
+                            continue
+                        hf_cfg = dict(merged)
+                        hf_cfg["huggingface"] = dict(merged.get("huggingface", {}))
+                        hf_cfg["huggingface"]["datasets"] = [item]
+                        repo_name = str(item.get("repo", "huggingface"))
+                        yield from run_crawler(group, "huggingface", {
+                            "identifier": repo_name,
+                            "display_name": repo_name,
+                            "revision": item.get("revision"),
+                            "license": item.get("license", "unknown"),
+                        }, hf_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "huggingface", "display_name": "HuggingFace", "identifier": f"group:{gid}:huggingface", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
+                if bool(merged.get("sources", {}).get("google", False)):
+                    queries = list(merged.get("google", {}).get("queries", []) or [])
+                    for query in queries:
+                        google_cfg = dict(merged)
+                        google_cfg["google"] = dict(merged.get("google", {}))
+                        google_cfg["google"]["queries"] = [query]
+                        yield from run_crawler(group, "google", {
+                            "identifier": str(query),
+                            "display_name": "Google",
+                        }, google_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "google", "display_name": "Google", "identifier": f"group:{gid}:google", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
         count = atomic_jsonl_write(out, lambda: (doc.to_jsonl() for doc in stream()))
         if count == 0:
+            self._source_observability = source_records
             raise RuntimeError(f"Crawl produced no documents: {out}")
-        _write_source_manifest(self._source_manifest_path, self.cfg, self._source_definition_paths, selected_group_id=selected_group_id or "all", retrieval_started_at=retrieval_started, retrieval_completed_at=datetime.now(timezone.utc).isoformat())
+
+        self._source_observability = source_records
+        _write_source_manifest(
+            self._source_manifest_path, self.cfg, self._source_definition_paths,
+            selected_group_id=selected_group_id or "all",
+            retrieval_started_at=retrieval_started,
+            retrieval_completed_at=datetime.now(timezone.utc).isoformat(),
+        )
         write_manifest(out, kind="crawl", rows=count, provenance=provenance)
+        self._stage_metrics["crawl"] = stage_counts(None, out)
+        self._stage_metrics["crawl"].update({"removal_reasons": {}, "source_count": len(source_records)})
         log.info("Wrote %d docs → %s", count, out)
         return out
 
