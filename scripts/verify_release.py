@@ -45,14 +45,14 @@ def _write_local_smoke_input(scratch: Path, pipeline_config_sha256: str | None =
     write_manifest(corpus, kind="weight", rows=len(docs), provenance=provenance)
 
 
-def _write_smoke_source_manifest(tmp_root: Path) -> None:
+def _write_smoke_source_manifest(tmp_root: Path, run_id: str) -> None:
     path = tmp_root / "source_manifest.json"
     now = datetime.now(timezone.utc).isoformat()
-    path.write_text(json.dumps({"schema": 2, "dataset_group": "release-smoke", "retrieval_started_at": now, "retrieval_completed_at": now, "source_definition_files": {}, "sources": [{"kind": "local_fixture", "identifier": source, "revision": "embedded", "license": "project-test-fixture", "raw_source_sha256": None, "dataset_group": "release-smoke"} for source, _ in RELEASE_SMOKE_SOURCES], "rights_note": "Deterministic test fixtures only; not external training sources."}, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({"schema": 2, "run_id": run_id, "dataset_group": "release-smoke", "retrieval_started_at": now, "retrieval_completed_at": now, "source_definition_sha256": __import__("hashlib").sha256(b"{}").hexdigest(), "source_definition_files": {}, "sources": [{"kind": "local_fixture", "identifier": source, "revision": "embedded", "license": "project-test-fixture", "raw_source_sha256": None, "dataset_group": "release-smoke"} for source, _ in RELEASE_SMOKE_SOURCES], "rights_note": "Deterministic test fixtures only; not external training sources."}, indent=2) + "\n", encoding="utf-8")
 
 
 def _validate_source_manifest(path: Path) -> None:
-    required_top_level = {"schema", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_files", "sources", "rights_note"}; data = json.loads(path.read_text(encoding="utf-8"))
+    required_top_level = {"schema", "run_id", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_sha256", "source_definition_files", "sources", "rights_note"}; data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not required_top_level <= set(data): raise RuntimeError("Source manifest is missing required top-level metadata")
     if int(data["schema"]) != 2 or not isinstance(data["sources"], list) or not data["sources"]: raise RuntimeError("Source manifest schema is invalid")
     required_source = {"kind", "identifier", "revision", "license", "raw_source_sha256", "dataset_group"}
@@ -66,7 +66,7 @@ def _validate_source_manifest(path: Path) -> None:
 def _native_smoke() -> int:
     source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "semantic_dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
     with tempfile.TemporaryDirectory(prefix="model-lab-release-") as tmp:
-        tmp_root = Path(tmp); output = tmp_root / "output"; scratch = tmp_root / "scratch"; config.setdefault("pipeline", {})["output_dir"] = str(output); config["pipeline"]["scratch_dir"] = str(scratch); config["pipeline"]["resume"] = False; config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp"); config_path = tmp_root / "release_smoke.yaml"; config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8"); _write_local_smoke_input(scratch, pipeline_config_sha256=_sha256(config_path)); _write_smoke_source_manifest(tmp_root)
+        tmp_root = Path(tmp); output = tmp_root / "output"; scratch = tmp_root / "scratch"; config.setdefault("pipeline", {})["output_dir"] = str(output); config["pipeline"]["scratch_dir"] = str(scratch); config["pipeline"]["resume"] = False; config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp"); config_path = tmp_root / "release_smoke.yaml"; config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8"); _write_local_smoke_input(scratch, pipeline_config_sha256=_sha256(config_path)); from pipeline.orchestrator import Pipeline; smoke_pipeline = Pipeline(str(config_path), resume=False); _write_smoke_source_manifest(tmp_root, smoke_pipeline.cfg["_run_id"])
         try: _validate_source_manifest(tmp_root / "source_manifest.json")
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, RuntimeError) as exc: print(f"Invalid smoke source manifest: {exc}"); return 2
         if run([sys.executable, "run_pipeline.py", "--config", str(config_path), "--no-resume"]): return 2
