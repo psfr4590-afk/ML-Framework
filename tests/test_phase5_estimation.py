@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from pipeline.model_sizer import HardwareProfile, recommend_training_profile
+from pipeline.trainer.model import ModelConfig
 from pipeline.preflight import estimate_duration
 
 
@@ -279,3 +280,53 @@ def test_capability_discovery_records_verified_and_failed_probe(monkeypatch):
     assert report["results"][0]["viable"] is True
     assert report["results"][1]["viable"] is False
     assert "synthetic probe failure" in report["results"][1]["failure"]
+
+
+def test_model_budget_generates_real_intermediate_architectures():
+    mid = ModelConfig.from_target_params(220_000_000, seq_len=512)
+    assert 117_000_000 < mid.param_count() < 360_000_000
+    assert mid.seq_len == 512
+    assert mid.n_layers > 0
+    assert mid.d_model % mid.n_heads == 0
+
+
+def test_model_budget_preserves_named_preset_geometry_as_nearby_search_points():
+    for target in (85_000_000, 117_000_000, 360_000_000):
+        cfg = ModelConfig.from_target_params(target)
+        assert cfg.param_count() > 0
+        assert cfg.d_model % cfg.n_heads == 0
+        assert cfg.n_heads == cfg.n_kv_heads
+
+
+def test_capability_report_marks_verified_and_failed_results_with_architecture(monkeypatch):
+    import torch
+    from pipeline import preflight
+    from pipeline.model_sizer import HardwareProfile
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self, cfg):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(1))
+
+        def forward(self, x, y):
+            loss = (self.weight * (x.float().mean() - y.float().mean()) * 0 + self.weight.pow(2)).mean()
+            return None, loss
+
+    def fake_model(cfg):
+        if cfg.seq_len >= 512:
+            raise RuntimeError("synthetic context failure")
+        return TinyModel(cfg)
+
+    monkeypatch.setattr(preflight, "LlamaModel", fake_model)
+    hw = HardwareProfile("test", 4, 8.0, 0, 0.0, None, False)
+    report = preflight.discover_capabilities(
+        hw,
+        candidates=(("85M", 256), ("117M", 512)),
+        benchmark_steps=1,
+        vocab_size=32,
+    )
+    assert report["schema"] == 2
+    assert report["verified_combinations"] == 1
+    assert report["failed_combinations"] == 1
+    assert report["results"][0]["architecture"]["d_model"] == 640
+    assert report["results"][1]["viable"] is False
