@@ -136,6 +136,7 @@ class RunTracker:
             "configuration": configuration,
             "dataset_identity": dataset_identity or {},
             "source_identity": source_identity or {},
+            "source_observability": [],
             "stages": {},
             "artifacts": [],
             "metrics": {},
@@ -143,6 +144,7 @@ class RunTracker:
             "errors": [],
             "retries": [],
             "degraded_stages": [],
+            "dataset_report": None,
             "final_status": "RUNNING",
         }
         self._write()
