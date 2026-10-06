@@ -63,7 +63,7 @@ def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> N
 
     required = (
         "schema", "run_id", "config_identities", "train_config_sha256",
-        "model_config_sha256", "shard_manifest_sha256", "source_manifest_sha256", "seed",
+        "model_config_sha256", "shard_manifest_sha256", "source_manifest_sha256", "seed", "parent_artifact_ids", "tokenizer_artifact_id", "dataset_artifact_id", "source_artifact_id",
     )
     missing = [key for key in required if key not in provenance or provenance[key] in (None, "")]
     if missing:
@@ -126,6 +126,22 @@ def _enforce_training_provenance(output_dir: Path, payload: dict[str, Any]) -> N
     tokenizer_sha = sha256_file(output_dir / "tokenizer" / "tokenizer.json")
     if (shard_data.get("provenance") or {}).get("tokenizer_sha256") != tokenizer_sha:
         raise RuntimeError("Shard → tokenizer artifact relationship is invalid; refusing export")
+
+    expected_parents = {
+        f"shard-manifest:{sha256_file(shard_manifest)}",
+        f"tokenizer-manifest:{sha256_file(tokenizer_manifest)}",
+        f"dataset-manifest:{sha256_file(weighted_manifest)}",
+        f"source-manifest:{sha256_file(source_manifest)}",
+    }
+    actual_parents = set(provenance.get("parent_artifact_ids") or [])
+    if not expected_parents <= actual_parents:
+        raise RuntimeError("Checkpoint parent artifact lineage is incomplete; refusing export")
+    if provenance.get("tokenizer_artifact_id") != f"tokenizer-manifest:{sha256_file(tokenizer_manifest)}":
+        raise RuntimeError("Checkpoint → tokenizer artifact relationship is invalid; refusing export")
+    if provenance.get("dataset_artifact_id") != f"dataset-manifest:{sha256_file(weighted_manifest)}":
+        raise RuntimeError("Checkpoint → dataset artifact relationship is invalid; refusing export")
+    if provenance.get("source_artifact_id") != f"source-manifest:{sha256_file(source_manifest)}":
+        raise RuntimeError("Checkpoint → source artifact relationship is invalid; refusing export")
     if int(tokenizer_data.get("vocab_size", -1)) != int(payload["model_cfg"].get("vocab_size", -2)):
         raise RuntimeError("Tokenizer/model vocabulary provenance mismatch; refusing export")
 
