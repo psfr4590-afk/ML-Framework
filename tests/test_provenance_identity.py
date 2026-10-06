@@ -76,7 +76,7 @@ def test_dataset_session_config_binds_to_canonical_production_groups():
 def test_dataset_profiles_schema2_bind_numeric_ids_to_canonical_groups():
     path = ROOT / "config" / "dataset_profiles.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert data["schema"] == 3
+    assert data["schema"] == 2
     profiles = data["dataset_profiles"]
     assert len(profiles) == 10
     assert [item["dataset_id"] for item in profiles] == list(range(1, 11))
@@ -97,7 +97,7 @@ def test_source_manifest_records_complete_release_metadata(tmp_path):
         retrieval_completed_at="2026-01-01T00:01:00+00:00",
     )
     data = json.loads(target.read_text(encoding="utf-8"))
-    assert data["schema"] == 2
+    assert data["schema"] == 3
     assert data["dataset_group"] == "swe_cs_systems"
     assert data["retrieval_started_at"]
     assert data["retrieval_completed_at"]
