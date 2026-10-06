@@ -109,6 +109,14 @@ def _implementation_sha256(stage: str) -> str:
     return digest.hexdigest()
 
 
+def _project_relative_path(path: Path) -> str:
+    """Return a stable project-relative path when possible, otherwise an absolute path."""
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path.resolve()).replace("\\", "/")
+
+
 def _source_definition_paths(cfg: dict, root: Path) -> dict[str, Path]:
     crawl = cfg.get("crawl", {})
     paths = {
