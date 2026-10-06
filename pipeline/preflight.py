@@ -16,6 +16,7 @@ from typing import Any
 
 import torch
 
+from pipeline.model_sizer import HardwareProfile, capability_candidates
 from pipeline.shardwriter.shard_writer import ShardDataLoader
 from pipeline.trainer.model import LlamaModel, ModelConfig
 
@@ -150,6 +151,78 @@ def run_preflight(
             torch.cuda.empty_cache()
 
 
+def discover_capabilities(
+    hardware: HardwareProfile,
+    *,
+    candidates: tuple[tuple[str, int], ...] | None = None,
+    benchmark_steps: int = 2,
+    vocab_size: int = 32000,
+) -> dict[str, Any]:
+    """Empirically map model/context combinations using synthetic tokens.
+
+    Production shard geometry must not be mistaken for a hardware limit.
+    Production shard viability is measured separately by run_preflight().
+    """
+    results: list[dict[str, Any]] = []
+    if candidates is None:
+        candidates = capability_candidates(hardware)
+    for model_preset, seq_len in candidates:
+        started = time.perf_counter()
+        model = None
+        optimizer = None
+        try:
+            cfg = {
+                "model_preset": model_preset,
+                "seq_len": int(seq_len),
+                "vocab_size": int(vocab_size),
+                "dropout": 0.0,
+            }
+            device = torch.device("cuda" if hardware.cuda_available else "cpu")
+            model = _make_model(cfg).to(device)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.0)
+            scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
+            model.train()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+            for _ in range(max(1, int(benchmark_steps))):
+                x = torch.randint(0, int(vocab_size), (1, int(seq_len)), device=device)
+                y = torch.randint(0, int(vocab_size), (1, int(seq_len)), device=device)
+                optimizer.zero_grad(set_to_none=True)
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
+                    _, loss = model(x, y)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            elapsed = max(time.perf_counter() - started, 1e-9)
+            peak = torch.cuda.max_memory_allocated() / (1024**3) if device.type == "cuda" else None
+            results.append({
+                "model_preset": model_preset, "seq_len": int(seq_len),
+                "batch_size": 1, "benchmark_steps": max(1, int(benchmark_steps)),
+                "viable": True,
+                "tokens_per_sec": (max(1, int(benchmark_steps)) * int(seq_len)) / elapsed,
+                "peak_memory_gb": peak, "elapsed_seconds": elapsed, "failure": None,
+            })
+        except (RuntimeError, OSError, ValueError, TypeError) as exc:
+            if torch.cuda.is_available() and "out of memory" in str(exc).lower():
+                torch.cuda.empty_cache()
+            results.append({
+                "model_preset": model_preset, "seq_len": int(seq_len),
+                "batch_size": 1, "benchmark_steps": max(1, int(benchmark_steps)),
+                "viable": False, "tokens_per_sec": None,
+                "peak_memory_gb": torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else None,
+                "elapsed_seconds": max(time.perf_counter() - started, 0.0),
+                "failure": f"{type(exc).__name__}: {exc}",
+            })
+        finally:
+            del optimizer
+            del model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+    return {"schema": 1, "hardware": hardware.to_dict(), "tested_combinations": len(results), "results": results}
+
 def estimate_duration(
     *,
     total_steps: int,
@@ -202,4 +275,4 @@ def write_preflight_report(path: str | Path, payload: dict[str, Any]) -> None:
     tmp.replace(target)
 
 
-__all__ = ["PreflightResult", "run_preflight", "estimate_duration", "write_preflight_report"]
+__all__ = ["PreflightResult", "run_preflight", "discover_capabilities", "estimate_duration", "write_preflight_report"]
