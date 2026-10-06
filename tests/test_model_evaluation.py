@@ -2,7 +2,7 @@ from scripts.evaluate_model import _generation_metrics, _perplexity, _qualitativ
 
 
 def test_perplexity_is_exp_loss():
-    assert round(_perplexity(3.24), 3) == 25.538
+    assert round(_perplexity(3.24), 3) == 25.534
 
 
 def test_generation_metrics_capture_repetition_and_diversity():
