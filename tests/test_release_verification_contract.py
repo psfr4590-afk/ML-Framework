@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts.patch_llama_cpp_tokenizer import patch_tokenizer_registry
+from tests.test_phase9_deployment import _write_gguf
 from scripts.verify_gguf import verify_gguf
 from scripts.verify_release import RELEASE_SMOKE_SOURCES, _write_local_smoke_input
 
@@ -21,7 +22,7 @@ class _Proc:
 def test_verify_gguf_runs_one_token_generation(monkeypatch, tmp_path: Path):
     model = tmp_path / "model.gguf"
     cli = tmp_path / "llama-cli"
-    model.write_bytes(b"gguf")
+    _write_gguf(model, [("general.architecture", 8, "llama")])
     cli.write_bytes(b"executable")
     seen: dict[str, object] = {}
 
@@ -47,7 +48,7 @@ def test_verify_gguf_runs_one_token_generation(monkeypatch, tmp_path: Path):
 def test_verify_gguf_rejects_empty_generation(monkeypatch, tmp_path: Path):
     model = tmp_path / "model.gguf"
     cli = tmp_path / "llama-cli"
-    model.write_bytes(b"gguf")
+    _write_gguf(model, [("general.architecture", 8, "llama")])
     cli.write_bytes(b"executable")
 
     class EmptyProc:
