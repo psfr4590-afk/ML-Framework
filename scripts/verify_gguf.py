@@ -149,10 +149,13 @@ def verify_gguf(
 
     context_key = f"{architecture or 'llama'}.context_length"
     embedded_context = values.get(context_key)
-    if context_length is not None and embedded_context is not None and int(embedded_context) != int(context_length):
-        raise RuntimeError(
-            f"GGUF context length mismatch: expected {context_length}, embedded {embedded_context}"
-        )
+    if context_length is not None:
+        if embedded_context is None:
+            raise RuntimeError(f"GGUF does not expose {context_key}")
+        if int(embedded_context) != int(context_length):
+            raise RuntimeError(
+                f"GGUF context length mismatch: expected {context_length}, embedded {embedded_context}"
+            )
 
     special_tokens = {
         "bos": values.get("tokenizer.ggml.bos_token_id"),
@@ -162,8 +165,13 @@ def verify_gguf(
     if expected_special_tokens:
         for name, expected in expected_special_tokens.items():
             actual = special_tokens.get(name)
-            if actual is not None and int(actual) != int(expected):
+            if actual is None:
+                raise RuntimeError(f"GGUF is missing expected {name} special-token metadata")
+            if int(actual) != int(expected):
                 raise RuntimeError(f"GGUF special token mismatch for {name}: expected {expected}, embedded {actual}")
+    tokenizer_present = any(k.startswith("tokenizer.ggml.") for k in values)
+    if not tokenizer_present:
+        raise RuntimeError("GGUF tokenizer metadata is missing")
 
     cmd = _build_command(cli_path, model_path, prompt, context_length)
     proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=120)
@@ -188,7 +196,7 @@ def verify_gguf(
             "tensor_validation": "passed",
             "architecture": architecture or "llama",
             "context_length": embedded_context if embedded_context is not None else context_length,
-            "tokenizer": "embedded GGUF tokenizer metadata present" if any(k.startswith("tokenizer.ggml.") for k in values) else "not reported",
+            "tokenizer": "passed",
             "special_tokens": special_tokens,
             "special_token_validation": "passed" if expected_special_tokens else "recorded",
             "generation": "passed",
