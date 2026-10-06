@@ -192,12 +192,12 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
     return sources
 
 
-def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None) -> None:
+def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path], selected_group_id: str | None = None, retrieval_started_at: str | None = None, retrieval_completed_at: str | None = None, retrieval_sources: list[dict[str, Any]] | None = None) -> None:
     started = retrieval_started_at or datetime.now(timezone.utc).isoformat()
     files = {name: {"path": _project_relative_path(value), "sha256": _file_hash(value)} for name, value in source_paths.items()}
     definition_hash = _hash_value({name: value.get("sha256") for name, value in files.items()})
     manifest = {
-        "schema": 2,
+        "schema": 3,
         "run_id": cfg.get("_run_id") or "standalone-source-definition",
         "dataset_group": selected_group_id or "all",
         "retrieval_started_at": started,
@@ -205,6 +205,7 @@ def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path],
         "source_definition_sha256": definition_hash,
         "source_definition_files": files,
         "sources": _manifest_sources(cfg, source_paths, selected_group_id),
+        "retrieval": list(retrieval_sources or []),
         "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -217,7 +218,7 @@ def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, 
         required = {"schema", "run_id", "dataset_group", "retrieval_started_at", "retrieval_completed_at", "source_definition_sha256", "source_definition_files", "sources", "rights_note"}
         if not isinstance(data, dict) or not required <= set(data):
             return False
-        if int(data["schema"]) != 2 or not data["run_id"] or not data["retrieval_started_at"] or not data["retrieval_completed_at"] or not data["source_definition_sha256"]:
+        if int(data["schema"]) < 2 or not data["run_id"] or not data["retrieval_started_at"] or not data["retrieval_completed_at"] or not data["source_definition_sha256"]:
             return False
         manifest_group = str(data["dataset_group"])
         if expected_group_id is not None and manifest_group != expected_group_id:
@@ -583,6 +584,7 @@ class Pipeline:
             selected_group_id=selected_group_id or "all",
             retrieval_started_at=retrieval_started,
             retrieval_completed_at=datetime.now(timezone.utc).isoformat(),
+            retrieval_sources=source_records,
         )
         write_manifest(out, kind="crawl", rows=count, provenance=provenance)
         self._stage_metrics["crawl"] = stage_counts(None, out)
