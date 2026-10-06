@@ -19,6 +19,7 @@ import torch.nn as nn
 
 from pipeline.integrity import sha256_file
 from pipeline.model_sizer import estimate_total_tokens, profile_hardware, recommend_training_profile
+from pipeline.preflight import discover_capabilities, estimate_duration, run_preflight, write_preflight_report
 from pipeline.shardwriter.shard_writer import ShardDataLoader
 from pipeline.provenance import config_identities, artifact_id, stable_hash
 from pipeline.trainer.model import LlamaModel, ModelConfig
@@ -282,13 +283,78 @@ class Trainer:
     def run(self):
         t = dict(self.t_cfg); seed = int(t.get("seed", 42)); _seed_everything(seed); device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cpu" and not bool(t.get("allow_cpu_training", False)): raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining")
+        requested_configuration = dict(t)
+        hardware = profile_hardware()
+        self._hardware_profile = hardware.to_dict()
+        self._requested_configuration = requested_configuration
+        self._initial_estimate_seconds = 0.0
+        shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
         if bool(t.get("auto_size", False)):
-            hardware = profile_hardware(); shard_dir = Path(t.get("shard_dir", self.out_dir / "shards"))
-            try: total_tokens = estimate_total_tokens(shard_dir)
-            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError): total_tokens = None
-            shard_cfg = self.cfg.get("shard", {}); max_seq_len = shard_cfg.get("sequence_length")
-            profile = recommend_training_profile(hardware, total_tokens=total_tokens, configured_steps=int(t.get("total_steps", 100_000)), target_training_hours=float(t["target_training_hours"]) if t.get("target_training_hours") is not None else None, observed_tokens_per_sec=float(t["observed_tokens_per_sec"]) if t.get("observed_tokens_per_sec") is not None else None, max_seq_len=int(max_seq_len) if max_seq_len is not None else None)
-            t.update({"model_preset": profile.model_preset, "seq_len": profile.seq_len, "batch_size": profile.batch_size, "grad_accum_steps": profile.grad_accum_steps, "eval_batches": profile.eval_batches, "eval_every_steps": profile.eval_every_steps, "checkpoint_every_steps": profile.checkpoint_every_steps, "total_steps": profile.recommended_steps or int(t.get("total_steps", 100_000)), "_hardware_profile": hardware.to_dict(), "_training_profile": profile.to_dict()}); log.info("Auto-sized training profile | hardware=%s | profile=%s", hardware.to_dict(), profile.to_dict())
+            try:
+                total_tokens = estimate_total_tokens(shard_dir)
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                total_tokens = None
+            profile = recommend_training_profile(
+                hardware,
+                total_tokens=total_tokens,
+                configured_steps=int(t.get("total_steps", 100_000)),
+                target_training_hours=float(t["target_training_hours"]) if t.get("target_training_hours") is not None else None,
+                observed_tokens_per_sec=float(t["observed_tokens_per_sec"]) if t.get("observed_tokens_per_sec") is not None else None,
+            )
+            t.update({
+                "model_preset": profile.model_preset,
+                "seq_len": profile.seq_len,
+                "batch_size": profile.batch_size,
+                "grad_accum_steps": profile.grad_accum_steps,
+                "eval_batches": profile.eval_batches,
+                "eval_every_steps": profile.eval_every_steps,
+                "checkpoint_every_steps": profile.checkpoint_every_steps,
+                "total_steps": profile.recommended_steps or int(t.get("total_steps", 100_000)),
+                "_hardware_profile": hardware.to_dict(),
+                "_training_profile": profile.to_dict(),
+            })
+            log.info("Auto-sized training profile | hardware=%s | profile=%s", hardware.to_dict(), profile.to_dict())
+        effective_configuration = dict(t)
+        preflight_cfg = self.cfg.get("preflight", {})
+        preflight_enabled = bool(preflight_cfg.get("enabled", True))
+        preflight_result = None
+        estimate = None
+        if preflight_enabled:
+            preflight_result = run_preflight(
+                t,
+                shard_dir,
+                warmup_steps=int(preflight_cfg.get("warmup_steps", 1)),
+                benchmark_steps=int(preflight_cfg.get("benchmark_steps", 3)),
+            )
+            if not preflight_result.viable:
+                raise RuntimeError(f"Preflight rejected training configuration: {preflight_result.failure}")
+            estimate = estimate_duration(
+                total_steps=int(t.get("total_steps", 100_000)),
+                batch_size=int(t.get("batch_size", 1)),
+                grad_accum_steps=int(t.get("grad_accum_steps", 1)),
+                seq_len=int(t.get("seq_len", 256)),
+                tokens_per_sec=preflight_result.tokens_per_sec,
+                eval_every_steps=int(t.get("eval_every_steps", 500)),
+                eval_batches=int(t.get("eval_batches", 20)),
+                checkpoint_every_steps=int(t.get("checkpoint_every_steps", 1000)),
+            )
+            capability_report = None
+            if bool(preflight_cfg.get("capability_discovery", False)):
+                capability_report = discover_capabilities(
+                    hardware,
+                    benchmark_steps=int(preflight_cfg.get("capability_benchmark_steps", 2)),
+                )
+            write_preflight_report(self.out_dir / "preflight_report.json", {
+                "hardware": hardware.to_dict(),
+                "requested_configuration": requested_configuration,
+                "effective_configuration": effective_configuration,
+                "decision_reasons": list(t.get("_training_profile", {}).get("decision_reasons", [])),
+                "benchmark": preflight_result.to_dict(),
+                "estimate": estimate,
+                "capability_discovery": capability_report,
+            })
+            t["_preflight"] = preflight_result.to_dict()
+            t["_initial_estimate"] = estimate
         preset = t.get("model_preset", "117M"); model_cfg = ModelConfig.from_preset(preset); model_cfg.vocab_size = int(t.get("vocab_size", 32000)); model_cfg.seq_len = int(t.get("seq_len", 1024)); model_cfg.dropout = float(t.get("dropout", 0.0)); model = LlamaModel(model_cfg).to(device)
         decay, no_decay = [], []
         for name, p in model.named_parameters():
@@ -328,6 +394,8 @@ class Trainer:
         model.train()
         optimizer.zero_grad(set_to_none=True)
         start_time = time.time()
+        initial_estimate_seconds = float((estimate or {}).get("estimated_duration_seconds") or 0.0)
+        self._initial_estimate_seconds = initial_estimate_seconds
         step = start_step
         try:
             while step < total_steps:
@@ -353,9 +421,17 @@ class Trainer:
                 if step % 10 == 0:
                     elapsed = max(time.time() - start_time, 1e-6)
                     tok_s = (step - start_step) * batch_size * grad_accum * seq_len / elapsed
+                    remaining_tokens = max(0, total_steps - step) * batch_size * grad_accum * seq_len
+                    remaining_seconds = remaining_tokens / tok_s if tok_s > 0 else None
+                    live_estimate_seconds = elapsed + remaining_seconds if remaining_seconds is not None else None
                     metrics.write(json.dumps({
                         "step": step, "train_loss": accum_loss, "lr": lr,
-                        "grad_norm": float(grad_norm), "tokens_per_sec": tok_s
+                        "grad_norm": float(grad_norm), "tokens_per_sec": tok_s,
+                        "elapsed_seconds": elapsed,
+                        "estimated_remaining_seconds": remaining_seconds,
+                        "live_estimate_seconds": live_estimate_seconds,
+                        "initial_estimate_seconds": initial_estimate_seconds,
+                        "actual_seconds_so_far": elapsed,
                     }) + "\n")
                     metrics.flush()
                 if step % eval_every == 0:
@@ -440,6 +516,15 @@ class Trainer:
             "training_duration_seconds": max(0.0, time.time() - start_time),
             "evaluation_duration_seconds": float(evaluation_duration),
             "checkpoint_duration_seconds": float(checkpoint_duration),
+            "hardware_profile": t.get("_hardware_profile", self._hardware_profile),
+            "requested_configuration": self._requested_configuration,
+            "effective_configuration": {k: v for k, v in t.items() if not k.startswith("__")},
+            "preflight": t.get("_preflight"),
+            "initial_estimate_seconds": self._initial_estimate_seconds,
+            "estimated_vs_actual_seconds": (
+                {"estimated_seconds": self._initial_estimate_seconds, "actual_seconds": max(0.0, time.time() - start_time)}
+                if self._initial_estimate_seconds > 0 else None
+            ),
         }
 
     @torch.no_grad()
