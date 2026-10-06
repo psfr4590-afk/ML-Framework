@@ -34,7 +34,8 @@ class ArxivCrawler(BaseCrawler):
                 response.raise_for_status()
                 root = ET.fromstring(response.text)
             except (requests.RequestException, ET.ParseError) as exc:
-                self.record_request_error()
+                if "response" not in locals() or not hasattr(response, "status_code"):
+                    self.record_request_error()
                 self.stats["errors"] += 1
                 log.warning("ArXiv query failed for %s: %s", category, exc)
                 continue
