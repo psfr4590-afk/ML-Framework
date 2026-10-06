@@ -752,15 +752,16 @@ class Pipeline:
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 self._stage_metrics["train"] = {"preflight_report": str(preflight_report)}
         ckpt_dir = self._out / "checkpoints"
-        candidates = []
+        candidates = sorted(ckpt_dir.glob("ckpt_[0-9]*.pt"))
         if (ckpt_dir / "ckpt_best.pt").is_file():
             candidates.append(ckpt_dir / "ckpt_best.pt")
         if (ckpt_dir / "ckpt_final.pt").is_file():
             candidates.append(ckpt_dir / "ckpt_final.pt")
-        candidates.extend(sorted(ckpt_dir.glob("ckpt_[0-9]*.pt")))
         if not candidates:
             raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
-        selected = candidates[-1]
+        selected = (ckpt_dir / "ckpt_final.pt") if (ckpt_dir / "ckpt_final.pt").is_file() else (
+            ckpt_dir / "ckpt_best.pt" if (ckpt_dir / "ckpt_best.pt").is_file() else candidates[-1]
+        )
         try:
             payload = torch.load(selected, map_location="cpu", weights_only=False)
         except TypeError:
