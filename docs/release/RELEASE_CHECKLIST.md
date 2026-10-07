@@ -5,6 +5,8 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 ## 1. Repository and automated gates
 
 - [ ] Exact release commit identified and frozen before tagging
+- [ ] Release tag exactly matches `pyproject.toml` version (`v<project-version>` or the approved prerelease suffix)
+- [ ] Historical mismatched tags are retained as failed candidates and are not force-moved
 - [ ] Linux CI passes on the exact release commit
 - [ ] Windows CI passes on the exact release commit
 - [ ] Windows PowerShell bootstrap contract passes
@@ -58,6 +60,8 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 
 These are not satisfied by the bounded RC smoke test:
 
+- [ ] Clean-clone acceptance is performed against the exact approved release commit
+- [ ] Command Center UI/backend probe passes against the exact approved release commit
 - [ ] Target deployment hardware passes native export/inference
 - [ ] Intended production training run completes successfully
 - [ ] Training loss/convergence and evaluation evidence are recorded
