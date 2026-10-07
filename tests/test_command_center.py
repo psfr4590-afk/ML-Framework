@@ -126,5 +126,3 @@ def test_command_center_exposes_four_credential_presets_without_secrets():
         assert {p["env_var"] for p in presets} == {
             "GITHUB_TOKEN", "HF_TOKEN", "GOOGLE_API_KEY", "GOOGLE_CX"
         }
-        for env in ["GITHUB_TOKEN", "HF_TOKEN", "GOOGLE_API_KEY", "GOOGLE_CX"]:
-            assert env in response.text or env in html or env in {p["env_var"] for p in presets}
