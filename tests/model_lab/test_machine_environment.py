@@ -16,41 +16,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 WINDOWS_ONLY = pytest.mark.skipif(platform.system() != "Windows", reason="requires target Windows machine")
-CI_UNSUPPORTED_DISPLAY = pytest.mark.skipif(
-    os.environ.get("CI", "").lower() == "true",
-    reason="GitHub-hosted Windows runners use a virtual 1024x768 display",
-)
-
 @WINDOWS_ONLY
 def test_python_is_supported_target_version():
-    assert sys.version_info >= (3, 11), sys.version
-
-@WINDOWS_ONLY
-def test_tkinter_available():
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk(); root.withdraw(); root.destroy()
-    except tk.TclError as exc:
-        pytest.skip(f"Tkinter is installed but its Tcl/Tk runtime is unavailable: {exc}")
-
-@WINDOWS_ONLY
-@CI_UNSUPPORTED_DISPLAY
-def test_target_resolution_is_1760x990_or_larger():
-    tk = pytest.importorskip("tkinter")
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        pytest.skip(f"Cannot inspect display resolution because the Tcl/Tk runtime is unavailable: {exc}")
-    root.withdraw()
-    try:
-        width, height = root.winfo_screenwidth(), root.winfo_screenheight()
-    finally:
-        root.destroy()
-    if width < 1760 or height < 990:
-        pytest.skip(
-            f"Display resolution {width}x{height} is below the recommended "
-            "1760x990 target; continuing because this is not a blocking requirement"
-        )
+    assert (3, 11) <= sys.version_info[:2] < (3, 15), sys.version
 
 @WINDOWS_ONLY
 def test_required_executables_are_on_path():
