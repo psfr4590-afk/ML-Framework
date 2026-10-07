@@ -1,7 +1,6 @@
 """Model Lab release-contract tests for the single operator interface."""
 from pathlib import Path
 import ast
-import re
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_STAGES=["crawl","clean","dedup","weight","tokenize","shard","train","export"]
