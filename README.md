@@ -1,191 +1,134 @@
 # ML-Framework
 
-**ML-Framework** is the public source repository for **Model Lab**, the **M²S Model Training Pipeline**: an end-to-end, local-first system for building training datasets, training a model, and exporting it for local inference.
+**ML-Framework** is the local-first training pipeline behind **Model Lab**. It takes configured data sources through cleaning, semantic deduplication, weighting, tokenization, sharding, training, and GGUF export, with provenance and artifact integrity tracked along the way.
 
-The repository is at **release-candidate (RC) source readiness**. The implementation, contracts, regression coverage, security/reproducibility controls, release tooling, and native GGUF verification path are in the repository. Workflow results are authoritative for the exact commit being evaluated; this document deliberately does not hard-code a current-green status.
+It is designed to run locally on Windows, Linux, macOS, and headless Termux. The desktop UI is Windows-oriented; the pipeline and command center are portable.
 
-**Termux native-toolchain evidence (2026-09-29):** on Android 16 / aarch64, the pinned llama.cpp checkout at `b95502b...` was configured and built successfully through the `llama-quantize` target. The resulting Android ELF executable was started successfully and its help output enumerated the supported quantization types. This verifies the native quantizer itself on that target; it does **not** replace the complete Python release gate or an end-to-end Model Lab export/inference run.
+## What you get
 
-## RC status
+- End-to-end data and training pipeline
+- Deterministic artifact manifests and run provenance
+- Semantic near-duplicate detection
+- Hardware/CUDA preflight and conservative training profiles
+- Local FastAPI command center
+- Windows desktop control surface
+- GGUF export and llama.cpp inference verification
+- SQLite experiment/run history
+- Automated tests, linting, security checks, and release verification
 
-**Package version:** `1.3.0`  
-**Source of truth:** `main`  
-**Release posture:** RC source-ready; production release evidence remains execution-dependent.
-
-The repository contains the implementation and release machinery. Automated workflow results, native verification, and production attestations must be evaluated against the exact commit being released. Historical reports are evidence of past work, not current status.
-
-- the native release gate must complete successfully for the exact release commit;
-- `python scripts/verify_release.py --bootstrap-native` must complete successfully;
-- the resulting GGUF must pass native llama.cpp inference validation;
-- the final release evidence must retain dependency freeze, SBOM, provenance, export, integrity, and inference records;
-- production training remains a separate operational run and is not implied by the bounded RC smoke test.
-
-A green static test suite alone is not a production-release claim.
-
-## What it does
-
-The canonical pipeline is:
-
-`crawl → clean → semantic dedup → weight → tokenize → shard → train → export`
-
-The repository includes:
-
-- pre-seeded dataset groups and crawl URLs
-- source-quality scoring and domain/content weighting
-- HTML/unicode cleaning and refusal/assistant-contamination filtering
-- exact and semantic near-duplicate handling
-- deterministic tokenizer and binary shard generation
-- isolated dataset sessions for independent experiments
-- hardware/CUDA readiness checks and conservative hardware-aware training profiles
-- local training and checkpoint management
-- GGUF export for local inference
-- a localhost FastAPI command center and desktop control surface
-- contract, regression, structure, and machine-environment tests
-- security and dependency auditing
-- deterministic release verification and native GGUF/inference validation tooling
-- release evidence generation, including dependency freeze and SBOM output
-
-## Repository map
-
-The root is intentionally kept small. Runtime code, configuration, scripts, tests, and UI live in their functional directories. Engineering history, audits, release material, and verification records live under `docs/` rather than competing with the project entry points.
-
-```text
-ML-Framework/
-├── README.md              # Start here
-├── LICENSE
-├── SECURITY.md
-├── CONTRIBUTING.md
-├── pyproject.toml         # Package metadata
-├── bootstrap.py           # Canonical environment setup
-├── run_pipeline.py        # Pipeline entry point
-├── run_command_center.py  # Command center entry point
-├── mlframework.py          # Stable clone-and-run CLI
-├── command_center/        # Local API/control backend
-├── config/                # Starter, smoke, full, and dataset configs
-├── pipeline/              # Crawl → export implementation
-├── ui/                    # Desktop control surface
-├── scripts/               # Native/bootstrap/release tooling
-├── tests/                 # Automated verification
-└── docs/                  # Architecture, development, release, verification
-```
-
-## Documentation
-
-- [Architecture](docs/architecture/ARCHITECTURE.md)
-- [Start Here](docs/development/START_HERE.md)
-- [Project State](docs/development/PROJECT_STATE.md)
-- [Dataset Provenance and Source Policy](docs/development/DATA_PROVENANCE.md)
-- [Source of Truth](docs/development/SYNC_SOURCE_OF_TRUTH.md)
-- [SQLite Experiment Store](docs/development/EXPERIMENT_STORE.md)
-- [Release Checklist](docs/release/RELEASE_CHECKLIST.md)
-- [Release Readiness](docs/release/RELEASE_READINESS_PLAN.md)
-- [Release Verification](docs/release/RELEASE_VERIFICATION_REPORT.md)
-- [Build Manifest](docs/release/BUILD_MANIFEST.json)
-- [Static Pipeline Audit](docs/release/static_pipeline_audit.md)
-- [Audit Report](docs/verification/AUDIT_REPORT.md)
-- [Verification](docs/verification/VERIFICATION.md)
-- [Verification Checklist](docs/verification/VERIFICATION_CHECKLIST.md)
-
-## Seeded dataset groups
-
-Ten dataset groups are preconfigured:
-
-- `swe_cs_systems` — software engineering, computer science, and systems
-- `ai_ml_cybersec_dataeng` — AI/ML, cybersecurity, and data engineering
-- `sci_reasoning_forensics_formal` — scientific reasoning, forensics, and formal methods
-- `domain_finance_bio_robotics` — finance, biology, and robotics
-- `math_statistics_optimization` — mathematics, statistics, and optimization
-- `physics_chemistry_materials` — physics, chemistry, and materials science
-- `biomedical_health_science` — biomedical science, bioinformatics, and health research
-- `law_compliance_governance` — law, compliance, and digital governance
-- `linguistics_information_retrieval` — linguistics, NLP, and information retrieval
-- `climate_energy_geospatial` — climate science, energy systems, and geospatial analysis
-
-General web seeds live in `config/seed_urls.txt`.
-
-## Quick start
-
-There is exactly one canonical first-run path. From the project root, install with the bootstrapper, verify the environment, then run the default starter profile.
-
-### Windows PowerShell
-
-```powershell
-python .\bootstrap.py --install
-python .\bootstrap.py --doctor
-python .\run_pipeline.py --no-resume
-```
-
-### Linux / macOS / Termux
-
-```bash
-python3 bootstrap.py --install
-python3 bootstrap.py --doctor
-python3 run_pipeline.py --no-resume
-```
-
-`config/pipeline_config.yaml` is the single canonical starter profile used when no `--config` argument is supplied. It is deliberately bounded, CPU-safe, and exercises the real pipeline and artifact chain without starting a long production training job.
-
-The larger profile is preserved as `config/pipeline_config.full.yaml` and must be selected explicitly for large runs.
-
-The bootstrapper installs framework dependencies and automatically selects the official CUDA PyTorch wheel when an NVIDIA GPU is detected, otherwise the official CPU wheel. Override with `--torch-channel cpu`, `--torch-channel cuda`, or `--torch-channel default` when a specific wheel source is required.
-
-After the starter run succeeds, inspect the host before doing expensive work:
-
-```powershell
-python .\run_pipeline.py --doctor --hardware-report
-```
-
-or:
-
-```bash
-python3 run_pipeline.py --doctor --hardware-report
-```
-
-## What happens during a run
-
-The normal pipeline is intentionally linear:
+The normal pipeline is:
 
 `crawl → clean → dedup → weight → tokenize → shard → train → export`
 
-Each stage reads a verified artifact from the previous stage and writes a new artifact with a manifest containing provenance and hashes. If an existing artifact does not match the expected provenance or integrity data, it is rebuilt instead of being silently reused.
+## Quick start
 
-Training checkpoints persist the model, optimizer, scaler, global RNG state, train/validation shard order, shard cursor, and loader RNG state. Resume therefore continues from the same data position instead of merely restoring model weights.
+You do not need to read the project history to use the project. Humanity has suffered enough documentation archaeology already.
 
-Final export verifies the checkpoint, tokenizer, weighted corpus, shard manifest, source manifest, independent configuration identities, seed, and explicit artifact relationships before conversion. The historical pipeline-wide configuration hash is retained as legacy evidence but is no longer treated as the identity of every stage. A mismatch stops export rather than allowing an inconsistent artifact to be presented as a valid model.
+### 1. Clone
 
-For an independent, read-only lineage check, run `python scripts/validate_lineage.py --output-dir output --checkpoint <checkpoint.pt>`. It reports configuration, artifact, parent, checkpoint, and export relationships without rewriting historical evidence.
+```bash
+git clone https://github.com/psfr4590-afk/ML-Framework.git
+cd ML-Framework
+```
 
-The starter profile is a correctness check, not a useful model-training run. For serious training, inspect the hardware report first and explicitly choose an appropriate larger configuration.
-
-## Clone-and-run CLI
-
-Phase 10 adds one stable user-facing command: `mlframework`. It resolves the repository from its installed entry point, so commands do not depend on `C:\\Users\\Metho...`, the caller's current directory, or undocumented local edits.
-
-### Fresh clone
+### 2. Install
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/psfr4590-afk/ML-Framework.git
-cd ML-Framework
-python .\\bootstrap.py --install
-python -m pip install -e .
-mlframework doctor
-mlframework smoke
+python .\bootstrap.py --install
 ```
 
 Linux / macOS / Termux:
 
 ```bash
-git clone https://github.com/psfr4590-afk/ML-Framework.git
-cd ML-Framework
 python3 bootstrap.py --install
-python3 -m pip install -e .
-mlframework doctor
-mlframework smoke
 ```
 
-After the smoke test, the operational path is:
+The bootstrapper installs the project dependencies and the PyTorch wheel appropriate to the detected host. Use `--torch-channel cpu` or `--torch-channel cuda` to override automatic selection.
+
+### 3. Check the machine
+
+Windows:
+
+```powershell
+python .\bootstrap.py --doctor
+```
+
+Linux / macOS / Termux:
+
+```bash
+python3 bootstrap.py --doctor
+```
+
+The doctor checks Python, required packages, Git/CMake, hardware, PyTorch/CUDA, and the project environment. A missing llama.cpp checkout is a warning before export, not a blocker for the basic smoke run.
+
+### 4. Run the starter pipeline
+
+Windows:
+
+```powershell
+python .\mlframework.py smoke
+```
+
+Linux / macOS / Termux:
+
+```bash
+python3 mlframework.py smoke
+```
+
+The starter profile is deliberately small. Its purpose is to prove that the real pipeline and artifact chain work on the current machine, not to train a useful production model.
+
+Afterward:
+
+```text
+mlframework status
+mlframework runs
+```
+
+For a fresh clone, the shortest useful path is therefore:
+
+```text
+clone → bootstrap.py --install → bootstrap.py --doctor → mlframework smoke
+```
+
+## Launch Model Lab
+
+### Windows desktop UI
+
+After installation:
+
+```powershell
+python .\launch.py
+```
+
+This starts the desktop control surface and its local FastAPI backend. The UI is designed around a 1760×990 desktop layout.
+
+### Browser command center
+
+To launch the local web control surface directly:
+
+```powershell
+python .\run_command_center.py
+```
+
+To start the backend without opening a browser:
+
+```powershell
+python .\run_command_center.py --no-browser
+```
+
+The command center binds to localhost by default.
+
+## CLI
+
+Install the editable package if you want the `mlframework` command available directly in your shell:
+
+```bash
+python -m pip install -e .
+```
+
+Then:
 
 ```text
 mlframework doctor
@@ -199,146 +142,115 @@ mlframework status
 mlframework runs
 ```
 
-The commands use the canonical starter configuration. A clean clone does not require opening a YAML file or changing an absolute path. `mlframework export` bootstraps the pinned llama.cpp checkout when needed. `mlframework infer` verifies the exported Q4_K_M artifact through llama.cpp.
+The Python entry points remain available when you do not install the package:
 
-### Doctor
-
-`mlframework doctor` is a non-destructive host and project preflight. It reports Python, PyTorch, CUDA, GPU, VRAM, RAM, disk, tokenizer prerequisites, dataset definitions, llama.cpp, Git, and configuration. CPU-only hosts report GPU/CUDA/VRAM as a CPU fallback rather than falsely claiming GPU capability.
-
-The doctor does not recommend the old fixed model presets. Training recommendations should come from gradient testing that measures the actual hardware ceiling and choke point. The current repository still accepts preset values as configuration compatibility inputs; the doctor does not treat those labels as measured hardware capability.
-
-### Supported environment
-
-- Windows 10/11, Linux, macOS, and headless Termux are supported for the portable Python pipeline. The desktop Tk UI is Windows-oriented.
-- Python 3.11-3.14 is supported.
-- NVIDIA CUDA is optional. CPU training is supported for bounded smoke/testing runs.
-- A practical GPU deployment benefits from NVIDIA CUDA and sufficient VRAM for the selected model configuration. The doctor reports the actual detected hardware instead of inventing a preset.
-- The onboarding disk gate requires at least 8 GiB free. Expect additional storage for the Python environment, semantic-dedup model/cache, datasets, checkpoints, llama.cpp build products, and GGUF artifacts. Large training runs can require substantially more.
-- The bounded smoke run is intended as the first functional test. The approximately 1h 15m runtime shown by the doctor is an operator estimate, not a universal benchmark. Actual runtime depends on hardware, network retrieval, dataset size, and configuration.
-
-### Troubleshooting
-
-- If `mlframework` is not found after installation, reactivate the virtual environment or run `python -m pip install -e .` again.
-- If PyTorch installation fails on a GPU host, rerun bootstrap with `--torch-channel cuda`; for CPU-only hosts use `--torch-channel cpu`.
-- If `mlframework doctor` reports missing llama.cpp, run `mlframework export` to bootstrap the pinned native toolchain, or use `python scripts/verify_release.py --bootstrap-native` for the full native gate.
-- If `mlframework evaluate` reports no checkpoint, run `mlframework train` after `mlframework dataset` or run the complete `mlframework smoke`.
-- If inference reports a missing GGUF, run `mlframework export` first.
-- Never edit an absolute path copied from another machine into the repository. Runtime paths are resolved from the project root.
-
-## Windows launch
-
-After the first-run path is healthy:
-
-```powershell
-python .\launch.py
+```text
+python bootstrap.py
+python run_pipeline.py
+python launch.py
+python run_command_center.py
 ```
 
-`launch.py` is the desktop entry point. It starts the existing desktop control surface, which uses the localhost FastAPI command center as its backend. The current desktop UI is documented for a 1760x990 target display; this is a machine/UI verification boundary, not a claim that every host has that display geometry.
+Use `python3` instead of `python` on systems where that is the local convention.
 
-Model Lab navigates the real pipeline and dataset sessions. It does not implement a second copy of the crawler, cleaner, deduplicator, tokenizer, sharder, trainer, or exporter.
+## Configuration
 
-## Backend-only mode
+The starter configuration is:
 
-```powershell
-python .\run_command_center.py --no-browser
+```text
+config/pipeline_config.yaml
 ```
 
-Without `--no-browser`, the backend opens the localhost command center in the default browser after its health endpoint is ready. The command center binds to localhost by default.
+It is the canonical first-run profile. Larger or specialized configurations are under `config/`.
 
-## Release verification
+Useful inspection commands:
 
-Static verification:
+```text
+mlframework doctor
+python run_pipeline.py --list-stages
+python run_pipeline.py --list-groups
+```
+
+Runtime paths are resolved from the repository root. Do not copy machine-specific absolute paths into configuration.
+
+## Project layout
+
+```text
+ML-Framework/
+├── README.md
+├── bootstrap.py             # Environment setup and hardware preflight
+├── mlframework.py           # User-facing CLI
+├── run_pipeline.py          # Pipeline entry point
+├── launch.py                # Desktop UI entry point
+├── run_command_center.py    # Local web backend
+├── config/                  # Starter and specialized configurations
+├── pipeline/                # Pipeline implementation
+├── command_center/          # Local FastAPI backend
+├── ui/                      # Desktop control surface
+├── scripts/                 # Verification, export, and tooling
+├── tests/                   # Automated verification
+└── docs/                    # Architecture, development, and release docs
+```
+
+The UI calls the existing pipeline/backend services. It does not maintain a second implementation of the crawler, tokenizer, trainer, or exporter.
+
+## Documentation
+
+Start with:
+
+- [Development guide](docs/development/START_HERE.md)
+- [Architecture](docs/architecture/ARCHITECTURE.md)
+- [Project state](docs/development/PROJECT_STATE.md)
+- [Dataset provenance](docs/development/DATA_PROVENANCE.md)
+
+For engineering and release work:
+
+- [Verification](docs/verification/VERIFICATION.md)
+- [Verification checklist](docs/verification/VERIFICATION_CHECKLIST.md)
+- [Release checklist](docs/release/RELEASE_CHECKLIST.md)
+- [Release readiness](docs/release/RELEASE_READINESS_PLAN.md)
+- [Release verification](docs/release/RELEASE_VERIFICATION_REPORT.md)
+
+## Development verification
+
+Run the normal static verification with:
 
 ```bash
 python scripts/verify_release.py
 ```
 
-This runs compilation, Ruff, the full test suite with coverage reporting, and the required project/runtime doctor. It deliberately does **not** claim native GGUF verification.
-
-Full native RC/release verification:
+For the full native release gate, including pinned llama.cpp bootstrap and GGUF/inference verification:
 
 ```bash
 python scripts/verify_release.py --bootstrap-native
 ```
 
-The native gate additionally reconciles the pinned llama.cpp toolchain and runs a deterministic, network-free fixture through tokenization, sharding, training, GGUF export, export-card generation, GGUF integrity verification, and native llama.cpp inference.
-
-A release candidate should have this command pass on the exact commit being approved.
-
-## Security and release evidence
-
-```bash
-python -m pip install -r requirements-security.txt
-python scripts/security_gate.py
-python scripts/generate_release_evidence.py
-```
-
-The security gate checks tracked source for common secret patterns, dependency consistency with `pip check`, and dependency vulnerabilities with `pip-audit`.
-
-The release evidence generator records the resolved dependency environment and SBOM. The release workflow combines those records with the native release verification and uploads the resulting evidence artifact.
-
-## GitHub Actions
-
-The repository contains separate CI, security, and release workflows. Their results are the authoritative source for current validation state.
-
-- CI covers Linux and Windows Python 3.11 and 3.14 environments, bootstrap doctor, dependency consistency, Ruff, compilation, tests/coverage, and the Windows PowerShell bootstrap contract.
-- Security runs the repository security gate on `main` pushes and pull requests and can also be dispatched manually.
-- Release runs the security gate, generates dependency/SBOM evidence, executes `verify_release.py --bootstrap-native`, and uploads release evidence. It is configured for manual dispatch and version tags.
-
-The release workflow is manually dispatchable and tag-driven so the complete native gate can be run against the approved source before an RC is promoted.
-
-## Production export requirement
-
-Final RC export requires the pinned llama.cpp checkout containing `convert_hf_to_gguf.py` and the built `llama-quantize` executable. The Phase 9 exporter can produce the complete release set with `--quant ALL`: F16, Q4_K_M, Q5_K_M, and Q8_0.
-
-Each export receives its own checkpoint hash, model configuration, export configuration, exporter version, timestamp, artifact hash, and lineage manifest. The aggregate `output/gguf/export_manifest.json` records the complete set.
-
-The native gate validates every exported GGUF with llama.cpp:
-
-```bash
-python scripts/verify_release.py --bootstrap-native
-```
-
-For the full deployment gate, including Ollama:
-
-```bash
-python scripts/verify_release.py --bootstrap-native --verify-ollama
-```
-
-Ollama remains an external deployment dependency and is intentionally not installed by the Python requirements.
-
-## Termux / Android native toolchain
-
-Model Lab supports a headless Termux runtime for the pipeline and native GGUF export. The Tk desktop UI is intentionally not a dependency of the portable pipeline test suite.
-
-To prepare the native llama.cpp toolchain after first-run validation:
-
-```bash
-bash scripts/bootstrap_llama_cpp.sh
-python scripts/verify_release.py --bootstrap-native
-```
-
-The native bootstrap uses a reduced Android-safe build profile under Termux and builds only the required `llama-quantize` target. The Termux build is serialized to reduce memory pressure during compilation. The Python-side GGUF converter remains part of the pinned llama.cpp checkout. The current Termux evidence was produced with the native binary at `third_party/llama.cpp/build-model-lab/bin/llama-quantize`.
-
-`sentence-transformers` and `faiss-cpu` are required runtime dependencies because semantic deduplication is a required pipeline capability. The default embedding model remains local-only; set `allow_model_download: true` only when an explicit model download is acceptable.
-
-`python scripts/verify_release.py` is read-only with respect to native dependencies. The explicit `--bootstrap-native` option is intentionally allowed to clone/build the pinned native dependency as part of the verification gate.
-
-## Release boundary
-
-The repository does **not** claim that a production dataset has been crawled, that a useful model has converged, that external-source training rights have been legally certified, or that target-hardware native inference has passed merely because the source tree is healthy.
-
-Those are runtime and operational facts. The release process requires evidence for them rather than substituting documentation, historical test counts, or placeholder artifacts.
-
-
-## RC release gate
-
-After the ten implementation phases, the release candidate is accepted only by the full release gate:
+The full RC gate can additionally exercise the UI/backend probe and clean-clone onboarding path:
 
 ```bash
 python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
 ```
 
-This produces `release-evidence/release_report.json`, a single machine-readable report covering functional evidence, provenance and lineage, dataset/source retrieval, checkpoints, reproducibility, hardware and auto-sizing, ETA, evaluation, SQLite, UI/backend connectivity, GGUF export/inference, clean-clone acceptance, documentation, secrets, Git state, and release artifacts.
+These commands are verification tools, not required steps for a newcomer who only wants to run the starter pipeline.
 
-A release is **PASS** only when the required checks are explicitly PASS. `UNKNOWN` evidence is not silently treated as success.
+## Requirements
+
+- Python 3.11–3.14
+- Git
+- CMake for native tooling
+- NVIDIA CUDA is optional
+- CPU mode is supported for bounded smoke/testing runs
+- At least 8 GiB free disk space for onboarding; real training can require substantially more
+- `sentence-transformers` and `faiss-cpu` are installed because semantic deduplication is part of the pipeline
+
+For serious training, run the doctor/hardware report before choosing a larger configuration.
+
+## Release boundary
+
+A passing source tree does not mean that a production dataset has been crawled, a useful model has converged, external-source training rights have been certified, or target hardware has passed native inference. Those claims require runtime evidence.
+
+The repository keeps those release checks in the verification tooling and release documentation rather than presenting historical results as current facts.
+
+## License
+
+See [LICENSE](LICENSE).
