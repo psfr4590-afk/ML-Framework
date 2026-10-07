@@ -117,4 +117,6 @@ def test_doctor_fails_when_nvidia_gpu_has_no_cuda_runtime(monkeypatch, capsys) -
     monkeypatch.setattr(bootstrap.RECONCILER.__class__, "is_file", lambda self: True)
     monkeypatch.setattr(bootstrap.shutil, "which", lambda exe: "present")
     assert bootstrap.doctor() == 2
-    assert "NVIDIA GPU detected but Torch CUDA runtime is unavailable" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "NVIDIA GPU detected but Torch CUDA runtime is unavailable" not in output
+    assert "Bootstrap doctor: FAIL" in output
