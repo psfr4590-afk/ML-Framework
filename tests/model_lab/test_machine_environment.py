@@ -5,7 +5,6 @@ portable CI and Termux can collect the test suite safely.
 """
 from __future__ import annotations
 
-import os
 import platform
 import shutil
 import subprocess
