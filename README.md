@@ -253,7 +253,6 @@ These commands are verification tools, not required steps for a newcomer who onl
 
 ## Requirements
 
-- Python 3.11–3.14
 - Python 3.11-3.14 for the runtime
 - Git is optional for ZIP users and required only for the clone/developer workflow
 - CMake is required for native export/toolchain work
