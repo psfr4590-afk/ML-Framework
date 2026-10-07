@@ -24,26 +24,35 @@ The normal pipeline is:
 
 You do not need to read the project history to use the project. Humanity has suffered enough documentation archaeology already.
 
-### 1. Clone
+### 1. Choose how you arrived here
+
+**New to Git or using a fresh Windows laptop:** download the repository with **Code → Download ZIP**, extract it, open PowerShell in the extracted folder, and run:
+
+```powershell
+.\bootstrap_windows.ps1
+```
+
+The Windows first-boot wrapper handles the human/machine boundary before Python can run. It finds Python 3.11-3.14, can install Python 3.13 with `winget` when Python is absent, installs the project dependencies, selects CPU/CUDA PyTorch, and runs the bootstrap doctor.
+
+**Developer path:** if Git is already installed:
 
 ```bash
 git clone https://github.com/psfr4590-afk/ML-Framework.git
 cd ML-Framework
 ```
 
-### 2. Install
+Then run the canonical bootstrap directly:
 
-Windows PowerShell:
-
+Windows:
 ```powershell
 python .\bootstrap.py --install
 ```
 
 Linux / macOS / Termux:
-
 ```bash
 python3 bootstrap.py --install
 ```
+
 
 The bootstrapper installs the project dependencies and the PyTorch wheel appropriate to the detected host. Use `--torch-channel cpu` or `--torch-channel cuda` to override automatic selection.
 
@@ -86,11 +95,19 @@ mlframework status
 mlframework runs
 ```
 
-For a fresh clone, the shortest useful path is therefore:
+For a first-time Windows user, the shortest useful path is therefore:
+
+```text
+Download ZIP → extract → bootstrap_windows.ps1 → mlframework smoke
+```
+
+For developers:
 
 ```text
 clone → bootstrap.py --install → bootstrap.py --doctor → mlframework smoke
 ```
+
+See [First boot](docs/development/FIRST_BOOT.md) for the non-happy-path onboarding and recovery behavior.
 
 ## Launch Model Lab
 
@@ -198,6 +215,7 @@ The UI calls the existing pipeline/backend services. It does not maintain a seco
 
 Start with:
 
+- [First boot](docs/development/FIRST_BOOT.md)
 - [Development guide](docs/development/START_HERE.md)
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Project state](docs/development/PROJECT_STATE.md)
