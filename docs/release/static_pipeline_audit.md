@@ -5,7 +5,7 @@ This audit defines what can be established from the repository without performin
 ## 1. Clone and repository identity
 
 - The project root is resolved from the entry-point file rather than the caller's working directory.
-- Python support is explicitly constrained to 3.11 through 3.13.
+- Python support is explicitly constrained to 3.11 through 3.14 by `pyproject.toml`, `bootstrap.py`, and the runtime doctor.
 - The bootstrapper has a separate PyTorch installation path so CUDA and CPU wheels are selected intentionally.
 - Native llama.cpp is not assumed to exist in a clean clone. The reconciler installs a pinned checkout and verifies the expected revision before building it.
 - Generated datasets, checkpoints, GGUF files, and other runtime artifacts are not part of the repository contract.
@@ -13,7 +13,7 @@ This audit defines what can be established from the repository without performin
 ## 2. Dependency and environment gate
 
 - `bootstrap.py --doctor` checks Python, core imports, Git, CMake, hardware, and actual Torch CUDA availability.
-- Runtime dependencies are bounded in both `requirements.txt` and `pyproject.toml`.
+- Runtime dependency authority is `pyproject.toml`; `requirements.txt` is the editable-install adapter and host-specific requirement files remain separate.
 - The release security gate scans tracked files for common credential patterns and can run `pip-audit` against the declared dependency sets.
 
 ## 3. Configuration identity
