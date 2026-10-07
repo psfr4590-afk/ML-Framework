@@ -93,7 +93,9 @@ def test_command_center_entrypoint_can_start_and_report_health():
         except subprocess.TimeoutExpired: proc.kill()
 
 @WINDOWS_ONLY
-def test_root_launcher_targets_desktop_ui():
+def test_root_launcher_targets_single_browser_command_center():
     launcher = (ROOT / "launch.py").read_text(encoding="utf-8")
-    assert "UI_ENTRYPOINT = ROOT / \"ui\" / \"app.py\"" in launcher
-    assert "run_command_center.py" not in launcher
+    assert "COMMAND_CENTER = ROOT / \"run_command_center.py\"" in launcher
+    assert "subprocess.call([sys.executable, str(COMMAND_CENTER)], cwd=ROOT)" in launcher
+    assert "UI_ENTRYPOINT = ROOT / \"ui\" / \"app.py\"" not in launcher
+    assert "tkinter" not in launcher
