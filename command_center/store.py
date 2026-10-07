@@ -50,9 +50,13 @@ class DatasetStore:
         return max([0, *self._ids(), *profile_ids]) + 1
 
     def get(self, did):
-        p = self.path(did) / "dataset.json"
-        if not p.exists(): return None
-        return json.loads(p.read_text(encoding="utf-8"))
+        # Serialize readers with atomic dataset.json replacement on Windows.
+        # A concurrent read can keep the file handle open long enough for
+        # os.replace() to fail with PermissionError on Windows.
+        with LOCK:
+            p = self.path(did) / "dataset.json"
+            if not p.exists(): return None
+            return json.loads(p.read_text(encoding="utf-8"))
 
     def list(self, limit=None, offset=0):
         ids = self._ids()
