@@ -289,10 +289,16 @@ def main() -> int:
                 checkout = subprocess.run(["git", "checkout", "--detach", expected_commit], cwd=clone, check=False) if fetch.returncode == 0 else None
                 checked_out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, check=False, capture_output=True, text=True) if checkout and checkout.returncode == 0 else None
                 exact_source = bool(checked_out and checked_out.returncode == 0 and checked_out.stdout.strip() == expected_commit)
-                install = subprocess.run([sys.executable, "-m", "pip", "install", str(clone)], cwd=clone, check=False) if exact_source else None
-                doctor = subprocess.run([sys.executable, str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False) if install and install.returncode == 0 else None
-                smoke = subprocess.run([sys.executable, str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor and doctor.returncode == 0 else None
-                NATIVE_EVIDENCE["clean_clone"] = bool(exact_source and install and install.returncode == 0 and doctor and doctor.returncode == 0 and smoke and smoke.returncode == 0)
+                venv_dir = clone / ".release-venv"
+                venv_python = venv_dir / "bin" / "python"
+                if sys.platform == "win32":
+                    venv_python = venv_dir / "Scripts" / "python.exe"
+                create_venv = subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], cwd=clone, check=False) if exact_source else None
+                install_torch = subprocess.run([str(venv_python), "-m", "pip", "install", "-r", "requirements-torch.txt", "--index-url", "https://download.pytorch.org/whl/cpu"], cwd=clone, check=False) if create_venv and create_venv.returncode == 0 else None
+                install = subprocess.run([str(venv_python), "-m", "pip", "install", str(clone)], cwd=clone, check=False) if install_torch and install_torch.returncode == 0 else None
+                doctor = subprocess.run([str(venv_python), str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False) if install and install.returncode == 0 else None
+                smoke = subprocess.run([str(venv_python), str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor and doctor.returncode == 0 else None
+                NATIVE_EVIDENCE["clean_clone"] = bool(exact_source and create_venv and create_venv.returncode == 0 and install_torch and install_torch.returncode == 0 and install and install.returncode == 0 and doctor and doctor.returncode == 0 and smoke and smoke.returncode == 0)
     if args.ui_probe and not NATIVE_EVIDENCE.get("ui_backend_connectivity"):
         failures.append("ui-backend")
     NATIVE_EVIDENCE["export"] = True
