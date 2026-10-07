@@ -1,24 +1,23 @@
-"""UI entry point. Starts the local Command Center when needed, then opens Tkinter."""
+"""Compatibility launcher for the single Model Lab Command Center.
+
+The former Tkinter desktop surface is no longer a second operator interface.
+All interactive control is served by the localhost Command Center.
+"""
 from __future__ import annotations
+
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from ui.core.application import Application, BackendManager
+COMMAND_CENTER = ROOT / "run_command_center.py"
 
 
 def main() -> int:
-    backend = BackendManager(ROOT)
-    backend.start()
-    try:
-        app = Application(backend=backend)
-        app.mainloop()
-    finally:
-        backend.stop()
-    return 0
+    """Delegate to the canonical browser Command Center."""
+    if not COMMAND_CENTER.is_file():
+        raise SystemExit(f"run_command_center.py is missing: {COMMAND_CENTER}")
+    return subprocess.call([sys.executable, str(COMMAND_CENTER)], cwd=ROOT)
 
 
 if __name__ == "__main__":
