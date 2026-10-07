@@ -1,8 +1,20 @@
 # Model Lab: start here
 
-This guide is the operational walkthrough for a new checkout. It intentionally focuses on getting the system running, not on the project's development history.
+This guide is the operational walkthrough for a new installation. It intentionally tests the human path, not just the developer happy path.
 
-## 1. Clone
+## 1. Get the project
+
+For a first-time Windows user, use GitHub's **Code → Download ZIP**, extract the archive, and open PowerShell in the extracted `ML-Framework` folder.
+
+Run:
+
+```powershell
+.\bootstrap_windows.ps1
+```
+
+This wrapper handles the pre-Python boundary. It locates supported Python, can install Python 3.13 through `winget` when available, then hands control to the canonical `bootstrap.py`.
+
+Git users can instead clone:
 
 ```bash
 git clone https://github.com/psfr4590-afk/ML-Framework.git
@@ -10,6 +22,10 @@ cd ML-Framework
 ```
 
 ## 2. Install
+
+For the ZIP path, `bootstrap_windows.ps1` already performs installation and doctor checks.
+
+For a Git checkout or direct Python workflow:
 
 Windows PowerShell:
 
@@ -32,7 +48,7 @@ Windows: python .\bootstrap.py --doctor
 Other:   python3 bootstrap.py --doctor
 ```
 
-Resolve any required `FAIL` result before continuing. A missing llama.cpp checkout is expected until native export is requested.
+Resolve any required `FAIL` result before continuing. Missing Git is not a blocker for a ZIP download. Missing CMake is not a blocker for the basic Python smoke path, but it is required for native export.
 
 ## 4. Prove the pipeline
 
@@ -93,7 +109,13 @@ doctor → smoke → dataset → train → evaluate → export → infer
 
 ## 7. Native export
 
-Export requires the pinned llama.cpp toolchain:
+Native export requires the pinned llama.cpp toolchain and CMake. On Windows, a first-boot user can prepare both with:
+
+```powershell
+.\bootstrap_windows.ps1 -Native
+```
+
+Or from an already-prepared environment:
 
 ```bash
 python scripts/verify_release.py --bootstrap-native
@@ -121,3 +143,9 @@ python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
 ```
 
 See the [architecture guide](../architecture/ARCHITECTURE.md) for system design and the [release checklist](../release/RELEASE_CHECKLIST.md) for release-specific requirements.
+
+## 9. Recovery
+
+The bootstrap path is designed to be rerun. If dependency installation is interrupted, the network fails, or a prerequisite is missing, fix the reported problem and rerun the same command. Do not treat a failed first attempt as a reason to delete the checkout or generated provenance.
+
+If Windows has no `winget`, install Python 3.11-3.14 manually and reopen PowerShell before rerunning `bootstrap_windows.ps1`. For native export, install CMake when the wrapper reports that it is missing.
