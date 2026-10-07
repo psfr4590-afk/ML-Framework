@@ -87,7 +87,7 @@ def _run(did, stage):
                              text=True, encoding="utf-8", errors="replace")
         with LOCK:
             RUNS[did] = p
-            _write_state(did, stage=stage, pid=p.pid, status="running")
+            _write_state(did, stage=stage, pid=getattr(p, "pid", None), status="running")
         for line in p.stdout or []:
             with logp.open("a", encoding="utf-8") as f:
                 f.write(line.rstrip() + "\n")
