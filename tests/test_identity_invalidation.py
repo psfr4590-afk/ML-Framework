@@ -59,5 +59,9 @@ def test_artifact_reuse_requires_exact_identity_bundle(tmp_path):
     changed["identity_bundle_sha256"] = stable_hash(changed["config_identities"])
     assert not artifact_valid(artifact, expected_provenance=changed)
 
-    manifest = json.loads((tmp_path / "weighted.jsonl.manifest.json").read_text(encoding="utf-8"))
+    manifest_path = tmp_path / "weighted.jsonl.manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["provenance"]["identity_bundle_sha256"] == provenance["identity_bundle_sha256"]
+    manifest["provenance"]["config_identities"]["dataset_config_sha256"] = "c" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert not artifact_valid(artifact)
