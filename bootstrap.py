@@ -363,10 +363,14 @@ def install(torch_channel: str = "auto") -> int:
     if result != 0:
         return result
 
-    result = _validate_requested_torch_channel(torch_channel)
+    result = _pip_install(REQUIREMENTS)
     if result != 0:
         return result
-    return _pip_install(REQUIREMENTS)
+
+    # Validate after the full dependency install because transitive dependencies
+    # are allowed to constrain Torch and must not silently replace the selected
+    # host-specific wheel.
+    return _validate_requested_torch_channel(torch_channel)
 
 
 def ensure_llamacpp() -> int:
