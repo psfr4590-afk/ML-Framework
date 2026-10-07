@@ -11,7 +11,7 @@ The ZIP path is intentionally supported. A clean machine is not assumed to have 
 
 After downloading the repository with GitHub's **Code → Download ZIP** and extracting it:
 
-1. Open PowerShell in the extracted \`ML-Framework\` folder.
+1. Open PowerShell in the extracted `ML-Framework` folder.
 2. Run:
 
 ~~~
@@ -21,10 +21,10 @@ After downloading the repository with GitHub's **Code → Download ZIP** and ext
 The Windows first-boot script:
 
 - locates a supported Python 3.11-3.14 interpreter;
-- if Python is missing and Windows \`winget\` is available, installs Python 3.13 for the current user;
-- runs the canonical \`bootstrap.py --install\` dependency installation;
+- if Python is missing and Windows `winget` is available, installs Python 3.13 for the current user;
+- runs the canonical `bootstrap.py --install` dependency installation;
 - selects the CPU or NVIDIA CUDA PyTorch wheel automatically;
-- runs \`bootstrap.py --doctor\`;
+- runs `bootstrap.py --doctor`;
 - stops with an actionable message instead of continuing after a failed prerequisite.
 
 Then prove the installation:
@@ -47,13 +47,13 @@ Native GGUF export needs CMake and the pinned llama.cpp toolchain. If you want t
 .\bootstrap_windows.ps1 -Native
 ~~~
 
-If CMake is missing and \`winget\` is available, the script installs the Kitware CMake package for the current user before invoking the native bootstrap.
+If CMake is missing and `winget` is available, the script installs the Kitware CMake package for the current user before invoking the native bootstrap.
 
 The native path is intentionally separate from the basic smoke path. A user should not need a compiler toolchain just to prove that the Python pipeline works.
 
 ## If the machine has no winget
 
-The script does not pretend every Windows installation is identical. If \`winget\` is unavailable, it reports the missing prerequisite and stops.
+The script does not pretend every Windows installation is identical. If `winget` is unavailable, it reports the missing prerequisite and stops.
 
 Install Python 3.11-3.14 manually, open a new PowerShell window, and rerun:
 
@@ -90,4 +90,4 @@ python .\bootstrap.py --doctor
 python .\mlframework.py smoke
 ~~~
 
-The two entry paths converge on the same \`bootstrap.py\`; the Windows wrapper exists to handle the human and machine prerequisites that occur before the Python bootstrap can even start.
+The two entry paths converge on the same `bootstrap.py`; the Windows wrapper exists to handle the human and machine prerequisites that occur before the Python bootstrap can even start.
