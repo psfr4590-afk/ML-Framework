@@ -88,12 +88,6 @@ def test_reconciler_dispatches_to_bash_on_non_windows(monkeypatch, tmp_path):
     assert calls == [(["bash", str(script)], tmp_path, False)]
 
 
-def test_termux_safe_machine_tests_do_not_import_tkinter_at_collection_time():
-    source = (ROOT / "tests/model_lab/test_machine_environment.py").read_text(encoding="utf-8")
-    assert "import tkinter as tk" not in source
-    assert 'pytest.importorskip("tkinter")' in source
-
-
 def test_runtime_requirements_include_command_center_security_dependencies():
     metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     for package in ["fastapi", "uvicorn", "cryptography", "httpx", "pydantic"]:

@@ -52,10 +52,10 @@ The production data and training path. Stage implementations are deliberately se
 `pipeline.types.Document` is the canonical document schema. `pipeline.contracts.run.Document` is intentionally a compatibility alias so the project has one schema instead of two subtly different ones.
 
 ### `command_center/`
-The localhost control plane. It owns dataset sessions, credentials, process lifecycle, API routes, and crawler telemetry. The desktop UI talks to this layer instead of reimplementing pipeline logic.
+The localhost control plane and sole operator surface. It owns dataset sessions, credentials, process lifecycle, API routes, crawler telemetry, and browser-facing operational state. It reads and writes the same backend state used by CLI execution.
 
 ### `ui/`
-The optional Windows/Tk desktop surface. Screens are presentation/control surfaces; pipeline behavior remains in `pipeline/` and backend behavior remains in `command_center/`.
+Legacy compatibility-only code retained outside the distributable package. `ui/app.py` delegates to the browser Command Center; the legacy Tk screens are not the supported operator interface and are not part of the release operator contract.
 
 ### `config/`
 The canonical configuration surface. Dataset groups, seeds, source weights, cleaner policy, pipeline settings, credentials templates, and smoke-test settings live here. Runtime credentials are never intended to be committed.

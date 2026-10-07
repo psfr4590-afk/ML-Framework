@@ -3,25 +3,23 @@
 ## Automated
 - Package identity and documentation
 - Launcher and project-root discovery
-- Navigation and screen inventory
+- Command Center route and browser-rendering contracts
 - Pipeline stage and route contracts
 - Credential encryption/decryption paths
 - Backend startup behavior
-- 1760×990 desktop configuration
 - Secret scanning
 - Release documentation
 
 ## Target machine
-- Windows and Python 3.11
-- Tkinter and 1760×990 display
+- Windows and supported Python 3.11-3.14
 - Required executables
 - NVIDIA/PyTorch CUDA observability when applicable
 - llama.cpp checkout and export tools
 - Pipeline doctor and Command Center health
 
 ## Human-visible
-- Desktop launch and display fit
-- Every navigation surface
+- Command Center launch and browser health
+- Browser rendering contract
 - Dataset selection and pipeline controls
 - Stop behavior
 - Four credential slots and safe save/replace behavior

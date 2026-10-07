@@ -132,7 +132,7 @@ See [First boot](docs/development/FIRST_BOOT.md) for the non-happy-path onboardi
 
 ### Command Center
 
-There is exactly one operator interface: the localhost browser Command Center. The desktop launcher and compatibility entry point both delegate to it, so they cannot drift into separate UI state.
+There is exactly one operator interface: the localhost browser Command Center. The `launch.py` launcher and `ui/app.py` compatibility entry point both delegate to it, so they cannot drift into separate UI state.
 
 Launch it with:
 

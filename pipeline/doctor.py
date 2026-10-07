@@ -15,7 +15,7 @@ from pathlib import Path
 LLAMACPP_TAG = "b10516"
 LLAMACPP_COMMIT = "b95502b"
 MIN_PYTHON = (3, 11)
-MAX_PYTHON_EXCLUSIVE = (3, 14)
+MAX_PYTHON_EXCLUSIVE = (3, 15)
 
 
 def _check(name: str, ok: bool, detail: str, required: bool = True) -> dict:
@@ -28,7 +28,7 @@ def _python_ok() -> bool:
 
 def _python_detail() -> str:
     version = sys.version.split()[0]
-    return f"{version} (requires Python 3.11-3.13)"
+    return f"{version} (supports Python 3.11-3.14)"
 
 
 def _writable(path: Path) -> bool:

@@ -1,6 +1,6 @@
 # Model Lab Verification
 
-Model Lab verification is divided into automated contract tests, Python compilation, non-destructive environment checks, native artifact verification, and human-visible desktop smoke checks.
+Model Lab verification is divided into automated contract tests, Python compilation, non-destructive environment checks, native artifact verification, and localhost browser Command Center connectivity checks.
 
 ## Static verification
 
@@ -30,6 +30,8 @@ On the target Windows machine:
 python -m pytest -q .\\tests\\model_lab\\test_machine_environment.py
 powershell -ExecutionPolicy Bypass -File .\\scripts\\run_release_verification.ps1 -IncludeMachineChecks
 ```
+
+The machine suite verifies supported Python, required executables, CUDA observability when available, and Command Center health. Legacy Tkinter/display checks are not release gates.
 
 Machine-specific evidence must not be presented as a universal guarantee for other hardware.
 

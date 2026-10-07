@@ -181,3 +181,31 @@ def test_semantic_dedup_auto_mode_fails_if_required_package_is_missing(monkeypat
     from pipeline.types import Document
     with pytest.raises(RuntimeError, match="sentence-transformers"):
         deduper.run([Document(doc_id="1", text="test")])
+
+
+def test_runtime_and_documentation_contracts_match_source():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    requires_python = pyproject["project"]["requires-python"]
+    from pipeline import doctor
+    assert requires_python == ">=3.11,<3.15"
+    assert doctor.MIN_PYTHON == (3, 11)
+    assert doctor.MAX_PYTHON_EXCLUSIVE == (3, 15)
+    assert "supports Python 3.11-3.14" in doctor._python_detail()
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    start_here = (ROOT / "docs/development/START_HERE.md").read_text(encoding="utf-8")
+    project_state = (ROOT / "docs/development/PROJECT_STATE.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs/architecture/ARCHITECTURE.md").read_text(encoding="utf-8")
+    verification = (ROOT / "docs/verification/VERIFICATION.md").read_text(encoding="utf-8")
+    checklist = (ROOT / "docs/verification/VERIFICATION_CHECKLIST.md").read_text(encoding="utf-8")
+    audit = (ROOT / "docs/release/static_pipeline_audit.md").read_text(encoding="utf-8")
+
+    for doc in (readme, start_here, project_state, architecture, verification, checklist):
+        assert "Windows desktop UI" not in doc
+    assert "sole operator interface" in start_here
+    assert "sole operator interface" in project_state
+    assert "sole operator surface" in architecture
+    assert "browser Command Center" in verification
+    assert "Windows and supported Python 3.11-3.14" in checklist
+    assert "Python support is explicitly constrained to 3.11 through 3.14" in audit
+    assert "requirements.txt` is the editable-install adapter" in audit

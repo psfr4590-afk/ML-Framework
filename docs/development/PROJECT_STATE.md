@@ -10,8 +10,8 @@
 - System: **M²S Model Training Pipeline**
 - `bootstrap.py`: environment installation and environment preflight (`--install`, `--doctor`)
 - `run_pipeline.py` / `mlab`: canonical pipeline CLI and project/runtime readiness doctor
-- `launch.py`: desktop UI launcher
-- `run_command_center.py`: backend-only command-center launcher
+- `launch.py`: canonical launcher for the single localhost browser Command Center
+- `run_command_center.py`: localhost FastAPI Command Center launcher
 - Pipeline: crawl → clean → dedup → weight → tokenize → shard → train → export
 
 ## Dataset catalog
@@ -33,7 +33,7 @@ General web seeds live in `config/seed_urls.txt`.
 
 ## Architecture
 
-The desktop UI is a control surface, not a second pipeline implementation. Dataset state, stage execution, credentials, and runtime behavior are owned by the existing backend.
+The browser Command Center is the sole operator interface. `launch.py` and `ui/app.py` are compatibility launchers that delegate to `run_command_center.py`; dataset state, stage execution, credentials, and runtime behavior are owned by the existing backend.
 
 The public repository intentionally does not vendor generated datasets, checkpoints, GGUF artifacts, caches, live credentials, or native build products.
 

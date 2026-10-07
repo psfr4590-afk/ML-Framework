@@ -92,21 +92,21 @@ python run_pipeline.py --list-stages
 python run_pipeline.py --list-groups
 ```
 
-## 5. Launch the UI
+## 5. Launch the Command Center
 
-Windows desktop:
+The localhost browser Command Center is the sole operator interface. `launch.py` and `ui/app.py` are compatibility launchers that delegate to the same backend.
 
 ```powershell
 python .\launch.py
 ```
 
-Browser command center:
+Or start the backend without opening a browser:
 
 ```powershell
-python .\run_command_center.py
+python .\run_command_center.py --no-browser
 ```
 
-The desktop launcher starts the UI and its localhost backend. The browser launcher starts only the local FastAPI command center.
+The Command Center binds to loopback by default and reads operational state from the authoritative SQLite store.
 
 ## 6. Continue into a real run
 
