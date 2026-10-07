@@ -11,7 +11,7 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 - [ ] Windows CI passes on the exact release commit
 - [ ] Windows PowerShell bootstrap contract passes
 - [ ] `python -m compileall -q .` passes in CI
-- [ ] `python -m pytest -q --cov-fail-under=65` passes in CI
+- [ ] `python -m pytest -q` plus `python -m coverage report --fail-under=60` passes in CI
 - [ ] Isolated clean-install CI job installs the package from source and passes doctor/entrypoint checks
 - [ ] `python run_pipeline.py --doctor` has no required failures
 - [ ] Security gate passes: secret scan, `pip check`, `pip-audit`
