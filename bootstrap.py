@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -267,6 +268,8 @@ def doctor() -> int:
         print(f"  Torch version: {runtime.get('version') or 'UNKNOWN'}")
         print(f"  CUDA available: {runtime['cuda_available']}")
         print(f"  CUDA runtime: {runtime.get('cuda_version') or 'NONE'}")
+        if profile.nvidia_gpu_detected and not runtime["cuda_available"]:
+            failures.append("NVIDIA GPU detected but Torch CUDA runtime is unavailable")
     print("Bootstrap doctor: PASS" if not failures else "Bootstrap doctor: FAIL")
     return 0 if not failures else 2
 
@@ -280,18 +283,87 @@ def _pip_install(requirements: Path, *extra: str) -> int:
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
 
+def _installed_torch_version() -> str | None:
+    try:
+        return importlib.metadata.version("torch")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _torch_variant_matches(channel: str) -> bool:
+    version = _installed_torch_version()
+    if version is None:
+        return False
+    normalized = version.lower()
+    if channel == "cuda":
+        return "+cpu" not in normalized and ("+cu" in normalized or "+cuda" in normalized)
+    if channel == "cpu":
+        return "+cpu" in normalized
+    return True
+
+
+def _remove_incompatible_torch(channel: str) -> int:
+    if _torch_variant_matches(channel):
+        return 0
+    installed = _installed_torch_version() or "unknown"
+    print(f"Replacing incompatible Torch variant {installed!r} for requested {channel!r} channel.")
+    command = [sys.executable, "-m", "pip", "uninstall", "-y", "torch"]
+    print("$", " ".join(command))
+    return subprocess.run(command, cwd=ROOT, check=False).returncode
+
+
+def _validate_requested_torch_channel(channel: str) -> int:
+    version = _installed_torch_version()
+    if version is None:
+        print("Torch installation validation failed: package metadata is missing.", file=sys.stderr)
+        return 2
+    if channel == "cuda":
+        if "+cpu" in version.lower():
+            print(
+                f"Torch installation validation failed: CUDA host has CPU-only Torch {version}.",
+                file=sys.stderr,
+            )
+            return 2
+        runtime = torch_runtime_status()
+        if not runtime["installed"] or not runtime["cuda_available"]:
+            print(
+                "Torch installation validation failed: CUDA Torch is installed but "
+                "torch.cuda.is_available() is false.",
+                file=sys.stderr,
+            )
+            return 2
+    elif channel == "cpu" and "+cpu" not in version.lower():
+        print(
+            f"Torch installation validation failed: CPU channel produced Torch {version}, "
+            "which is not a CPU wheel.",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
 def install(torch_channel: str = "auto") -> int:
     if not _python_supported():
         print(f"Bootstrap install aborted: {_python_requirement_message()}", file=sys.stderr)
         return 2
     if torch_channel == "auto":
         torch_channel = "cuda" if detect_hardware().nvidia_gpu_detected else "cpu"
+
+    if torch_channel in {"cpu", "cuda"}:
+        result = _remove_incompatible_torch(torch_channel)
+        if result != 0:
+            return result
+
     if torch_channel == "cpu":
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
     elif torch_channel == "cuda":
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CUDA_TORCH_INDEX)
     else:
         result = _pip_install(TORCH_REQUIREMENTS)
+    if result != 0:
+        return result
+
+    result = _validate_requested_torch_channel(torch_channel)
     if result != 0:
         return result
     return _pip_install(REQUIREMENTS)
