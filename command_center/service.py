@@ -7,6 +7,12 @@ from .secrets import credentials
 from .store import store
 
 STAGES = ("crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export")
+CREDENTIAL_PRESETS = (
+    {"name": "github", "provider": "GitHub", "kind": "API token", "env_var": "GITHUB_TOKEN", "description": "GitHub repository crawling."},
+    {"name": "huggingface", "provider": "Hugging Face", "kind": "Hub token", "env_var": "HF_TOKEN", "description": "Gated/private Hugging Face datasets."},
+    {"name": "google_api", "provider": "Google", "kind": "API key", "env_var": "GOOGLE_API_KEY", "description": "Google Programmable Search JSON API."},
+    {"name": "google_cx", "provider": "Google", "kind": "Search engine ID", "env_var": "GOOGLE_CX", "description": "Google Programmable Search engine identifier."},
+)
 
 
 def init():
@@ -38,6 +44,13 @@ def status(did=None):
 
 def groups():
     return load_groups()
+
+
+def credential_presets():
+    configured = {item["name"]: item for item in credentials.list()}
+    return [{**preset, "configured": bool(configured.get(preset["name"], {}).get("stored")),
+             "environment_set": bool(configured.get(preset["name"], {}).get("environment_set"))}
+            for preset in CREDENTIAL_PRESETS]
 
 
 def credential_list():
