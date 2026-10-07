@@ -95,15 +95,15 @@ def test_termux_safe_machine_tests_do_not_import_tkinter_at_collection_time():
 
 
 def test_runtime_requirements_include_command_center_security_dependencies():
-    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     for package in ["fastapi", "uvicorn", "cryptography", "httpx", "pydantic"]:
-        assert package in requirements
+        assert package in metadata
 
 
 def test_semantic_acceleration_is_required_for_runtime():
-    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    assert "sentence-transformers" in requirements
-    assert "faiss-cpu" in requirements
+    metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "sentence-transformers" in metadata
+    assert "faiss-cpu" in metadata
 
 
 def test_native_bootstrap_has_platform_specific_build_profiles():

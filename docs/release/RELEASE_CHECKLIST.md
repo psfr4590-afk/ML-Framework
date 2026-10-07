@@ -11,7 +11,8 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 - [ ] Windows CI passes on the exact release commit
 - [ ] Windows PowerShell bootstrap contract passes
 - [ ] `python -m compileall -q .` passes in CI
-- [ ] `python -m pytest -q` passes in CI
+- [ ] `python -m pytest -q` plus `python -m coverage report --fail-under=60` passes in CI
+- [ ] Isolated clean-install CI job installs the package from source and passes doctor/entrypoint checks
 - [ ] `python run_pipeline.py --doctor` has no required failures
 - [ ] Security gate passes: secret scan, `pip check`, `pip-audit`
 - [ ] CodeQL analysis passes on the exact release commit
@@ -44,6 +45,8 @@ A release candidate is a source-tree candidate plus reproducible evidence. A pro
 - [ ] Command-center localhost binding and access controls are verified
 - [ ] Dependency vulnerability/license scanning is complete for the release environment
 - [ ] Dependency freeze and SBOM are retained
+- [ ] Dependency authority is `pyproject.toml`; adapter requirements files contain no duplicated runtime dependency declarations
+- [ ] Release artifact receives a GitHub artifact attestation
 
 ## 4. Artifact lineage
 
@@ -67,5 +70,7 @@ These are not satisfied by the bounded RC smoke test:
 - [ ] Training loss/convergence and evaluation evidence are recorded
 - [ ] Production dataset provenance/rights review is complete
 - [ ] Release artifact is rebuilt from the exact approved source/config/dependency state
+- [ ] Native toolchain evidence records pinned llama.cpp commit, converter hash, native binary hashes, and CMake version
+- [ ] GitHub Release is published from the exact matching version tag with verified release assets
 
 Every completed gate should include its execution environment, result, and relevant artifact or log evidence. Historical reports do not satisfy current gates.

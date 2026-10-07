@@ -370,6 +370,7 @@ class Pipeline:
             "pipeline_config_sha256": self._config_sha256,
             "config_paths": {"pipeline": _project_relative_path(self._cfg_path)},
             "config_identities": dict(self._config_identities),
+            "identity_bundle_sha256": _hash_value(self._config_identities),
             "config_snapshots": dict(self._config_snapshots),
             "implementation_sha256": _implementation_sha256(stage),
         }

@@ -87,7 +87,18 @@ def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None
             return False
         if m.get("sha256") != sha256_file(path):
             return False
-        if expected_provenance is not None and m.get("provenance") != expected_provenance:
+        provenance = m.get("provenance") or {}
+        if not isinstance(provenance, dict):
+            return False
+        identities = provenance.get("config_identities")
+        bundle = provenance.get("identity_bundle_sha256")
+        if identities is not None or bundle is not None:
+            if not isinstance(identities, dict) or not isinstance(bundle, str):
+                return False
+            canonical = json.dumps(identities, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+            if hashlib.sha256(canonical).hexdigest() != bundle:
+                return False
+        if expected_provenance is not None and provenance != expected_provenance:
             return False
         source = m.get("source")
         source_sha256 = m.get("source_sha256")

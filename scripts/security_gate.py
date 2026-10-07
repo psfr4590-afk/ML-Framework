@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,22 +44,27 @@ def _secret_scan() -> list[str]:
 
 
 def _audit_requirements() -> int:
-    """Audit declared third-party dependencies, excluding the local project package."""
-    requirement_files = (
-        ROOT / "requirements.txt",
-        ROOT / "requirements-torch.txt",
-        ROOT / "requirements-security.txt",
-    )
-    missing = [str(path) for path in requirement_files if not path.is_file()]
-    if missing:
-        print("Dependency audit inputs missing:")
-        for path in missing:
-            print(f"  {path}")
-        return 2
-    args = [sys.executable, "-m", "pip_audit", "--strict"]
-    for path in requirement_files:
-        args.extend(["-r", str(path)])
-    return subprocess.run(args, cwd=ROOT, check=False).returncode
+    """Audit the complete isolated release environment.
+
+    Runtime dependency declarations are authoritative in pyproject.toml. The
+    environment already contains the host-specific PyTorch and security tools,
+    so auditing the installed environment avoids maintaining a second,
+    incompatible requirement parser.
+    """
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = [str(item) for item in project["project"].get("dependencies", [])]
+    dependencies.extend((ROOT / "requirements-torch.txt").read_text(encoding="utf-8").splitlines())
+    dependencies.extend((ROOT / "requirements-security.txt").read_text(encoding="utf-8").splitlines())
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as handle:
+        for line in dependencies:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                handle.write(line + "\n")
+        audit_file = Path(handle.name)
+    try:
+        return subprocess.run([sys.executable, "-m", "pip_audit", "--strict", "-r", str(audit_file)], cwd=ROOT, check=False).returncode
+    finally:
+        audit_file.unlink(missing_ok=True)
 
 
 def main() -> int:
