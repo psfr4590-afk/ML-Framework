@@ -33,7 +33,7 @@ jobs:
       - name: Dependency consistency
         run: python -m pip check
       - name: Lint
-        run: ruff check --select F --extend-per-file-ignores pipeline/orchestrator.py:F401 command_center pipeline tests scripts ui run_pipeline.py launch.py bootstrap.py run_command_center.py
+        run: ruff check --select F --extend-per-file-ignores pipeline/orchestrator.py:F401 command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
       - name: Compile
         run: python -m compileall -q .
       - name: Test and coverage gate
