@@ -23,6 +23,7 @@ def _state_path(did: int) -> Path:
 
 def _write_state(did: int, *, stage: str, pid: int | None, status: str) -> None:
     path = _state_path(did)
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps({"schema": 1, "dataset_id": did, "stage": stage, "pid": pid, "status": status}, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(path)
