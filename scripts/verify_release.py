@@ -289,7 +289,7 @@ def main() -> int:
                 checkout = subprocess.run(["git", "checkout", "--detach", expected_commit], cwd=clone, check=False) if fetch.returncode == 0 else None
                 checked_out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, check=False, capture_output=True, text=True) if checkout and checkout.returncode == 0 else None
                 exact_source = bool(checked_out and checked_out.returncode == 0 and checked_out.stdout.strip() == expected_commit)
-                install = subprocess.run([sys.executable, "-m", "pip", "install", "-e", str(clone), "--no-deps"], cwd=clone, check=False) if exact_source else None
+                install = subprocess.run([sys.executable, "-m", "pip", "install", str(clone)], cwd=clone, check=False) if exact_source else None
                 doctor = subprocess.run([sys.executable, str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False) if install and install.returncode == 0 else None
                 smoke = subprocess.run([sys.executable, str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor and doctor.returncode == 0 else None
                 NATIVE_EVIDENCE["clean_clone"] = bool(exact_source and install and install.returncode == 0 and doctor and doctor.returncode == 0 and smoke and smoke.returncode == 0)
