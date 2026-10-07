@@ -1,6 +1,6 @@
 # ML-Framework
 
-**ML-Framework** is the local-first training pipeline behind **Model Lab**. It takes configured data sources through cleaning, semantic deduplication, weighting, tokenization, sharding, training, and GGUF export, with provenance and artifact integrity tracked along the way.
+**ML-Framework** is the local-first training pipeline behind **Model Lab**, the **M²S Model Training Pipeline**. It takes configured data sources through cleaning, semantic deduplication, weighting, tokenization, sharding, training, and GGUF export, with provenance and artifact integrity tracked along the way.
 
 It is designed to run locally on Windows, Linux, macOS, and headless Termux. The desktop UI is Windows-oriented; the pipeline and command center are portable.
 
@@ -19,6 +19,8 @@ It is designed to run locally on Windows, Linux, macOS, and headless Termux. The
 The normal pipeline is:
 
 `crawl → clean → dedup → weight → tokenize → shard → train → export`
+
+**Ten dataset groups are preconfigured** in `config/dataset_groups.yaml`, with the canonical seeded groups exposed through the Model Lab dataset surface.
 
 ## Quick start
 
@@ -55,6 +57,24 @@ python3 bootstrap.py --install
 
 
 The bootstrapper installs the project dependencies and the PyTorch wheel appropriate to the detected host. Use `--torch-channel cpu` or `--torch-channel cuda` to override automatic selection.
+
+### Canonical pipeline entrypoint
+
+The CLI wrapper above is the friendlier first-boot path. The underlying pipeline entrypoint remains available and is the canonical direct-run contract:
+
+Windows:
+```powershell
+python .\\run_pipeline.py --doctor
+python .\\run_pipeline.py --no-resume
+```
+
+Linux / macOS / Termux:
+```bash
+python3 run_pipeline.py --doctor
+python3 run_pipeline.py --no-resume
+```
+
+The starter profile is `config/pipeline_config.yaml`.
 
 ### 3. Check the machine
 
