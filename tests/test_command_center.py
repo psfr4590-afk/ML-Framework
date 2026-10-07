@@ -126,3 +126,31 @@ def test_command_center_exposes_four_credential_presets_without_secrets():
         assert {p["env_var"] for p in presets} == {
             "GITHUB_TOKEN", "HF_TOKEN", "GOOGLE_API_KEY", "GOOGLE_CX"
         }
+
+
+def test_runner_reconciles_dead_worker_state(tmp_path, monkeypatch):
+    import command_center.runner as runner
+
+    dataset = {
+        "id": 77,
+        "status": "RUNNING",
+        "stages": {"crawl": "running"},
+    }
+    state_path = tmp_path / "runner_state.json"
+    state_path.write_text(
+        '{"schema":1,"dataset_id":77,"stage":"crawl","pid":99999999,"status":"running"}',
+        encoding="utf-8",
+    )
+    updates = []
+    events = []
+
+    monkeypatch.setattr(runner.store, "list", lambda: [dataset])
+    monkeypatch.setattr(runner.store, "path", lambda did: tmp_path)
+    monkeypatch.setattr(runner.store, "update", lambda did, **changes: updates.append((did, changes)))
+    monkeypatch.setattr(runner.store, "event", lambda did, event, data=None: events.append((did, event, data)))
+
+    runner.reconcile_orphaned_runs()
+
+    assert updates == [(77, {"stages": {"crawl": "failed"}, "status": "ERROR"})]
+    assert events[0][1] == "stage.recovered_orphan"
+    assert not state_path.exists()
