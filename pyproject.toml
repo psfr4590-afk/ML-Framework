@@ -29,7 +29,7 @@ include-package-data = true
 py-modules = ["run_pipeline", "run_command_center", "launch", "mlframework"]
 
 [tool.setuptools.packages.find]
-include = ["pipeline*", "command_center*", "ui*"]
+include = ["pipeline*", "command_center*"]
 
 [tool.ruff]
 line-length = 120
@@ -45,13 +45,10 @@ ignore = ["N999"]
 "scripts/**" = ["UP031"]
 "tests/test_runtime.py" = ["E402"]
 "tests/model_lab/test_model_lab_services.py" = ["E402"]
-"ui/app.py" = ["E402"]
-"ui/screens/**" = ["F403", "F405"]
-"ui/core/application.py" = ["F403", "F405"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=command_center.config --cov=command_center.secrets --cov=command_center.service --cov=command_center.web --cov=pipeline.config_validation --cov=pipeline.contracts.run --cov=pipeline.doctor --cov=pipeline.embedder --cov=pipeline.filtering --cov=pipeline.integrity --cov=pipeline.experiment_db --cov=pipeline.model_sizer --cov=pipeline.orchestrator --cov=pipeline.tokenizer --cov=pipeline.trainer --cov=pipeline.weighter"
+addopts = "--cov=command_center.config --cov=command_center.secrets --cov=command_center.service --cov=command_center.web --cov=pipeline.config_validation --cov=pipeline.contracts.run --cov=pipeline.doctor --cov=pipeline.embedder --cov=pipeline.filtering --cov=pipeline.integrity --cov=pipeline.experiment_db --cov=pipeline.model_sizer --cov=pipeline.orchestrator --cov=pipeline.tokenizer --cov=pipeline.trainer --cov=pipeline.weighter --cov-report=term-missing --cov-report=json"
 
 [tool.coverage.run]
 branch = true
