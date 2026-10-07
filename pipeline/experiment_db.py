@@ -222,9 +222,6 @@ class ExperimentDB:
         """Close the SQLite connection and release the file descriptor."""
         self.conn.close()
 
-    def close(self) -> None:
-        self.conn.close()
-
     def sync_manifest(self, manifest: dict[str, Any]) -> None:
         """Project the authoritative run manifest into normalized SQLite tables."""
         run_id = str(manifest["run_id"])
