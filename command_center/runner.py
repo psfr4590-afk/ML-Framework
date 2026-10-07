@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 import threading
+import json
+from pathlib import Path
 
 from .config import ROOT
 from .secrets import credentials
@@ -13,6 +15,56 @@ RUNS: dict[int, subprocess.Popen | object] = {}
 LOCK = threading.RLock()
 _STARTING = object()
 VALID_STAGES = {"crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"}
+
+
+def _state_path(did: int) -> Path:
+    return store.path(did) / "runner_state.json"
+
+
+def _write_state(did: int, *, stage: str, pid: int | None, status: str) -> None:
+    path = _state_path(did)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"schema": 1, "dataset_id": did, "stage": stage, "pid": pid, "status": status}, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _clear_state(did: int) -> None:
+    try:
+        _state_path(did).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _pid_alive(pid: int | None) -> bool:
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def reconcile_orphaned_runs() -> None:
+    """Recover persisted RUNNING state after a Command Center restart."""
+    for dataset in store.list():
+        if not dataset or dataset.get("status") != "RUNNING":
+            continue
+        state_path = _state_path(int(dataset["id"]))
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            state = {}
+        if _pid_alive(state.get("pid")):
+            continue
+        did = int(dataset["id"])
+        stage = str(state.get("stage") or next((name for name, value in dataset.get("stages", {}).items() if value == "running"), "unknown"))
+        stages = dict(dataset.get("stages") or {})
+        if stage in VALID_STAGES and stages.get(stage) == "running":
+            stages[stage] = "failed"
+        store.update(did, stages=stages, status="ERROR")
+        store.event(did, "stage.recovered_orphan", {"stage": stage, "reason": "command-center restarted and worker PID is no longer alive"})
+        _clear_state(did)
 
 
 def _run(did, stage):
@@ -35,6 +87,7 @@ def _run(did, stage):
                              text=True, encoding="utf-8", errors="replace")
         with LOCK:
             RUNS[did] = p
+            _write_state(did, stage=stage, pid=p.pid, status="running")
         for line in p.stdout or []:
             with logp.open("a", encoding="utf-8") as f:
                 f.write(line.rstrip() + "\n")
@@ -65,6 +118,7 @@ def _run(did, stage):
     finally:
         with LOCK:
             RUNS.pop(did, None)
+            _clear_state(did)
         # Reconcile artifacts after the process exits, but preserve an explicit
         # failed stage rather than allowing refresh to hide it behind STALE/IN_PROGRESS.
         final = store.get(did)
@@ -81,6 +135,7 @@ def start_stage(did, stage):
         if did in RUNS:
             raise RuntimeError(f"Dataset {did} already has a running or starting pipeline stage")
         RUNS[did] = _STARTING
+        _write_state(did, stage=stage, pid=None, status="starting")
         threading.Thread(target=_run, args=(did, stage), daemon=True).start()
     return {"started": True, "dataset_id": did, "stage": stage}
 
@@ -92,3 +147,6 @@ def stop(did):
         return False
     p.terminate()
     return True
+
+
+reconcile_orphaned_runs()
