@@ -27,7 +27,7 @@
       "pipeline/doctor.py"
     ],
     "operator_surface": ["command_center"],
-    "compatibility_surface": ["ui/app.py"],
+    "compatibility_surface": ["launch.py", "ui/app.py"],
     "configuration": ["config"],
     "release_tooling": ["scripts"],
     "verification": [
