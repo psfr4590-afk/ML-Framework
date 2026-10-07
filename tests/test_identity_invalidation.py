@@ -47,19 +47,16 @@ def test_artifact_reuse_requires_exact_identity_bundle(tmp_path):
         "schema": 3,
         "stage": "weight",
         "run_id": "run-test",
-        "dataset_config_sha256": identities["dataset_config_sha256"],
-        "tokenizer_config_sha256": identities["tokenizer_config_sha256"],
-        "shard_config_sha256": identities["shard_config_sha256"],
-        "train_config_sha256": identities["train_config_sha256"],
-        "source_definition_sha256": identities["source_definition_sha256"],
+        "config_identities": identities,
         "identity_bundle_sha256": stable_hash(identities),
     }
     write_manifest(artifact, kind="weight", provenance=provenance)
     assert artifact_valid(artifact, expected_provenance=provenance)
 
     changed = copy.deepcopy(provenance)
-    changed["dataset_config_sha256"] = "b" * 64
-    changed["identity_bundle_sha256"] = stable_hash(changed)
+    changed["config_identities"] = dict(changed["config_identities"])
+    changed["config_identities"]["dataset_config_sha256"] = "b" * 64
+    changed["identity_bundle_sha256"] = stable_hash(changed["config_identities"])
     assert not artifact_valid(artifact, expected_provenance=changed)
 
     manifest = json.loads((tmp_path / "weighted.jsonl.manifest.json").read_text(encoding="utf-8"))
