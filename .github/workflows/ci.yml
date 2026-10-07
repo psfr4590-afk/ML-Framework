@@ -37,7 +37,7 @@ jobs:
       - name: Compile
         run: python -m compileall -q .
       - name: Test and coverage gate
-        run: python -m pytest -q
+        run: python -m pytest -q --cov-fail-under=65
 
   windows-test:
     strategy:
@@ -74,7 +74,7 @@ jobs:
         run: python -m compileall -q .
       - name: Test and coverage gate
         shell: pwsh
-        run: python -m pytest -q
+        run: python -m pytest -q --cov-fail-under=65
 
   windows-script-contract:
     runs-on: windows-latest
@@ -92,3 +92,22 @@ jobs:
           $source = Get-Content -Raw -Encoding UTF8 'scripts/bootstrap_llama_cpp.ps1'
           $required = @('$Tag = "b10516"','$Commit = "b95502b"','convert_hf_to_gguf.py','llama-quantize','llama-cli','-DGGML_NATIVE=OFF','-DGGML_OPENMP=OFF','-DLLAMA_BUILD_SERVER=OFF')
           foreach ($needle in $required) { if ($source -notlike "*$needle*") { throw "Missing PowerShell bootstrap contract: $needle" } }
+  clean-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Create isolated install environment
+        run: python -m venv .ci-venv
+      - name: Install host-specific PyTorch
+        run: .ci-venv/bin/python -m pip install -r requirements-torch.txt --index-url https://download.pytorch.org/whl/cpu
+      - name: Install package from source
+        run: .ci-venv/bin/python -m pip install .
+      - name: Verify installed package and entry points
+        run: |
+          .ci-venv/bin/python bootstrap.py --doctor
+          .ci-venv/bin/python mlframework.py --help
+          .ci-venv/bin/python run_command_center.py --help
