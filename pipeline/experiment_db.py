@@ -219,6 +219,10 @@ class ExperimentDB:
         self.conn.commit()
 
     def close(self) -> None:
+        """Close the SQLite connection and release the file descriptor."""
+        self.conn.close()
+
+    def close(self) -> None:
         self.conn.close()
 
     def sync_manifest(self, manifest: dict[str, Any]) -> None:
