@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .runner import stop
 from .config import ROOT
 from pipeline.experiment_db import ExperimentDB
-from .service import add, credential_delete, credential_list, credential_set, credential_test, groups, ingest, init, stage, status
+from .service import add, credential_delete, credential_list, credential_presets, credential_set, credential_test, groups, ingest, init, stage, status
 from .store import store
 from .security import MAX_REQUEST_BYTES, validate_tail_lines
 
@@ -117,6 +117,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;bord
 <section class="card"><h2>TRAINING</h2><div class="rows" id="training"></div></section>
 <section class="card"><h2>DATASET</h2><div class="rows" id="dataset"></div></section>
 <section class="card"><h2>HARDWARE</h2><div class="rows" id="hardware"></div></section>
+<section class="card"><h2>CREDENTIAL PRESETS</h2><div class="rows" id="credentials"></div><div class="muted">Secrets are never displayed. Configure the four predefined slots below through the secure credential API.</div></section>
 <section class="card"><h2>PROVENANCE</h2><div class="rows" id="provenance"></div></section>
 <section class="card"><h2>PIPELINE STAGES</h2><div id="stages" class="muted">Loading...</div></section>
 <section class="card"><h2>RECENT RUNS</h2><div id="runs" class="muted">Loading...</div></section>
@@ -128,7 +129,7 @@ function setRows(id,items){document.getElementById(id).innerHTML=items.map(funct
 async function api(path,opts){opts=opts||{};opts.headers=Object.assign({"x-m2s-command-center":"1"},opts.headers||{});var r=await fetch(path,opts);if(!r.ok)throw new Error(r.status+": "+await r.text());return r.json();}
 async function refresh(){
  try{
-  var d=await api("/api/dashboard"),s=await api("/api/system"),r=await api("/api/runs?limit=10");
+  var d=await api("/api/dashboard"),s=await api("/api/system"),r=await api("/api/runs?limit=10"),cp=await api("/api/credentials/presets");
   document.getElementById("api").textContent="ONLINE";document.getElementById("api").className="badge ok";
   document.getElementById("message").textContent="Authoritative state refreshed at "+new Date().toLocaleTimeString();
   var run=d.run||{},t=d.training||{},ds=d.dataset||{},hw=d.hardware||{},p=d.provenance||{},st=d.stage||[];
@@ -138,6 +139,7 @@ async function refresh(){
   setRows("training",[["Step",fmt(t.step)],["Total Steps",fmt(t.total_steps)],["Loss",fmt(t.loss)],["Validation Loss",fmt(t.validation_loss)],["Best Loss",fmt(t.best_loss)],["Tokens/sec",fmt(t.tokens_per_sec)],["Elapsed",fmt(t.elapsed_seconds," s")],["ETA",fmt(t.eta_seconds," s")]]);
   setRows("dataset",[["Documents",ds.document_count!=null?Number(ds.document_count).toLocaleString():"—"],["Tokens",ds.token_count!=null?Number(ds.token_count).toLocaleString():"—"],["Train Tokens",ds.train_tokens!=null?Number(ds.train_tokens).toLocaleString():"—"],["Validation Tokens",ds.validation_tokens!=null?Number(ds.validation_tokens).toLocaleString():"—"],["Sources",(ds.sources||[]).length],["Lineage",p.dataset_lineage?"PASS":"PENDING",p.dataset_lineage?"ok":"warn"]]);
   setRows("hardware",[["CPU",hw.cpu_name],["RAM",fmt(hw.ram_gb," GB")],["GPU",hw.gpu_name],["VRAM",fmt(hw.gpu_memory_gb," GB")],["CUDA",hw.cuda_version],["GPU Utilization",hw.gpu_utilization!=null?Number(hw.gpu_utilization).toFixed(1)+"%":"Not persisted"]]);
+  setRows("credentials",cp.map(function(x){return [x.provider+" · "+x.kind,x.env_var+" · "+x.description,(x.configured?"CONFIGURED":"NOT SET")+" / "+(x.environment_set?"ENV SET":"ENV NOT SET"),x.configured?"ok":"warn"];}));
   setRows("provenance",[["Configuration",p.configuration?"PASS":"PENDING",p.configuration?"ok":"warn"],["Dataset lineage",p.dataset_lineage?"PASS":"PENDING",p.dataset_lineage?"ok":"warn"],["Tokenizer",p.tokenizer?"PASS":"PENDING",p.tokenizer?"ok":"warn"],["Checkpoint",p.checkpoint?"PASS":"PENDING",p.checkpoint?"ok":"warn"],["Artifact integrity",p.artifact_integrity?"PASS":"PENDING",p.artifact_integrity?"ok":"warn"],["Warnings",(d.warnings||[]).length],["Errors",(d.errors||[]).length,(d.errors||[]).length?"err":"ok"]]);
   document.getElementById("stages").innerHTML='<table><thead><tr><th>Stage</th><th>Status</th><th>Duration</th></tr></thead><tbody>'+st.map(function(x){return '<tr><td>'+esc(x.stage_name)+'</td><td>'+esc(x.status)+'</td><td>'+esc(fmt(x.duration_seconds," s"))+'</td></tr>';}).join("")+'</tbody></table>';
   document.getElementById("runs").innerHTML='<table><thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Dataset</th><th>Git</th></tr></thead><tbody>'+(r.runs||[]).map(function(x){return '<tr><td>'+esc(x.id)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.started_at)+'</td><td>'+esc(x.dataset_id)+'</td><td>'+esc(x.git_sha)+'</td></tr>';}).join("")+'</tbody></table>';
@@ -310,6 +312,10 @@ def stop_stage(did: int):
 
 @app.get("/api/groups")
 def api_groups(): return groups()
+
+
+@app.get("/api/credentials/presets")
+def credential_presets_api(): return credential_presets()
 
 
 @app.get("/api/credentials")
