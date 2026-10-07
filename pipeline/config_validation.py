@@ -3,7 +3,7 @@ from __future__ import annotations
 
 QUANTS = {"F16", "Q4_K_M", "Q5_K_M", "Q8_0"}
 PRESETS = {"85M", "117M", "360M"}
-STAGES = {"crawl", "clean", "semantic_dedup", "weight", "tokenize", "shard", "train", "export"}
+STAGES = {"crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"}
 SECTION_KEYS = {
     "pipeline": {"name", "model_name", "output_dir", "scratch_dir", "seed", "resume", "log_level"},
     "stages": STAGES,
