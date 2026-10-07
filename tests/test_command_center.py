@@ -94,3 +94,18 @@ def test_run_list_and_missing_run_contract():
         assert "runs" in response.json()
         missing = client.get("/api/runs/does-not-exist")
         assert missing.status_code == 404
+
+
+def test_command_center_browser_is_operational_not_a_landing_page():
+    with TestClient(app, client=LOOPBACK_CLIENT) as client:
+        response = client.get("/")
+        assert response.status_code == 200
+        html = response.text
+        for marker in [
+            'id="metrics"', 'id="run"', 'id="training"', 'id="dataset"',
+            'id="hardware"', 'id="provenance"', 'id="stages"', 'id="runs"',
+            '/api/dashboard', '/api/system', '/api/runs'
+        ]:
+            assert marker in html
+        assert "Dataset lifecycle" not in html
+        assert "Machine status" not in html
