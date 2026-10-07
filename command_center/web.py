@@ -90,8 +90,63 @@ def _safe_error(exc: Exception, code: str = "REQUEST_FAILED") -> HTTPException:
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>M²S Model Training Pipeline</title><style>:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--border:#26324a;--text:#eef3ff;--muted:#9eabc4;--accent:#79a7ff;--ok:#63d49b}*{box-sizing:border-box}body{margin:0;min-height:100vh;font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);background:radial-gradient(circle at 15% 0%,#18284a 0,transparent 42%),var(--bg)}main{width:min(1040px,calc(100% - 40px));margin:0 auto;padding:72px 0 56px}.eyebrow{color:var(--accent);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:12px}h1{margin:10px 0 12px;font-size:clamp(34px,6vw,58px);line-height:1.05;letter-spacing:-.035em}.lead{max-width:720px;color:var(--muted);font-size:18px;margin:0 0 34px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--border);border-radius:18px;padding:22px;box-shadow:0 14px 40px #0003}.card h2{margin:0 0 7px;font-size:17px}.card p{margin:0;color:var(--muted)}.pill{display:inline-block;margin-top:14px;padding:4px 9px;border:1px solid #34506f;border-radius:999px;color:var(--ok);font-size:12px;font-weight:700}code{color:#cfe0ff;background:#0a1120;padding:2px 6px;border-radius:6px}footer{margin-top:34px;color:var(--muted);font-size:13px}a{color:var(--accent);text-decoration:none}@media(max-width:760px){main{padding-top:42px}.grid{grid-template-columns:1fr}}</style></head><body><main><div class="eyebrow">Model Lab · Local Command Center</div><h1>M²S Model Training Pipeline</h1><p class="lead">A local-first control surface for dataset preparation, training, artifact verification, and GGUF export. The browser surface is intentionally localhost-only.</p><section class="grid" aria-label="Command center capabilities"><article class="card"><h2>Dataset lifecycle</h2><p>Create datasets, inspect pipeline state, ingest local sources, and monitor crawl telemetry.</p><span class="pill">/api/datasets</span></article><article class="card"><h2>Pipeline control</h2><p>Run individual stages or inspect the configured stage graph without exposing a remote control plane.</p><span class="pill">8 stages</span></article><article class="card"><h2>Machine status</h2><p>Read runtime and host information through the local system endpoint.</p><span class="pill">/api/system</span></article></section><footer>API documentation: <a href="/docs">/docs</a> · OpenAPI schema: <a href="/openapi.json">/openapi.json</a></footer></main></body></html>""")
-
+    """Serve the single operator interface from authoritative API state."""
+    return HTMLResponse("""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Model Lab Command Center</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--panel2:#182238;--line:#2a3854;--text:#eef3ff;--muted:#9eabc4;--accent:#79a7ff;--ok:#63d49b;--warn:#f2c66d;--err:#ff7373}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+header{position:sticky;top:0;z-index:5;background:#0b1020ee;border-bottom:1px solid var(--line)}.header{max-width:1500px;margin:auto;padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+h1{font-size:22px;margin:0}.sub{color:var(--muted);font-size:12px}.badge{padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px}
+main{max-width:1500px;margin:auto;padding:22px}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer}button:hover{border-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}.card h2{font-size:14px;margin:0 0 12px}
+.metric{font-size:22px;font-weight:700}.label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.row{background:var(--panel2);border-radius:8px;padding:9px}.value{margin-top:2px;word-break:break-word}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:11px;text-transform:uppercase}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}.muted{color:var(--muted)}#message{min-height:20px;color:var(--muted);margin-bottom:10px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.rows{grid-template-columns:1fr}}@media(max-width:560px){.grid{grid-template-columns:1fr}main{padding:14px}}
+</style></head>
+<body>
+<header><div class="header"><div><h1>M²S Model Training Pipeline</h1><div class="sub">Single local operator interface · authoritative SQLite state</div></div><div id="api" class="badge">CONNECTING</div></div></header>
+<main><div class="toolbar">
+<button onclick="refresh()">↻ Refresh</button><button onclick="runStage('crawl')">Run Crawl</button><button onclick="runStage('clean')">Run Clean</button><button onclick="runStage('dedup')">Run Dedup</button><button onclick="runStage('tokenize')">Run Tokenize</button><button onclick="runStage('train')">Train</button><button onclick="runStage('export')">Export</button><button onclick="stopRun()">Stop</button><a href="/docs" target="_blank"><button>API Docs</button></a>
+</div><div id="message"></div>
+<section class="grid" id="metrics"></section>
+<section class="card"><h2>RUN</h2><div class="rows" id="run"></div></section>
+<section class="card"><h2>TRAINING</h2><div class="rows" id="training"></div></section>
+<section class="card"><h2>DATASET</h2><div class="rows" id="dataset"></div></section>
+<section class="card"><h2>HARDWARE</h2><div class="rows" id="hardware"></div></section>
+<section class="card"><h2>PROVENANCE</h2><div class="rows" id="provenance"></div></section>
+<section class="card"><h2>PIPELINE STAGES</h2><div id="stages" class="muted">Loading...</div></section>
+<section class="card"><h2>RECENT RUNS</h2><div id="runs" class="muted">Loading...</div></section>
+</main>
+<script>
+function esc(v){return String(v===null||v===undefined?"—":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];});}
+function fmt(v,s){return v===null||v===undefined||v===""?"—":String(v)+String(s||"");}
+function setRows(id,items){document.getElementById(id).innerHTML=items.map(function(x){return '<div class="row"><div class="label">'+esc(x[0])+'</div><div class="value '+(x[2]||"")+'">'+esc(x[1])+'</div></div>';}).join("");}
+async function api(path,opts){opts=opts||{};opts.headers=Object.assign({"x-m2s-command-center":"1"},opts.headers||{});var r=await fetch(path,opts);if(!r.ok)throw new Error(r.status+": "+await r.text());return r.json();}
+async function refresh(){
+ try{
+  var d=await api("/api/dashboard"),s=await api("/api/system"),r=await api("/api/runs?limit=10");
+  document.getElementById("api").textContent="ONLINE";document.getElementById("api").className="badge ok";
+  document.getElementById("message").textContent="Authoritative state refreshed at "+new Date().toLocaleTimeString();
+  var run=d.run||{},t=d.training||{},ds=d.dataset||{},hw=d.hardware||{},p=d.provenance||{},st=d.stage||[];
+  var cards=[["Run",run.id],["Status",run.status],["Progress",typeof t.progress==="number"?(t.progress*100).toFixed(1)+"%":"—"],["API",s.application]];
+  document.getElementById("metrics").innerHTML=cards.map(function(x){return '<div class="card"><div class="label">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>';}).join("");
+  setRows("run",[["Run ID",run.id],["Dataset",ds.dataset_group||run.dataset_id],["Model",ds.model],["Git",(run.git_branch||"—")+" · "+(run.git_sha||"—")],["Status",run.status]]);
+  setRows("training",[["Step",fmt(t.step)],["Total Steps",fmt(t.total_steps)],["Loss",fmt(t.loss)],["Validation Loss",fmt(t.validation_loss)],["Best Loss",fmt(t.best_loss)],["Tokens/sec",fmt(t.tokens_per_sec)],["Elapsed",fmt(t.elapsed_seconds," s")],["ETA",fmt(t.eta_seconds," s")]]);
+  setRows("dataset",[["Documents",ds.document_count!=null?Number(ds.document_count).toLocaleString():"—"],["Tokens",ds.token_count!=null?Number(ds.token_count).toLocaleString():"—"],["Train Tokens",ds.train_tokens!=null?Number(ds.train_tokens).toLocaleString():"—"],["Validation Tokens",ds.validation_tokens!=null?Number(ds.validation_tokens).toLocaleString():"—"],["Sources",(ds.sources||[]).length],["Lineage",p.dataset_lineage?"PASS":"PENDING",p.dataset_lineage?"ok":"warn"]]);
+  setRows("hardware",[["CPU",hw.cpu_name],["RAM",fmt(hw.ram_gb," GB")],["GPU",hw.gpu_name],["VRAM",fmt(hw.gpu_memory_gb," GB")],["CUDA",hw.cuda_version],["GPU Utilization",hw.gpu_utilization!=null?Number(hw.gpu_utilization).toFixed(1)+"%":"Not persisted"]]);
+  setRows("provenance",[["Configuration",p.configuration?"PASS":"PENDING",p.configuration?"ok":"warn"],["Dataset lineage",p.dataset_lineage?"PASS":"PENDING",p.dataset_lineage?"ok":"warn"],["Tokenizer",p.tokenizer?"PASS":"PENDING",p.tokenizer?"ok":"warn"],["Checkpoint",p.checkpoint?"PASS":"PENDING",p.checkpoint?"ok":"warn"],["Artifact integrity",p.artifact_integrity?"PASS":"PENDING",p.artifact_integrity?"ok":"warn"],["Warnings",(d.warnings||[]).length],["Errors",(d.errors||[]).length,(d.errors||[]).length?"err":"ok"]]);
+  document.getElementById("stages").innerHTML='<table><thead><tr><th>Stage</th><th>Status</th><th>Duration</th></tr></thead><tbody>'+st.map(function(x){return '<tr><td>'+esc(x.stage_name)+'</td><td>'+esc(x.status)+'</td><td>'+esc(fmt(x.duration_seconds," s"))+'</td></tr>';}).join("")+'</tbody></table>';
+  document.getElementById("runs").innerHTML='<table><thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Dataset</th><th>Git</th></tr></thead><tbody>'+(r.runs||[]).map(function(x){return '<tr><td>'+esc(x.id)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.started_at)+'</td><td>'+esc(x.dataset_id)+'</td><td>'+esc(x.git_sha)+'</td></tr>';}).join("")+'</tbody></table>';
+ }catch(e){document.getElementById("api").textContent="OFFLINE";document.getElementById("api").className="badge err";document.getElementById("message").textContent=e.message;}
+}
+async function runStage(stage){try{var d=await api("/api/datasets"),did=d[0]&&d[0].id;if(!did)throw new Error("No dataset is available. Create or seed a dataset first.");await api("/api/datasets/"+did+"/stage/"+stage,{method:"POST"});document.getElementById("message").textContent="Requested "+stage+" for dataset "+did+".";setTimeout(refresh,500);}catch(e){document.getElementById("message").textContent=e.message;}}
+async function stopRun(){try{var d=await api("/api/datasets"),did=d[0]&&d[0].id;if(!did)throw new Error("No dataset is available.");await api("/api/datasets/"+did+"/stop",{method:"POST"});refresh();}catch(e){document.getElementById("message").textContent=e.message;}}
+refresh();setInterval(refresh,2500);
+</script></body></html>""")
 
 @app.get("/api/system")
 def system():
