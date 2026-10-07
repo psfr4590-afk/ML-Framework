@@ -33,11 +33,13 @@ Then prove the installation:
 python .\mlframework.py smoke
 ~~~
 
-Launch the desktop UI:
+Launch the localhost browser Command Center:
 
 ~~~
 python .\launch.py
 ~~~
+
+The launcher delegates to `run_command_center.py`; `ui/app.py` remains a compatibility launcher only.
 
 ## Native export path
 
