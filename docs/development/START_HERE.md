@@ -1,6 +1,6 @@
 # Model Lab: start here
 
-This guide is the operational walkthrough for a new installation. It intentionally tests the human path, not just the developer happy path.
+This guide is the operational walkthrough for a new installation. ML-Framework is the local-first training pipeline behind Model Lab, the **M²S Model Training Pipeline**. It intentionally tests the human path, not just the developer happy path.
 
 ## 1. Get the project
 
@@ -49,6 +49,24 @@ Other:   python3 bootstrap.py --doctor
 ```
 
 Resolve any required `FAIL` result before continuing. Missing Git is not a blocker for a ZIP download. Missing CMake is not a blocker for the basic Python smoke path, but it is required for native export.
+
+## Canonical pipeline entrypoint
+
+The first-boot wrapper is the human-friendly path. The underlying direct pipeline contract remains:
+
+Windows:
+```powershell
+python .\\run_pipeline.py --doctor
+python .\\run_pipeline.py --no-resume
+```
+
+Linux / macOS / Termux:
+```bash
+python3 run_pipeline.py --doctor
+python3 run_pipeline.py --no-resume
+```
+
+The canonical starter profile is `config/pipeline_config.yaml`.
 
 ## 4. Prove the pipeline
 
