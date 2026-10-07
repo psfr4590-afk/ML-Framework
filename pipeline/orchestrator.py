@@ -800,7 +800,6 @@ class Pipeline:
             return result
         except BaseException as exc:
             self._run_tracker.fail_stage(name, exc)
-            self._run_tracker.finish_run("FAILED")
             raise
 
     def run(self, stages: str = "all", dataset_group: str | None = None):
@@ -830,30 +829,35 @@ class Pipeline:
                 self._run_tracker.manifest["stages"][stage]["status"] = "SKIPPED"
         self._run_tracker._write()
 
-        artifacts: dict[str, Any] = {}
-        if "crawl" in requested:
-            artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
-        if "clean" in requested:
-            inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
-            artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
-        if "dedup" in requested:
-            inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
-            artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
-        if "weight" in requested:
-            inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
-            artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
-        if "tokenize" in requested:
-            inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
-            artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
-        if "shard" in requested:
-            corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
-            tokenizer = artifacts.get("tokenizer") or self._out / "tokenizer"
-            artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus, tokenizer])
-        if "train" in requested:
-            inp = artifacts.get("shard", self._out / "shards")
-            artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
-        if "export" in requested:
-            artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
+        try:
+                artifacts: dict[str, Any] = {}
+                if "crawl" in requested:
+                    artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
+                if "clean" in requested:
+                    inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
+                    artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
+                if "dedup" in requested:
+                    inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
+                    artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
+                if "weight" in requested:
+                    inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
+                    artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
+                if "tokenize" in requested:
+                    inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+                    artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
+                if "shard" in requested:
+                    corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+                    tokenizer = artifacts.get("tokenizer") or self._out / "tokenizer"
+                    artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus, tokenizer])
+                if "train" in requested:
+                    inp = artifacts.get("shard", self._out / "shards")
+                    artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
+                if "export" in requested:
+                    artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
+        
+        except BaseException:
+            self._run_tracker.finish_run("FAILED")
+            raise
 
         statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
         final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")
