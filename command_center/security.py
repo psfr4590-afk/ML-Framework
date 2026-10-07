@@ -59,8 +59,6 @@ def validate_log_path(path: str | Path) -> Path:
         raise ValueError("log path is outside the command-center log roots")
     if not candidate.is_file():
         raise ValueError("log path must be a regular file")
-    if "log" not in candidate.name.lower():
-        raise ValueError("requested file is not a log")
     return candidate
 
 
