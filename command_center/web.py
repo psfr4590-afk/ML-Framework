@@ -171,8 +171,8 @@ def _latest_run(db: ExperimentDB) -> dict | None:
 
 
 def _run_snapshot(run_id: str | None = None) -> dict:
-        db = _experiment_db()
-        try:
+    db = _experiment_db()
+    try:
         run = db.get_run(run_id) if run_id else _latest_run(db)
         if not run:
             return {"run": None, "stage": [], "training": {}, "dataset": {}, "hardware": {}, "provenance": {}, "checkpoints": [], "artifacts": [], "warnings": [], "errors": []}
