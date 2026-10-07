@@ -95,7 +95,7 @@ if ($Native) {
 
 Write-Host ""
 Write-Host "ML-Framework first-boot setup complete."
-Write-Host "Next: python .mlframework.py smoke"
+Write-Host "Next: python .\mlframework.py smoke"
 if (-not $Native) {
     Write-Host "Native export: python .ootstrap.py --ensure-llamacpp"
 }
