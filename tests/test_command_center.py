@@ -109,3 +109,17 @@ def test_command_center_browser_is_operational_not_a_landing_page():
             assert marker in html
         assert "Dataset lifecycle" not in html
         assert "Machine status" not in html
+
+
+def test_command_center_exposes_four_credential_presets_without_secrets():
+    with TestClient(app, client=LOOPBACK_CLIENT) as client:
+        response = client.get("/api/credentials/presets")
+        assert response.status_code == 200
+        presets = response.json()
+        assert [p["name"] for p in presets] == ["github", "huggingface", "google_api", "google_cx"]
+        for preset in presets:
+            assert "secret" not in preset
+        html = client.get("/").text
+        assert 'id="credentials"' in html
+        for env in ["GITHUB_TOKEN", "HF_TOKEN", "GOOGLE_API_KEY", "GOOGLE_CX"]:
+            assert env in html
