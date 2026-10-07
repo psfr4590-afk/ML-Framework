@@ -808,7 +808,7 @@ class Pipeline:
             configured = self.cfg.get("stages", {}) or {}
             requested = [
                 stage for stage in stage_names
-                if bool(configured.get(stage, configured.get("semantic_dedup", False) if stage == "dedup" else False))
+                if bool(configured.get(stage, False))
             ]
         else:
             requested = [s.strip() for s in stages.split(",") if s.strip()]
