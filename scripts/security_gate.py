@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +51,20 @@ def _audit_requirements() -> int:
     so auditing the installed environment avoids maintaining a second,
     incompatible requirement parser.
     """
-    return subprocess.run([sys.executable, "-m", "pip_audit", "--strict"], cwd=ROOT, check=False).returncode
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = [str(item) for item in project["project"].get("dependencies", [])]
+    dependencies.extend((ROOT / "requirements-torch.txt").read_text(encoding="utf-8").splitlines())
+    dependencies.extend((ROOT / "requirements-security.txt").read_text(encoding="utf-8").splitlines())
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as handle:
+        for line in dependencies:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                handle.write(line + "\n")
+        audit_file = Path(handle.name)
+    try:
+        return subprocess.run([sys.executable, "-m", "pip_audit", "--strict", "-r", str(audit_file)], cwd=ROOT, check=False).returncode
+    finally:
+        audit_file.unlink(missing_ok=True)
 
 
 def main() -> int:
