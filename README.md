@@ -254,8 +254,10 @@ These commands are verification tools, not required steps for a newcomer who onl
 ## Requirements
 
 - Python 3.11–3.14
-- Git
-- CMake for native tooling
+- Python 3.11-3.14 for the runtime
+- Git is optional for ZIP users and required only for the clone/developer workflow
+- CMake is required for native export/toolchain work
+- Windows ZIP first boot uses PowerShell and can use `winget` to install missing Python/CMake prerequisites
 - NVIDIA CUDA is optional
 - CPU mode is supported for bounded smoke/testing runs
 - At least 8 GiB free disk space for onboarding; real training can require substantially more
