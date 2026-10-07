@@ -79,7 +79,7 @@ def _validate_source_manifest(path: Path) -> None:
 
 
 def _native_smoke(verify_ollama: bool = False) -> int:
-    source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "semantic_dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
+    source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
     with tempfile.TemporaryDirectory(prefix="model-lab-release-") as tmp:
         tmp_root = Path(tmp); output = tmp_root / "output"; scratch = tmp_root / "scratch"; config.setdefault("pipeline", {})["output_dir"] = str(output); config["pipeline"]["scratch_dir"] = str(scratch); config["pipeline"]["resume"] = False; config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp"); config["export"]["quant"] = "ALL"; config_path = tmp_root / "release_smoke.yaml"; config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8"); from pipeline.orchestrator import Pipeline; smoke_pipeline = Pipeline(str(config_path), resume=False); _write_local_smoke_input(scratch, pipeline_config_sha256=_sha256(config_path), run_id=smoke_pipeline.cfg["_run_id"], config_identities=smoke_pipeline._config_identities); _write_smoke_source_manifest(tmp_root, smoke_pipeline.cfg["_run_id"], smoke_pipeline._source_definition_paths)
         try: _validate_source_manifest(tmp_root / "source_manifest.json")
