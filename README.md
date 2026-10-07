@@ -1,6 +1,6 @@
 # ML-Framework
 
-**ML-Framework** is the local-first training pipeline behind **Model Lab**. It takes configured data sources through cleaning, semantic deduplication, weighting, tokenization, sharding, training, and GGUF export, with provenance and artifact integrity tracked along the way.
+**ML-Framework** is the local-first training pipeline behind **Model Lab**, the **M²S Model Training Pipeline**. It takes configured data sources through cleaning, semantic deduplication, weighting, tokenization, sharding, training, and GGUF export, with provenance and artifact integrity tracked along the way.
 
 It is designed to run locally on Windows, Linux, macOS, and headless Termux. The desktop UI is Windows-oriented; the pipeline and command center are portable.
 
@@ -20,32 +20,61 @@ The normal pipeline is:
 
 `crawl → clean → dedup → weight → tokenize → shard → train → export`
 
+**Ten dataset groups are preconfigured** in `config/dataset_groups.yaml`, with the canonical seeded groups exposed through the Model Lab dataset surface.
+
 ## Quick start
 
 You do not need to read the project history to use the project. Humanity has suffered enough documentation archaeology already.
 
-### 1. Clone
+### 1. Choose how you arrived here
+
+**New to Git or using a fresh Windows laptop:** download the repository with **Code → Download ZIP**, extract it, open PowerShell in the extracted folder, and run:
+
+```powershell
+.\bootstrap_windows.ps1
+```
+
+The Windows first-boot wrapper handles the human/machine boundary before Python can run. It finds Python 3.11-3.14, can install Python 3.13 with `winget` when Python is absent, installs the project dependencies, selects CPU/CUDA PyTorch, and runs the bootstrap doctor.
+
+**Developer path:** if Git is already installed:
 
 ```bash
 git clone https://github.com/psfr4590-afk/ML-Framework.git
 cd ML-Framework
 ```
 
-### 2. Install
+Then run the canonical bootstrap directly:
 
-Windows PowerShell:
-
+Windows:
 ```powershell
 python .\bootstrap.py --install
 ```
 
 Linux / macOS / Termux:
-
 ```bash
 python3 bootstrap.py --install
 ```
 
+
 The bootstrapper installs the project dependencies and the PyTorch wheel appropriate to the detected host. Use `--torch-channel cpu` or `--torch-channel cuda` to override automatic selection.
+
+### Canonical pipeline entrypoint
+
+The CLI wrapper above is the friendlier first-boot path. The underlying pipeline entrypoint remains available and is the canonical direct-run contract:
+
+Windows:
+```powershell
+python .\run_pipeline.py --doctor
+python .\run_pipeline.py --no-resume
+```
+
+Linux / macOS / Termux:
+```bash
+python3 run_pipeline.py --doctor
+python3 run_pipeline.py --no-resume
+```
+
+The starter profile is `config/pipeline_config.yaml`.
 
 ### 3. Check the machine
 
@@ -86,11 +115,19 @@ mlframework status
 mlframework runs
 ```
 
-For a fresh clone, the shortest useful path is therefore:
+For a first-time Windows user, the shortest useful path is therefore:
+
+```text
+Download ZIP → extract → bootstrap_windows.ps1 → mlframework smoke
+```
+
+For developers:
 
 ```text
 clone → bootstrap.py --install → bootstrap.py --doctor → mlframework smoke
 ```
+
+See [First boot](docs/development/FIRST_BOOT.md) for the non-happy-path onboarding and recovery behavior.
 
 ## Launch Model Lab
 
@@ -198,6 +235,7 @@ The UI calls the existing pipeline/backend services. It does not maintain a seco
 
 Start with:
 
+- [First boot](docs/development/FIRST_BOOT.md)
 - [Development guide](docs/development/START_HERE.md)
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Project state](docs/development/PROJECT_STATE.md)
@@ -235,9 +273,10 @@ These commands are verification tools, not required steps for a newcomer who onl
 
 ## Requirements
 
-- Python 3.11–3.14
-- Git
-- CMake for native tooling
+- Python 3.11-3.14 for the runtime
+- Git is optional for ZIP users and required only for the clone/developer workflow
+- CMake is required for native export/toolchain work
+- Windows ZIP first boot uses PowerShell and can use `winget` to install missing Python/CMake prerequisites
 - NVIDIA CUDA is optional
 - CPU mode is supported for bounded smoke/testing runs
 - At least 8 GiB free disk space for onboarding; real training can require substantially more
@@ -254,3 +293,4 @@ The repository keeps those release checks in the verification tooling and releas
 ## License
 
 See [LICENSE](LICENSE).
+
