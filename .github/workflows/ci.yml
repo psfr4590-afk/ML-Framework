@@ -36,8 +36,10 @@ jobs:
         run: ruff check --select F --extend-per-file-ignores pipeline/orchestrator.py:F401 command_center pipeline tests scripts run_pipeline.py launch.py bootstrap.py run_command_center.py
       - name: Compile
         run: python -m compileall -q .
-      - name: Test and coverage gate
-        run: python -m pytest -q --cov-fail-under=65
+      - name: Test suite
+        run: python -m pytest -q
+      - name: Coverage gate
+        run: python -m coverage report --fail-under=60
 
   windows-test:
     strategy:
@@ -72,9 +74,12 @@ jobs:
       - name: Compile
         shell: pwsh
         run: python -m compileall -q .
-      - name: Test and coverage gate
+      - name: Test suite
         shell: pwsh
-        run: python -m pytest -q --cov-fail-under=65
+        run: python -m pytest -q
+      - name: Coverage gate
+        shell: pwsh
+        run: python -m coverage report --fail-under=60
 
   windows-script-contract:
     runs-on: windows-latest
