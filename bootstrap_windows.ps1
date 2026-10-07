@@ -42,14 +42,14 @@ Install Python from https://www.python.org/downloads/ or install a package manag
     Write-Host "Python was not found. Installing Python 3.13 with winget..."
     & $winget.Source install --id Python.Python.3.13 -e --scope user --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Python installation failed. Install Python 3.11-3.14 manually, then run .ootstrap_windows.ps1 again."
+        Write-Error "Python installation failed. Install Python 3.11-3.14 manually, then run .\bootstrap_windows.ps1 again."
         exit $LASTEXITCODE
     }
 
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     $Python = Find-Python
     if (-not $Python) {
-        Write-Error "Python was installed, but this PowerShell session cannot find it yet. Close PowerShell, open a new PowerShell window in this folder, and run .ootstrap_windows.ps1 again."
+        Write-Error "Python was installed, but this PowerShell session cannot find it yet. Close PowerShell, open a new PowerShell window in this folder, and run .\bootstrap_windows.ps1 again."
         exit 2
     }
 }
@@ -74,7 +74,7 @@ if ($Native) {
     if (-not $cmake) {
         $winget = Get-Command winget -ErrorAction SilentlyContinue
         if (-not $winget) {
-            Write-Error "Native export requires CMake. Install CMake, then rerun .ootstrap_windows.ps1 -Native."
+            Write-Error "Native export requires CMake. Install CMake, then rerun .\bootstrap_windows.ps1 -Native."
             exit 2
         }
         Write-Host "CMake was not found. Installing CMake with winget..."
@@ -97,5 +97,5 @@ Write-Host ""
 Write-Host "ML-Framework first-boot setup complete."
 Write-Host "Next: python .\mlframework.py smoke"
 if (-not $Native) {
-    Write-Host "Native export: python .ootstrap.py --ensure-llamacpp"
+    Write-Host "Native export: python .\bootstrap.py --ensure-llamacpp"
 }
