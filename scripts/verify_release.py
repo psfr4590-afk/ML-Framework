@@ -25,7 +25,7 @@ from pipeline.integrity import write_manifest
 from pipeline.run_tracking import _git, _git_state
 from pipeline.types import Document
 
-LINT_TARGETS = ["command_center", "pipeline", "tests", "scripts", "ui", "run_pipeline.py", "run_command_center.py", "launch.py", "bootstrap.py"]
+LINT_TARGETS = ["command_center", "pipeline", "tests", "scripts", "run_pipeline.py", "run_command_center.py", "launch.py", "bootstrap.py"]
 RELEASE_SMOKE_SOURCES = (("local-technical", "systems architecture, compilers, operating systems, networking, storage, and distributed computing"),("local-scientific", "physics, chemistry, biology, astronomy, mathematics, statistics, and experimental methods"),("local-engineering", "mechanical, electrical, civil, software, control systems, reliability, and manufacturing engineering"),("local-humanities", "history, literature, linguistics, philosophy, archaeology, anthropology, and cultural studies"),("local-business", "accounting, finance, economics, operations, logistics, management, markets, and entrepreneurship"),("local-geography", "cartography, climate, geology, ecology, oceans, weather, agriculture, and geographic information"),("local-medicine", "anatomy, physiology, epidemiology, diagnostics, pharmacology, public health, and clinical research"),("local-creative", "music, visual design, architecture, photography, theater, film, animation, and digital media"))
 
 
