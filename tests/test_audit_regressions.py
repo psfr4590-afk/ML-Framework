@@ -97,7 +97,7 @@ def test_canonical_ui_and_docs_advertise_all_seeded_dataset_groups():
 
 def test_starter_requires_semantic_dedup_and_uses_local_model_by_default():
     cfg = _load("config/pipeline_config.yaml")
-    assert cfg["stages"]["semantic_dedup"] is True
+    assert cfg["stages"]["dedup"] is True
     assert cfg["embed_dedup"]["mode"] == "auto"
     assert cfg["embed_dedup"]["allow_model_download"] is False
 
