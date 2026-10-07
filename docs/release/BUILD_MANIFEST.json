@@ -26,8 +26,8 @@
       "pipeline/orchestrator.py",
       "pipeline/doctor.py"
     ],
-    "control_plane": ["command_center"],
-    "desktop_surface": ["ui"],
+    "operator_surface": ["command_center"],
+    "compatibility_surface": ["ui/app.py"],
     "configuration": ["config"],
     "release_tooling": ["scripts"],
     "verification": [
@@ -75,7 +75,6 @@
     ],
     "target_machine": [
       "CUDA",
-      "Tkinter",
       "native llama.cpp",
       "network access"
     ],

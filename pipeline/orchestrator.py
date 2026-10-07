@@ -16,7 +16,7 @@ from typing import Any, Iterator
 import yaml
 
 from pipeline.config_validation import validate_config
-from pipeline.integrity import artifact_valid, atomic_jsonl_write, sha256_file, write_manifest
+from pipeline.integrity import artifact_valid, atomic_jsonl_write, atomic_write_text, sha256_file, write_manifest
 from pipeline.types import Document
 from pipeline.provenance import artifact_id, config_identities, new_run_id, snapshot_configs
 from pipeline.run_tracking import RunTracker
@@ -56,7 +56,6 @@ def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
     if not any(getattr(h, "_model_lab_file", None) == str(log_file) for h in root.handlers):
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
-        handler._model_lab_file = str(log_file)
         handler._model_lab_file = str(log_file)
         root.addHandler(handler)
 
@@ -720,7 +719,7 @@ class Pipeline:
         paths = sorted(shard_dir.glob("shard_*.bin"))
         if not paths:
             raise RuntimeError("Shard stage produced no shard files")
-        marker.write_text(json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n", encoding="utf-8")
+        atomic_write_text(marker, json.dumps({"schema": 4, "files": [{"name": p.name, "size": p.stat().st_size, "sha256": sha256_file(p)} for p in paths], "source": str(corpus_path.resolve()), "source_sha256": sha256_file(corpus_path), "provenance": provenance, "sequence_length": int(shard_cfg.get("sequence_length", 1024)), "tokenizer_vocab_size": tokenizer.get_vocab_size()}, separators=(",", ":")) + "\n")
         self._stage_metrics["shard"] = stage_counts(corpus_path, None)
         writer_stats = getattr(writer, "stats", {})
         self._stage_metrics["shard"].update({
@@ -763,9 +762,9 @@ class Pipeline:
             ckpt_dir / "ckpt_best.pt" if (ckpt_dir / "ckpt_best.pt").is_file() else candidates[-1]
         )
         try:
-            payload = torch.load(selected, map_location="cpu", weights_only=False)
-        except TypeError:
-            payload = torch.load(selected, map_location="cpu")
+            payload = torch.load(selected, map_location="cpu", weights_only=True)
+        except Exception as exc:
+            raise RuntimeError(f"Refusing unsafe checkpoint load for {selected}: {exc}") from exc
         training_metadata = payload.get("training_metadata") if isinstance(payload, dict) else {}
         self._stage_metrics["train"] = {
             **(self._stage_metrics.get("train") or {}),
@@ -801,7 +800,6 @@ class Pipeline:
             return result
         except BaseException as exc:
             self._run_tracker.fail_stage(name, exc)
-            self._run_tracker.finish_run("FAILED")
             raise
 
     def run(self, stages: str = "all", dataset_group: str | None = None):
@@ -810,7 +808,7 @@ class Pipeline:
             configured = self.cfg.get("stages", {}) or {}
             requested = [
                 stage for stage in stage_names
-                if bool(configured.get(stage, configured.get("semantic_dedup", False) if stage == "dedup" else False))
+                if bool(configured.get(stage, False))
             ]
         else:
             requested = [s.strip() for s in stages.split(",") if s.strip()]
@@ -831,30 +829,35 @@ class Pipeline:
                 self._run_tracker.manifest["stages"][stage]["status"] = "SKIPPED"
         self._run_tracker._write()
 
-        artifacts: dict[str, Any] = {}
-        if "crawl" in requested:
-            artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
-        if "clean" in requested:
-            inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
-            artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
-        if "dedup" in requested:
-            inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
-            artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
-        if "weight" in requested:
-            inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
-            artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
-        if "tokenize" in requested:
-            inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
-            artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
-        if "shard" in requested:
-            corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
-            tokenizer = artifacts.get("tokenizer") or self._out / "tokenizer"
-            artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus, tokenizer])
-        if "train" in requested:
-            inp = artifacts.get("shard", self._out / "shards")
-            artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
-        if "export" in requested:
-            artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
+        try:
+            artifacts: dict[str, Any] = {}
+            if "crawl" in requested:
+                artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
+            if "clean" in requested:
+                inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
+                artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
+            if "dedup" in requested:
+                inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
+                artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
+            if "weight" in requested:
+                inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
+                artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
+            if "tokenize" in requested:
+                inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+                artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
+            if "shard" in requested:
+                corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+                tokenizer = artifacts.get("tokenizer") or self._out / "tokenizer"
+                artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus, tokenizer])
+            if "train" in requested:
+                inp = artifacts.get("shard", self._out / "shards")
+                artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
+            if "export" in requested:
+                artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
+    
+        except BaseException:
+            self._run_tracker.finish_run("FAILED")
+            raise
 
         statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
         final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")

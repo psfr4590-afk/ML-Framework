@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from contextlib import closing
 import json
 from datetime import datetime, timezone
 import platform
@@ -15,7 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .runner import stop
 from .config import ROOT
 from pipeline.experiment_db import ExperimentDB
-from .service import add, credential_delete, credential_list, credential_set, credential_test, groups, ingest, init, stage, status
+from .service import add, credential_delete, credential_list, credential_presets, credential_set, credential_test, groups, ingest, init, stage, status
 from .store import store
 from .security import MAX_REQUEST_BYTES, validate_tail_lines
 
@@ -90,8 +91,65 @@ def _safe_error(exc: Exception, code: str = "REQUEST_FAILED") -> HTTPException:
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>M²S Model Training Pipeline</title><style>:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--border:#26324a;--text:#eef3ff;--muted:#9eabc4;--accent:#79a7ff;--ok:#63d49b}*{box-sizing:border-box}body{margin:0;min-height:100vh;font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);background:radial-gradient(circle at 15% 0%,#18284a 0,transparent 42%),var(--bg)}main{width:min(1040px,calc(100% - 40px));margin:0 auto;padding:72px 0 56px}.eyebrow{color:var(--accent);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:12px}h1{margin:10px 0 12px;font-size:clamp(34px,6vw,58px);line-height:1.05;letter-spacing:-.035em}.lead{max-width:720px;color:var(--muted);font-size:18px;margin:0 0 34px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--border);border-radius:18px;padding:22px;box-shadow:0 14px 40px #0003}.card h2{margin:0 0 7px;font-size:17px}.card p{margin:0;color:var(--muted)}.pill{display:inline-block;margin-top:14px;padding:4px 9px;border:1px solid #34506f;border-radius:999px;color:var(--ok);font-size:12px;font-weight:700}code{color:#cfe0ff;background:#0a1120;padding:2px 6px;border-radius:6px}footer{margin-top:34px;color:var(--muted);font-size:13px}a{color:var(--accent);text-decoration:none}@media(max-width:760px){main{padding-top:42px}.grid{grid-template-columns:1fr}}</style></head><body><main><div class="eyebrow">Model Lab · Local Command Center</div><h1>M²S Model Training Pipeline</h1><p class="lead">A local-first control surface for dataset preparation, training, artifact verification, and GGUF export. The browser surface is intentionally localhost-only.</p><section class="grid" aria-label="Command center capabilities"><article class="card"><h2>Dataset lifecycle</h2><p>Create datasets, inspect pipeline state, ingest local sources, and monitor crawl telemetry.</p><span class="pill">/api/datasets</span></article><article class="card"><h2>Pipeline control</h2><p>Run individual stages or inspect the configured stage graph without exposing a remote control plane.</p><span class="pill">8 stages</span></article><article class="card"><h2>Machine status</h2><p>Read runtime and host information through the local system endpoint.</p><span class="pill">/api/system</span></article></section><footer>API documentation: <a href="/docs">/docs</a> · OpenAPI schema: <a href="/openapi.json">/openapi.json</a></footer></main></body></html>""")
-
+    """Serve the single operator interface from authoritative API state."""
+    return HTMLResponse("""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Model Lab Command Center</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--panel2:#182238;--line:#2a3854;--text:#eef3ff;--muted:#9eabc4;--accent:#79a7ff;--ok:#63d49b;--warn:#f2c66d;--err:#ff7373}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+header{position:sticky;top:0;z-index:5;background:#0b1020ee;border-bottom:1px solid var(--line)}.header{max-width:1500px;margin:auto;padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+h1{font-size:22px;margin:0}.sub{color:var(--muted);font-size:12px}.badge{padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px}
+main{max-width:1500px;margin:auto;padding:22px}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer}button:hover{border-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}.card h2{font-size:14px;margin:0 0 12px}
+.metric{font-size:22px;font-weight:700}.label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.row{background:var(--panel2);border-radius:8px;padding:9px}.value{margin-top:2px;word-break:break-word}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:11px;text-transform:uppercase}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.err{color:var(--err)}.muted{color:var(--muted)}#message{min-height:20px;color:var(--muted);margin-bottom:10px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.rows{grid-template-columns:1fr}}@media(max-width:560px){.grid{grid-template-columns:1fr}main{padding:14px}}
+</style></head>
+<body>
+<header><div class="header"><div><h1>M²S Model Training Pipeline</h1><div class="sub">Single local operator interface · authoritative SQLite state</div></div><div id="api" class="badge">CONNECTING</div></div></header>
+<main><div class="toolbar">
+<button onclick="refresh()">↻ Refresh</button><button onclick="runStage('crawl')">Run Crawl</button><button onclick="runStage('clean')">Run Clean</button><button onclick="runStage('dedup')">Run Dedup</button><button onclick="runStage('tokenize')">Run Tokenize</button><button onclick="runStage('train')">Train</button><button onclick="runStage('export')">Export</button><button onclick="stopRun()">Stop</button><a href="/docs" target="_blank"><button>API Docs</button></a>
+</div><div id="message"></div>
+<section class="grid" id="metrics"></section>
+<section class="card"><h2>RUN</h2><div class="rows" id="run"></div></section>
+<section class="card"><h2>TRAINING</h2><div class="rows" id="training"></div></section>
+<section class="card"><h2>DATASET</h2><div class="rows" id="dataset"></div></section>
+<section class="card"><h2>HARDWARE</h2><div class="rows" id="hardware"></div></section>
+<section class="card"><h2>CREDENTIAL PRESETS</h2><div class="rows" id="credentials"></div><div class="muted">Secrets are never displayed. Configure the four predefined slots below through the secure credential API.</div></section>
+<section class="card"><h2>PROVENANCE</h2><div class="rows" id="provenance"></div></section>
+<section class="card"><h2>PIPELINE STAGES</h2><div id="stages" class="muted">Loading...</div></section>
+<section class="card"><h2>RECENT RUNS</h2><div id="runs" class="muted">Loading...</div></section>
+</main>
+<script>
+function esc(v){return String(v===null||v===undefined?"—":v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];});}
+function fmt(v,s){return v===null||v===undefined||v===""?"—":String(v)+String(s||"");}
+function setRows(id,items){document.getElementById(id).innerHTML=items.map(function(x){return '<div class="row"><div class="label">'+esc(x[0])+'</div><div class="value '+(x[2]||"")+'">'+esc(x[1])+'</div></div>';}).join("");}
+async function api(path,opts){opts=opts||{};opts.headers=Object.assign({"x-m2s-command-center":"1"},opts.headers||{});var r=await fetch(path,opts);if(!r.ok)throw new Error(r.status+": "+await r.text());return r.json();}
+async function refresh(){
+ try{
+  var d=await api("/api/dashboard"),s=await api("/api/system"),r=await api("/api/runs?limit=10"),cp=await api("/api/credentials/presets");
+  document.getElementById("api").textContent="ONLINE";document.getElementById("api").className="badge ok";
+  document.getElementById("message").textContent="Authoritative state refreshed at "+new Date().toLocaleTimeString();
+  var run=d.run||{},t=d.training||{},ds=d.dataset||{},hw=d.hardware||{},p=d.provenance||{},st=d.stage||[];
+  var cards=[["Run",run.id],["Status",run.status],["Progress",typeof t.progress==="number"?(t.progress*100).toFixed(1)+"%":"—"],["API",s.application]];
+  document.getElementById("metrics").innerHTML=cards.map(function(x){return '<div class="card"><div class="label">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>';}).join("");
+  setRows("run",[["Run ID",run.id],["Dataset",ds.dataset_group||run.dataset_id],["Model",ds.model],["Git",(run.git_branch||"—")+" · "+(run.git_sha||"—")],["Status",run.status]]);
+  setRows("training",[["Step",fmt(t.step)],["Total Steps",fmt(t.total_steps)],["Loss",fmt(t.loss)],["Validation Loss",fmt(t.validation_loss)],["Best Loss",fmt(t.best_loss)],["Tokens/sec",fmt(t.tokens_per_sec)],["Elapsed",fmt(t.elapsed_seconds," s")],["ETA",fmt(t.eta_seconds," s")]]);
+  setRows("dataset",[["Documents",ds.document_count!=null?Number(ds.document_count).toLocaleString():"—"],["Tokens",ds.token_count!=null?Number(ds.token_count).toLocaleString():"—"],["Train Tokens",ds.train_tokens!=null?Number(ds.train_tokens).toLocaleString():"—"],["Validation Tokens",ds.validation_tokens!=null?Number(ds.validation_tokens).toLocaleString():"—"],["Sources",(ds.sources||[]).length],["Lineage",p.dataset_lineage?"PASS":"PENDING",p.dataset_lineage?"ok":"warn"]]);
+  setRows("hardware",[["CPU",hw.cpu_name],["RAM",fmt(hw.ram_gb," GB")],["GPU",hw.gpu_name],["VRAM",fmt(hw.gpu_memory_gb," GB")],["CUDA",hw.cuda_version],["GPU Utilization",hw.gpu_utilization!=null?Number(hw.gpu_utilization).toFixed(1)+"%":"Not persisted"]]);
+  setRows("credentials",cp.map(function(x){return [x.provider+" · "+x.kind,x.env_var+" · "+x.description,(x.configured?"CONFIGURED":"NOT SET")+" / "+(x.environment_set?"ENV SET":"ENV NOT SET"),x.configured?"ok":"warn"];}));
+  setRows("provenance",[["Configuration",p.configuration?"PASS":"PENDING",p.configuration?"ok":"warn"],["Dataset lineage",p.dataset_lineage?"PASS":"PENDING",p.dataset_lineage?"ok":"warn"],["Tokenizer",p.tokenizer?"PASS":"PENDING",p.tokenizer?"ok":"warn"],["Checkpoint",p.checkpoint?"PASS":"PENDING",p.checkpoint?"ok":"warn"],["Artifact integrity",p.artifact_integrity?"PASS":"PENDING",p.artifact_integrity?"ok":"warn"],["Warnings",(d.warnings||[]).length],["Errors",(d.errors||[]).length,(d.errors||[]).length?"err":"ok"]]);
+  document.getElementById("stages").innerHTML='<table><thead><tr><th>Stage</th><th>Status</th><th>Duration</th></tr></thead><tbody>'+st.map(function(x){return '<tr><td>'+esc(x.stage_name)+'</td><td>'+esc(x.status)+'</td><td>'+esc(fmt(x.duration_seconds," s"))+'</td></tr>';}).join("")+'</tbody></table>';
+  document.getElementById("runs").innerHTML='<table><thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Dataset</th><th>Git</th></tr></thead><tbody>'+(r.runs||[]).map(function(x){return '<tr><td>'+esc(x.id)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.started_at)+'</td><td>'+esc(x.dataset_id)+'</td><td>'+esc(x.git_sha)+'</td></tr>';}).join("")+'</tbody></table>';
+ }catch(e){document.getElementById("api").textContent="OFFLINE";document.getElementById("api").className="badge err";document.getElementById("message").textContent=e.message;}
+}
+async function runStage(stage){try{var d=await api("/api/datasets"),did=d[0]&&d[0].id;if(!did)throw new Error("No dataset is available. Create or seed a dataset first.");await api("/api/datasets/"+did+"/stage/"+stage,{method:"POST"});document.getElementById("message").textContent="Requested "+stage+" for dataset "+did+".";setTimeout(refresh,500);}catch(e){document.getElementById("message").textContent=e.message;}}
+async function stopRun(){try{var d=await api("/api/datasets"),did=d[0]&&d[0].id;if(!did)throw new Error("No dataset is available.");await api("/api/datasets/"+did+"/stop",{method:"POST"});refresh();}catch(e){document.getElementById("message").textContent=e.message;}}
+refresh();setInterval(refresh,2500);
+</script></body></html>""")
 
 @app.get("/api/system")
 def system():
@@ -114,95 +172,99 @@ def _latest_run(db: ExperimentDB) -> dict | None:
 
 def _run_snapshot(run_id: str | None = None) -> dict:
     db = _experiment_db()
-    run = db.get_run(run_id) if run_id else _latest_run(db)
-    if not run:
-        return {"run": None, "stage": [], "training": {}, "dataset": {}, "hardware": {}, "provenance": {}, "checkpoints": [], "artifacts": [], "warnings": [], "errors": []}
-    rid = run["id"]
-    dataset_rows = _rows(db, "SELECT * FROM datasets WHERE run_id=? ORDER BY id LIMIT 1", (rid,))
-    dataset = dataset_rows[0] if dataset_rows else {}
-    stages = _rows(db, "SELECT * FROM stages WHERE run_id=? ORDER BY id", (rid,))
-    metrics = _rows(db, "SELECT step,metric_name,metric_value,metric_unit,recorded_at FROM metrics WHERE run_id=? ORDER BY step DESC,id DESC", (rid,))
-    latest = {}
-    for row in metrics:
-        latest.setdefault(row["metric_name"], row)
-    checkpoints = _rows(db, "SELECT * FROM checkpoints WHERE run_id=? ORDER BY step DESC", (rid,))
-    artifacts = _rows(db, "SELECT id,stage_name,path,sha256,size_bytes,created_at FROM artifacts WHERE run_id=? ORDER BY stage_name,path", (rid,))
-    configs = _rows(db, "SELECT config_type,sha256,path,snapshot_json FROM configs WHERE run_id=? ORDER BY config_type", (rid,))
-    train_config = {}
-    for cfg in configs:
-        if cfg.get("config_type") in {"train", "training"}:
+    try:
+        run = db.get_run(run_id) if run_id else _latest_run(db)
+        if not run:
+            return {"run": None, "stage": [], "training": {}, "dataset": {}, "hardware": {}, "provenance": {}, "checkpoints": [], "artifacts": [], "warnings": [], "errors": []}
+        rid = run["id"]
+        dataset_rows = _rows(db, "SELECT * FROM datasets WHERE run_id=? ORDER BY id LIMIT 1", (rid,))
+        dataset = dataset_rows[0] if dataset_rows else {}
+        stages = _rows(db, "SELECT * FROM stages WHERE run_id=? ORDER BY id", (rid,))
+        metrics = _rows(db, "SELECT step,metric_name,metric_value,metric_unit,recorded_at FROM metrics WHERE run_id=? ORDER BY step DESC,id DESC", (rid,))
+        latest = {}
+        for row in metrics:
+            latest.setdefault(row["metric_name"], row)
+        checkpoints = _rows(db, "SELECT * FROM checkpoints WHERE run_id=? ORDER BY step DESC", (rid,))
+        artifacts = _rows(db, "SELECT id,stage_name,path,sha256,size_bytes,created_at FROM artifacts WHERE run_id=? ORDER BY stage_name,path", (rid,))
+        configs = _rows(db, "SELECT config_type,sha256,path,snapshot_json FROM configs WHERE run_id=? ORDER BY config_type", (rid,))
+        train_config = {}
+        for cfg in configs:
+            if cfg.get("config_type") in {"train", "training"}:
+                try:
+                    train_config = json.loads(cfg.get("snapshot_json") or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    train_config = {}
+        sources = _rows(db, "SELECT s.id,s.kind,s.identifier,s.revision,s.license,s.status,ss.requests,ss.successes,ss.failures,ss.documents,ss.retries,ss.duration_seconds FROM sources s LEFT JOIN source_stats ss ON ss.source_id=s.id WHERE s.dataset_id=? ORDER BY s.id", (dataset["id"],)) if dataset.get("id") else []
+        warnings = _rows(db, "SELECT code,message,created_at FROM warnings WHERE run_id=? ORDER BY id DESC", (rid,))
+        errors = _rows(db, "SELECT code,message,exception_type,created_at FROM errors WHERE run_id=? ORDER BY id DESC", (rid,))
+        runtime = _rows(db, "SELECT * FROM runtime_estimates WHERE run_id=? ORDER BY id DESC", (rid,))
+        step = next((int(r["step"]) for r in metrics if r["step"] is not None), None)
+        total_steps = next((int(latest[k]["metric_value"]) for k in ("total_steps", "train.total_steps") if k in latest), None)
+        if total_steps is None:
+            raw_total = train_config.get("total_steps")
+            if raw_total is not None:
+                try:
+                    total_steps = int(raw_total)
+                except (TypeError, ValueError):
+                    total_steps = None
+        progress = step / total_steps if step is not None and total_steps else None
+        def metric_value(*names):
+            return next((latest[n]["metric_value"] for n in names if n in latest), None)
+        train_runtime = next((r for r in runtime if r["estimate_type"] == "training"), {})
+        elapsed_seconds = None
+        if run.get("started_at"):
             try:
-                train_config = json.loads(cfg.get("snapshot_json") or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                train_config = {}
-    sources = _rows(db, "SELECT s.id,s.kind,s.identifier,s.revision,s.license,s.status,ss.requests,ss.successes,ss.failures,ss.documents,ss.retries,ss.duration_seconds FROM sources s LEFT JOIN source_stats ss ON ss.source_id=s.id WHERE s.dataset_id=? ORDER BY s.id", (dataset["id"],)) if dataset.get("id") else []
-    warnings = _rows(db, "SELECT code,message,created_at FROM warnings WHERE run_id=? ORDER BY id DESC", (rid,))
-    errors = _rows(db, "SELECT code,message,exception_type,created_at FROM errors WHERE run_id=? ORDER BY id DESC", (rid,))
-    runtime = _rows(db, "SELECT * FROM runtime_estimates WHERE run_id=? ORDER BY id DESC", (rid,))
-    step = next((int(r["step"]) for r in metrics if r["step"] is not None), None)
-    total_steps = next((int(latest[k]["metric_value"]) for k in ("total_steps", "train.total_steps") if k in latest), None)
-    if total_steps is None:
-        raw_total = train_config.get("total_steps")
-        if raw_total is not None:
-            try:
-                total_steps = int(raw_total)
+                start = datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))
+                end = datetime.fromisoformat(run["completed_at"].replace("Z", "+00:00")) if run.get("completed_at") else datetime.now(timezone.utc)
+                elapsed_seconds = max(0.0, (end - start).total_seconds())
             except (TypeError, ValueError):
-                total_steps = None
-    progress = step / total_steps if step is not None and total_steps else None
-    def metric_value(*names):
-        return next((latest[n]["metric_value"] for n in names if n in latest), None)
-    train_runtime = next((r for r in runtime if r["estimate_type"] == "training"), {})
-    elapsed_seconds = None
-    if run.get("started_at"):
-        try:
-            start = datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))
-            end = datetime.fromisoformat(run["completed_at"].replace("Z", "+00:00")) if run.get("completed_at") else datetime.now(timezone.utc)
-            elapsed_seconds = max(0.0, (end - start).total_seconds())
-        except (TypeError, ValueError):
-            elapsed_seconds = None
-    eta_seconds = None
-    if progress and progress > 0 and elapsed_seconds is not None and not run.get("completed_at"):
-        eta_seconds = max(0.0, elapsed_seconds * (1.0 - progress) / progress)
-    hardware_rows = _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,))
-    hardware = hardware_rows[0] if hardware_rows else {}
-    if hardware.get("snapshot_json"):
-        try:
-            snapshot = json.loads(hardware["snapshot_json"])
-            if isinstance(snapshot, dict):
-                hardware["gpu_utilization"] = snapshot.get("gpu_utilization_percent", snapshot.get("gpu_utilization"))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return {
-        "run": run,
-        "stage": stages,
-        "training": {
-            "step": step, "total_steps": total_steps, "progress": progress,
-            "loss": metric_value("loss", "train.loss", "train_loss"),
-            "validation_loss": metric_value("val_loss", "validation_loss", "train.val_loss"),
-            "best_loss": next((c["best_val_loss"] for c in checkpoints if c["best_val_loss"] is not None), None),
-            "tokens_per_sec": metric_value("tokens_per_sec", "tokens/sec", "train.tokens_per_sec"),
-            "estimated_seconds": train_runtime.get("estimated_seconds"),
-            "actual_seconds": train_runtime.get("actual_seconds"),
-            "elapsed_seconds": elapsed_seconds,
-            "eta_seconds": eta_seconds,
-        },
-        "dataset": {**dataset, "sources": sources, "model": train_config.get("model_preset") or train_config.get("model_name")},
-        "hardware": hardware,
-        "provenance": {
-            "configuration": bool(configs),
-            "dataset_lineage": bool(dataset.get("manifest_sha256")),
-            "tokenizer": any(a["stage_name"] == "tokenize" and a["sha256"] for a in artifacts),
-            "checkpoint": bool(checkpoints),
-            "artifact_integrity": bool(artifacts) and all(a["sha256"] for a in artifacts),
-            "configs": configs,
-        },
-        "checkpoints": checkpoints, "artifacts": artifacts, "warnings": warnings, "errors": errors,
-    }
+                elapsed_seconds = None
+        eta_seconds = None
+        if progress and progress > 0 and elapsed_seconds is not None and not run.get("completed_at"):
+            eta_seconds = max(0.0, elapsed_seconds * (1.0 - progress) / progress)
+        hardware_rows = _rows(db, "SELECT * FROM hardware WHERE run_id=? LIMIT 1", (rid,))
+        hardware = hardware_rows[0] if hardware_rows else {}
+        if hardware.get("snapshot_json"):
+            try:
+                snapshot = json.loads(hardware["snapshot_json"])
+                if isinstance(snapshot, dict):
+                    hardware["gpu_utilization"] = snapshot.get("gpu_utilization_percent", snapshot.get("gpu_utilization"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+        return {
+            "run": run,
+            "stage": stages,
+            "training": {
+                "step": step, "total_steps": total_steps, "progress": progress,
+                "loss": metric_value("loss", "train.loss", "train_loss"),
+                "validation_loss": metric_value("val_loss", "validation_loss", "train.val_loss"),
+                "best_loss": next((c["best_val_loss"] for c in checkpoints if c["best_val_loss"] is not None), None),
+                "tokens_per_sec": metric_value("tokens_per_sec", "tokens/sec", "train.tokens_per_sec"),
+                "estimated_seconds": train_runtime.get("estimated_seconds"),
+                "actual_seconds": train_runtime.get("actual_seconds"),
+                "elapsed_seconds": elapsed_seconds,
+                "eta_seconds": eta_seconds,
+            },
+            "dataset": {**dataset, "sources": sources, "model": train_config.get("model_preset") or train_config.get("model_name")},
+            "hardware": hardware,
+            "provenance": {
+                "configuration": bool(configs),
+                "dataset_lineage": bool(dataset.get("manifest_sha256")),
+                "tokenizer": any(a["stage_name"] == "tokenize" and a["sha256"] for a in artifacts),
+                "checkpoint": bool(checkpoints),
+                "artifact_integrity": bool(artifacts) and all(a["sha256"] for a in artifacts),
+                "configs": configs,
+            },
+            "checkpoints": checkpoints, "artifacts": artifacts, "warnings": warnings, "errors": errors,
+        }
+    finally:
+        db.close()
 
 
 @app.get("/api/runs")
 def api_runs(limit: int = 20):
-    return {"runs": _experiment_db().search_runs(limit=max(1, min(int(limit), 100)))}
+    with closing(_experiment_db()) as db:
+        return {"runs": db.search_runs(limit=max(1, min(int(limit), 100)))}
 
 
 @app.get("/api/runs/{run_id}")
@@ -255,6 +317,10 @@ def stop_stage(did: int):
 
 @app.get("/api/groups")
 def api_groups(): return groups()
+
+
+@app.get("/api/credentials/presets")
+def credential_presets_api(): return credential_presets()
 
 
 @app.get("/api/credentials")

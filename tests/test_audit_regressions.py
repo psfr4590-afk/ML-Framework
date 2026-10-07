@@ -97,7 +97,7 @@ def test_canonical_ui_and_docs_advertise_all_seeded_dataset_groups():
 
 def test_starter_requires_semantic_dedup_and_uses_local_model_by_default():
     cfg = _load("config/pipeline_config.yaml")
-    assert cfg["stages"]["semantic_dedup"] is True
+    assert cfg["stages"]["dedup"] is True
     assert cfg["embed_dedup"]["mode"] == "auto"
     assert cfg["embed_dedup"]["allow_model_download"] is False
 
@@ -127,6 +127,26 @@ def test_resume_skip_rejects_byte_corruption(tmp_path):
 
 def pipeline_artifact_is_valid(path: Path) -> bool:
     return artifact_valid(path)
+
+
+def test_run_finalization_is_owned_by_the_pipeline_boundary():
+    source = (ROOT / "pipeline/orchestrator.py").read_text(encoding="utf-8")
+    assert source.count("finish_run(") == 2
+    stage_failure = source.index("def _run_stage(")
+    run_boundary = source.index("def run(", stage_failure)
+    assert 'finish_run("FAILED")' not in source[stage_failure:run_boundary]
+
+
+def test_experiment_db_exposes_explicit_close():
+    source = (ROOT / "pipeline/experiment_db.py").read_text(encoding="utf-8")
+    assert "def close(self) -> None:" in source
+    web = (ROOT / "command_center/web.py").read_text(encoding="utf-8")
+    assert "with closing(_experiment_db()) as db:" in web
+
+
+def test_dedup_stage_uses_one_canonical_stage_name():
+    source = (ROOT / "pipeline/orchestrator.py").read_text(encoding="utf-8")
+    assert 'configured.get("semantic_dedup"' not in source
 
 
 def test_orchestrator_source_keeps_global_dedup_streaming_contract():

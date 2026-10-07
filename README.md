@@ -2,7 +2,7 @@
 
 **ML-Framework** is the local-first training pipeline behind **Model Lab**, the **M²S Model Training Pipeline**. It takes configured data sources through cleaning, semantic deduplication, weighting, tokenization, sharding, training, and GGUF export, with provenance and artifact integrity tracked along the way.
 
-It is designed to run locally on Windows, Linux, macOS, and headless Termux. The desktop UI is Windows-oriented; the pipeline and command center are portable.
+It is designed to run locally on Windows, Linux, macOS, and headless Termux. The operator surface is a single localhost browser Command Center; the pipeline and backend are portable.
 
 ## What you get
 
@@ -11,7 +11,6 @@ It is designed to run locally on Windows, Linux, macOS, and headless Termux. The
 - Semantic near-duplicate detection
 - Hardware/CUDA preflight and conservative training profiles
 - Local FastAPI command center
-- Windows desktop control surface
 - GGUF export and llama.cpp inference verification
 - SQLite experiment/run history
 - Automated tests, linting, security checks, and release verification
@@ -131,19 +130,11 @@ See [First boot](docs/development/FIRST_BOOT.md) for the non-happy-path onboardi
 
 ## Launch Model Lab
 
-### Windows desktop UI
+### Command Center
 
-After installation:
+There is exactly one operator interface: the localhost browser Command Center. The desktop launcher and compatibility entry point both delegate to it, so they cannot drift into separate UI state.
 
-```powershell
-python .\launch.py
-```
-
-This starts the desktop control surface and its local FastAPI backend. The UI is designed around a 1760×990 desktop layout.
-
-### Browser command center
-
-To launch the local web control surface directly:
+Launch it with:
 
 ```powershell
 python .\run_command_center.py
@@ -158,6 +149,8 @@ python .\run_command_center.py --no-browser
 The command center binds to localhost by default.
 
 ## CLI
+
+The CLI is an execution and automation interface, not a second operator UI. It writes authoritative run state to the same SQLite experiment store consumed by the Command Center.
 
 Install the editable package if you want the `mlframework` command available directly in your shell:
 
@@ -178,6 +171,8 @@ mlframework infer
 mlframework status
 mlframework runs
 ```
+
+The operator workflow is intentionally one-way: `pipeline/CLI execution → SQLite authoritative state → Command Center API → browser`.
 
 The Python entry points remain available when you do not install the package:
 
@@ -218,18 +213,17 @@ ML-Framework/
 ├── bootstrap.py             # Environment setup and hardware preflight
 ├── mlframework.py           # User-facing CLI
 ├── run_pipeline.py          # Pipeline entry point
-├── launch.py                # Desktop UI entry point
-├── run_command_center.py    # Local web backend
+├── launch.py                # Canonical Command Center launcher
+├── run_command_center.py    # Local Command Center server
 ├── config/                  # Starter and specialized configurations
 ├── pipeline/                # Pipeline implementation
-├── command_center/          # Local FastAPI backend
-├── ui/                      # Desktop control surface
+├── command_center/          # API and single browser operator surface
 ├── scripts/                 # Verification, export, and tooling
 ├── tests/                   # Automated verification
 └── docs/                    # Architecture, development, and release docs
 ```
 
-The UI calls the existing pipeline/backend services. It does not maintain a second implementation of the crawler, tokenizer, trainer, or exporter.
+The Command Center calls the existing pipeline/backend services. It does not maintain a second implementation of the crawler, tokenizer, trainer, or exporter. The legacy `ui/` package is retained only as a compatibility launcher and is not a second operator interface.
 
 ## Documentation
 

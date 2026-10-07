@@ -12,6 +12,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,11 @@ RELEASE_SMOKE_SOURCES = (("local-technical", "systems architecture, compilers, o
 
 def run(cmd: list[str]) -> int:
     print("$", " ".join(map(str, cmd))); return subprocess.run(cmd, cwd=ROOT, check=False).returncode
+
+
+def _project_version() -> str:
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        return str(tomllib.load(handle)["project"]["version"])
 
 
 def _sha256(path: Path) -> str:
@@ -73,7 +79,7 @@ def _validate_source_manifest(path: Path) -> None:
 
 
 def _native_smoke(verify_ollama: bool = False) -> int:
-    source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "semantic_dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
+    source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
     with tempfile.TemporaryDirectory(prefix="model-lab-release-") as tmp:
         tmp_root = Path(tmp); output = tmp_root / "output"; scratch = tmp_root / "scratch"; config.setdefault("pipeline", {})["output_dir"] = str(output); config["pipeline"]["scratch_dir"] = str(scratch); config["pipeline"]["resume"] = False; config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp"); config["export"]["quant"] = "ALL"; config_path = tmp_root / "release_smoke.yaml"; config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8"); from pipeline.orchestrator import Pipeline; smoke_pipeline = Pipeline(str(config_path), resume=False); _write_local_smoke_input(scratch, pipeline_config_sha256=_sha256(config_path), run_id=smoke_pipeline.cfg["_run_id"], config_identities=smoke_pipeline._config_identities); _write_smoke_source_manifest(tmp_root, smoke_pipeline.cfg["_run_id"], smoke_pipeline._source_definition_paths)
         try: _validate_source_manifest(tmp_root / "source_manifest.json")
@@ -224,7 +230,7 @@ def _ui_probe() -> bool:
         from command_center.web import app
         with TestClient(app) as client:
             response = client.get("/api/system")
-            return response.status_code == 200 and response.json().get("version") == "1.3.0"
+            return response.status_code == 200 and response.json().get("version") == _project_version()
     except Exception as exc:
         print(f"UI/backend probe failed: {exc}")
         return False
@@ -274,14 +280,19 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="model-lab-clean-clone-") as clone_dir:
             clone = Path(clone_dir) / "ML-Framework"
             remote = _git(ROOT, "config", "--get", "remote.origin.url") or "https://github.com/psfr4590-afk/ML-Framework.git"
+            expected_commit = _git(ROOT, "rev-parse", "HEAD")
             clone_rc = run(["git", "clone", "--depth", "1", remote, str(clone)])
-            if clone_rc:
+            if clone_rc or not expected_commit:
                 NATIVE_EVIDENCE["clean_clone"] = False
             else:
-                install = subprocess.run([sys.executable, "-m", "pip", "install", "-e", str(clone), "--no-deps"], cwd=clone, check=False)
-                doctor = subprocess.run([sys.executable, str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False)
-                smoke = subprocess.run([sys.executable, str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor.returncode == 0 else None
-                NATIVE_EVIDENCE["clean_clone"] = install.returncode == 0 and doctor.returncode == 0 and smoke is not None and smoke.returncode == 0
+                fetch = subprocess.run(["git", "fetch", "--depth", "1", "origin", expected_commit], cwd=clone, check=False)
+                checkout = subprocess.run(["git", "checkout", "--detach", expected_commit], cwd=clone, check=False) if fetch.returncode == 0 else None
+                checked_out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=clone, check=False, capture_output=True, text=True) if checkout and checkout.returncode == 0 else None
+                exact_source = bool(checked_out and checked_out.returncode == 0 and checked_out.stdout.strip() == expected_commit)
+                install = subprocess.run([sys.executable, "-m", "pip", "install", "-e", str(clone), "--no-deps"], cwd=clone, check=False) if exact_source else None
+                doctor = subprocess.run([sys.executable, str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False) if install and install.returncode == 0 else None
+                smoke = subprocess.run([sys.executable, str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor and doctor.returncode == 0 else None
+                NATIVE_EVIDENCE["clean_clone"] = bool(exact_source and install and install.returncode == 0 and doctor and doctor.returncode == 0 and smoke and smoke.returncode == 0)
     if args.ui_probe and not NATIVE_EVIDENCE.get("ui_backend_connectivity"):
         failures.append("ui-backend")
     NATIVE_EVIDENCE["export"] = True

@@ -184,8 +184,7 @@ def main() -> int:
         if requested == "all":
             pipeline.run("all", dataset_group=args.dataset_group)
         else:
-            for stage in stages or []:
-                pipeline.run(stage, dataset_group=args.dataset_group)
+            pipeline.run(",".join(stages or []), dataset_group=args.dataset_group)
     except KeyboardInterrupt:
         print("\nInterrupted. Atomic artifacts remain intact; rerun with resume enabled.")
         return 130

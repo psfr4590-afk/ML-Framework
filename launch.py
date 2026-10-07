@@ -1,4 +1,4 @@
-"""Canonical desktop launcher for Model Lab."""
+"""Canonical launcher for the single Model Lab Command Center."""
 from __future__ import annotations
 
 import subprocess
@@ -6,14 +6,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-UI_ENTRYPOINT = ROOT / "ui" / "app.py"
+COMMAND_CENTER = ROOT / "run_command_center.py"
 
 
 def main() -> int:
-    """Start the native desktop control surface."""
-    if not UI_ENTRYPOINT.is_file():
-        raise SystemExit(f"ui/app.py is missing: {UI_ENTRYPOINT}")
-    return subprocess.call([sys.executable, str(UI_ENTRYPOINT)], cwd=ROOT)
+    """Start the one operator interface: the local browser Command Center."""
+    if not COMMAND_CENTER.is_file():
+        raise SystemExit(f"run_command_center.py is missing: {COMMAND_CENTER}")
+    return subprocess.call([sys.executable, str(COMMAND_CENTER)], cwd=ROOT)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,10 @@ This document defines the production-readiness contract for `main`. It distingui
 | Target-hardware validation | **Pending execution** | must be executed on intended deployment hardware |
 | Production training/convergence | **Operational evidence** | separate from RC smoke |
 
+## Release tag/version contract
+
+`pyproject.toml` is currently version `1.3.0`. The historical `v1.0.0-rc.1` tag does not match that metadata and is retained as a failed historical candidate. It must not be reused or force-moved. The next release candidate must use a matching tag, `v1.3.0-rc.1`, unless the project version is deliberately changed first. The release gate now validates the package version dynamically and the clean-clone gate verifies the exact approved commit instead of silently testing the default branch.
+
 ## Release commands
 
 Static verification:

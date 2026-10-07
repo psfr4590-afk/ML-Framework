@@ -56,6 +56,22 @@ def write_manifest(
     return mp
 
 
+def atomic_write_text(path: Path, content: str) -> None:
+    """Atomically replace a UTF-8 text file using a sibling temporary file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def artifact_valid(path: Path, expected_provenance: dict[str, Any] | None = None) -> bool:
     """Return true only when bytes and semantic manifest metadata are valid."""
     if not path.exists() or path.stat().st_size <= 0:
@@ -112,10 +128,7 @@ def validate_checkpoint(
         import torch
         from pipeline.trainer.model import LlamaModel, ModelConfig
 
-        try:
-            payload = torch.load(path, map_location="cpu", weights_only=False)
-        except TypeError:
-            payload = torch.load(path, map_location="cpu")
+        payload = torch.load(path, map_location="cpu", weights_only=True)
     except Exception as exc:
         raise RuntimeError(f"Unable to load checkpoint {path}: {exc}") from exc
 

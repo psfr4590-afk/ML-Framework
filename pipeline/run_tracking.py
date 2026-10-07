@@ -245,8 +245,11 @@ class RunTracker:
         self._write()
 
     def finish_run(self, status: str = "PASS") -> None:
+        """Finalize the run exactly once; repeated calls are harmless."""
         if status not in {"PASS", "WARN", "FAILED", "DEGRADED"}:
             raise ValueError(f"Invalid final run status: {status}")
+        if self.manifest.get("timestamps", {}).get("ended") is not None:
+            return
         self.manifest["final_status"] = status
         self.manifest["timestamps"]["ended"] = _now()
         self._write()

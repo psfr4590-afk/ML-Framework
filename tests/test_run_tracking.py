@@ -73,3 +73,15 @@ def test_resume_reuses_same_run_manifest(tmp_path: Path, monkeypatch) -> None:
     resumed = RunTracker.resume(tmp_path, tmp_path / "output", tracker.path)
     assert resumed.run_id == tracker.run_id
     assert resumed.manifest["final_status"] == "RUNNING"
+
+
+def test_finish_run_is_idempotent(tmp_path: Path, monkeypatch) -> None:
+    _patch_host(monkeypatch)
+    tracker = RunTracker(tmp_path, tmp_path / "output", run_id="run_once", dataset_id="ds", experiment_id="exp", configuration={})
+    tracker.finish_run("PASS")
+    first = json.loads(tracker.path.read_text(encoding="utf-8"))
+    ended = first["timestamps"]["ended"]
+    tracker.finish_run("FAILED")
+    second = json.loads(tracker.path.read_text(encoding="utf-8"))
+    assert second["final_status"] == "PASS"
+    assert second["timestamps"]["ended"] == ended
