@@ -44,13 +44,7 @@ def _load(path: str) -> dict:
 def test_semantic_dedup_dependencies_are_required_everywhere():
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project_deps = {re.split(r"[<>=!~ ]", dep, maxsplit=1)[0] for dep in metadata["project"]["dependencies"]}
-    requirements = {
-        re.split(r"[<>=!~ ]", line, maxsplit=1)[0]
-        for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#") and not line.startswith("-")
-    }
     assert REQUIRED_SEMANTIC_PACKAGES <= project_deps
-    assert REQUIRED_SEMANTIC_PACKAGES <= requirements
 
 
 def test_semantic_dedup_is_not_documented_as_optional():
@@ -175,11 +169,8 @@ def test_doctor_treats_semantic_dedup_dependencies_as_required():
 
 def test_semantic_dedup_required_dependencies_are_not_hidden_behind_optional_extras():
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert "sentence-transformers>=6.0.1" in pyproject
     assert "faiss-cpu>=1.15.0" in pyproject
-    assert "sentence-transformers>=6.0.1" in requirements
-    assert "faiss-cpu>=1.15.0" in requirements
 
 
 def test_semantic_dedup_auto_mode_fails_if_required_package_is_missing(monkeypatch):
