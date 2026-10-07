@@ -61,15 +61,8 @@ def test_packaging_dependencies_match_runtime_contract():
         for dependency in metadata["project"]["dependencies"]
     }
 
-    requirement_names = {
-        _requirement_name(line)
-        for line in requirements.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
-    runtime_names = requirement_names - _VERIFICATION_REQUIREMENTS
-
-    assert runtime_names == _RUNTIME_REQUIREMENTS
-    assert runtime_names <= set(declared)
+    assert [line.strip() for line in requirements.splitlines() if line.strip() and not line.lstrip().startswith("#")] == ["-e ."]
+    assert set(declared) == _RUNTIME_REQUIREMENTS
     assert all(not name.startswith("torch") for name in declared)
 
 
