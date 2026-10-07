@@ -56,8 +56,8 @@ The first-boot wrapper is the human-friendly path. The underlying direct pipelin
 
 Windows:
 ```powershell
-python .\\run_pipeline.py --doctor
-python .\\run_pipeline.py --no-resume
+python .\run_pipeline.py --doctor
+python .\run_pipeline.py --no-resume
 ```
 
 Linux / macOS / Termux:
