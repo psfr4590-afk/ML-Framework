@@ -64,8 +64,8 @@ The CLI wrapper above is the friendlier first-boot path. The underlying pipeline
 
 Windows:
 ```powershell
-python .\\run_pipeline.py --doctor
-python .\\run_pipeline.py --no-resume
+python .\run_pipeline.py --doctor
+python .\run_pipeline.py --no-resume
 ```
 
 Linux / macOS / Termux:
