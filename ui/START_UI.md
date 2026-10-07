@@ -1,9 +1,13 @@
-# Model Lab UI
+# Model Lab Command Center
 
-Tkinter desktop control surface for the existing localhost command center.
+The project has exactly one operator interface: the localhost browser Command Center.
 
-Target display: **1760×990**.
+`launch.py` and this compatibility path both delegate to `run_command_center.py`. The old Tkinter implementation is no longer an operator surface and is not part of the release contract.
 
-The visual language follows the previous dark browser command-center presentation while retaining navigable desktop screens and real backend actions.
+Canonical launch:
 
-Canonical launch: `python launch.py` from the Model Lab root.
+```powershell
+python .\\launch.py
+```
+
+The Command Center reads operational state from the authoritative SQLite experiment store through the FastAPI service. It does not maintain a parallel UI state store.
