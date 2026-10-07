@@ -23,8 +23,9 @@ def test_command_center_seeds_and_serves():
         page = client.get('/')
         assert page.status_code == 200
         assert page.encoding == 'utf-8'
-        assert 'Model Lab' in page.text
-        assert 'Local Command Center' in page.text
+        assert 'Model Lab Command Center' in page.text
+        assert 'Single local operator interface' in page.text
+        assert 'authoritative SQLite state' in page.text
         assert 'M²S Model Training Pipeline' in page.content.decode('utf-8')
 
 
@@ -103,12 +104,13 @@ def test_command_center_browser_is_operational_not_a_landing_page():
         html = response.text
         for marker in [
             'id="metrics"', 'id="run"', 'id="training"', 'id="dataset"',
-            'id="hardware"', 'id="provenance"', 'id="stages"', 'id="runs"',
+            'id="hardware"', 'id="credentials"', 'id="provenance"', 'id="stages"', 'id="runs"',
             '/api/dashboard', '/api/system', '/api/runs'
         ]:
             assert marker in html
         assert "Dataset lifecycle" not in html
         assert "Machine status" not in html
+        assert "Local Command Center" not in html
 
 
 def test_command_center_exposes_four_credential_presets_without_secrets():
