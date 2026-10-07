@@ -42,22 +42,14 @@ def _secret_scan() -> list[str]:
 
 
 def _audit_requirements() -> int:
-    """Audit declared third-party dependencies, excluding the local project package."""
-    requirement_files = (
-        ROOT / "requirements.txt",
-        ROOT / "requirements-torch.txt",
-        ROOT / "requirements-security.txt",
-    )
-    missing = [str(path) for path in requirement_files if not path.is_file()]
-    if missing:
-        print("Dependency audit inputs missing:")
-        for path in missing:
-            print(f"  {path}")
-        return 2
-    args = [sys.executable, "-m", "pip_audit", "--strict"]
-    for path in requirement_files:
-        args.extend(["-r", str(path)])
-    return subprocess.run(args, cwd=ROOT, check=False).returncode
+    """Audit the complete isolated release environment.
+
+    Runtime dependency declarations are authoritative in pyproject.toml. The
+    environment already contains the host-specific PyTorch and security tools,
+    so auditing the installed environment avoids maintaining a second,
+    incompatible requirement parser.
+    """
+    return subprocess.run([sys.executable, "-m", "pip_audit", "--strict"], cwd=ROOT, check=False).returncode
 
 
 def main() -> int:
