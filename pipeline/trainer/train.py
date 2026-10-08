@@ -21,7 +21,12 @@ from pipeline.integrity import sha256_file
 from pipeline.model_sizer import estimate_total_tokens, profile_hardware, recommend_training_profile
 from pipeline.preflight import discover_capabilities, estimate_duration, run_preflight, write_preflight_report
 from pipeline.shardwriter.shard_writer import ShardDataLoader
-from pipeline.provenance import config_identities, artifact_id, stable_hash
+from pipeline.provenance import (
+    config_identities,
+    artifact_id,
+    stable_hash,
+    training_compatibility_config,
+)
 from pipeline.trainer.model import LlamaModel, ModelConfig
 
 log = logging.getLogger("trainer")
@@ -62,7 +67,8 @@ def _provenance(cfg: dict, model_cfg: ModelConfig, shard_dir: Path, train_cfg: O
             source_definition_hashes=cfg.get("_source_definition_hashes") or {},
         )
     model_sha = stable_hash(model_cfg.to_dict())
-    train_sha = stable_hash(effective_train_cfg)
+    train_identity_cfg = training_compatibility_config(effective_train_cfg)
+    train_sha = stable_hash(train_identity_cfg)
     identities["train_config_sha256"] = train_sha
     identities["model_config_sha256"] = model_sha
     shard_manifest = Path(shard_dir) / "shards.manifest.json"
@@ -104,15 +110,52 @@ def _seed_everything(seed: int) -> None:
 
 
 def _rng_state() -> dict:
-    state = {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state()}
-    if torch.cuda.is_available(): state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    numpy_state = np.random.get_state()
+    state = {
+        "python": random.getstate(),
+        "numpy": {
+            "algorithm": str(numpy_state[0]),
+            "state": [int(value) for value in numpy_state[1].tolist()],
+            "pos": int(numpy_state[2]),
+            "has_gauss": int(numpy_state[3]),
+            "cached_gaussian": float(numpy_state[4]),
+        },
+        "torch_cpu": torch.get_rng_state().cpu(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = [rng.cpu() for rng in torch.cuda.get_rng_state_all()]
     return state
 
 
 def _restore_rng_state(state: dict) -> None:
-    if not isinstance(state, dict): raise RuntimeError("Checkpoint RNG state is invalid")
-    random.setstate(state["python"]); np.random.set_state(state["numpy"]); torch.set_rng_state(state["torch"])
-    if torch.cuda.is_available() and "torch_cuda" in state: torch.cuda.set_rng_state_all(state["torch_cuda"])
+    if not isinstance(state, dict):
+        raise RuntimeError("Checkpoint RNG state is invalid")
+
+    random.setstate(state["python"])
+
+    numpy_state = state["numpy"]
+    if isinstance(numpy_state, dict):
+        np.random.set_state(
+            (
+                str(numpy_state["algorithm"]),
+                np.asarray(numpy_state["state"], dtype=np.uint32),
+                int(numpy_state["pos"]),
+                int(numpy_state["has_gauss"]),
+                float(numpy_state["cached_gaussian"]),
+            )
+        )
+    else:
+        np.random.set_state(numpy_state)
+
+    torch_cpu_state = state.get("torch_cpu", state.get("torch"))
+    if torch_cpu_state is None:
+        raise RuntimeError("Checkpoint CPU RNG state is missing")
+    torch.set_rng_state(torch_cpu_state.cpu())
+
+    if torch.cuda.is_available() and "torch_cuda" in state:
+        torch.cuda.set_rng_state_all(
+            [rng.cpu() for rng in state["torch_cuda"]]
+        )
 
 
 def _rng_state_sha256(state: dict) -> str:
@@ -240,11 +283,28 @@ def load_checkpoint(path: Path, model: LlamaModel, optimizer: Optional[torch.opt
 def latest_checkpoint(ckpt_dir: Path) -> Optional[Path]:
     numbered = []
     for path in ckpt_dir.glob("ckpt_*.pt"):
-        if path.with_name(path.name + ".manifest.json").is_file():
-            stem = path.stem
-            if stem.startswith("ckpt_") and stem[5:].isdigit(): numbered.append((int(stem[5:]), path))
-    numbered.sort(key=lambda item: item[0])
-    return numbered[-1][1] if numbered else None
+        stem = path.stem
+        if not stem.startswith("ckpt_") or not stem[5:].isdigit():
+            continue
+        if not path.with_name(path.name + ".manifest.json").is_file():
+            continue
+        numbered.append((int(stem[5:]), path))
+
+    numbered.sort(key=lambda item: item[0], reverse=True)
+
+    for step, path in numbered:
+        try:
+            checkpoint_metadata(path)
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            log.warning(
+                "Skipping invalid checkpoint during latest selection: %s (%s)",
+                path,
+                exc,
+            )
+            continue
+        return path
+
+    return None
 
 
 def checkpoint_metadata(path: Path) -> dict:
@@ -277,8 +337,24 @@ class Trainer:
     def __init__(self, cfg: dict):
         self.cfg = cfg; self.t_cfg = cfg.get("train", {}); self.out_dir = Path(cfg.get("pipeline", {}).get("output_dir", "output")); self.ckpt_dir = self.out_dir / "checkpoints"; self.log_path = self.out_dir / "logs" / "train.log"; self.log_path.parent.mkdir(parents=True, exist_ok=True)
         target = str(self.log_path.resolve())
+        self._log_handler = None
         if not any(getattr(h, "_model_lab_path", None) == target for h in log.handlers):
-            handler = logging.FileHandler(self.log_path, encoding="utf-8"); handler._model_lab_path = target; handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")); log.addHandler(handler)
+            handler = logging.FileHandler(self.log_path, encoding="utf-8")
+            handler._model_lab_path = target
+            handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+            log.addHandler(handler)
+            self._log_handler = handler
+
+    def close(self) -> None:
+        """Release the logging handler owned by this Trainer instance."""
+        handler = self._log_handler
+        self._log_handler = None
+        if handler is not None:
+            try:
+                handler.flush()
+            finally:
+                log.removeHandler(handler)
+                handler.close()
 
     def run(self):
         t = dict(self.t_cfg); seed = int(t.get("seed", 42)); _seed_everything(seed); device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

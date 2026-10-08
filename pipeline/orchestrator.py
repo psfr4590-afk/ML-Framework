@@ -41,23 +41,27 @@ SOURCE_KINDS = ("web", "github", "arxiv", "huggingface", "google")
 REQUIRED_SOURCE_FIELDS = {"kind", "identifier", "revision", "license", "raw_source_sha256", "dataset_group"}
 
 
-def _setup_logging(out_dir: Path, level: str = "INFO") -> None:
+def _setup_logging(out_dir: Path, level: str = "INFO") -> list[logging.Handler]:
     log_dir = out_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s [%(name)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    owned_handlers: list[logging.Handler] = []
     if not any(getattr(h, "_model_lab_console", False) for h in root.handlers):
         handler = logging.StreamHandler()
         handler.setFormatter(fmt)
         handler._model_lab_console = True
         root.addHandler(handler)
+        owned_handlers.append(handler)
     log_file = (log_dir / "pipeline.log").resolve()
     if not any(getattr(h, "_model_lab_file", None) == str(log_file) for h in root.handlers):
         handler = logging.FileHandler(log_file, encoding="utf-8")
         handler.setFormatter(fmt)
         handler._model_lab_file = str(log_file)
         root.addHandler(handler)
+        owned_handlers.append(handler)
+    return owned_handlers
 
 
 def _load_config(path: Path) -> dict:
@@ -208,7 +212,7 @@ def _write_source_manifest(path: Path, cfg: dict, source_paths: dict[str, Path],
         "rights_note": "License and usage terms must be verified before distribution; unknown values are intentional.",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
 def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, expected_source_definition_paths: dict[str, Path] | None = None) -> bool:
@@ -303,8 +307,19 @@ class Pipeline:
             self.cfg["_run_id"] = new_run_id()
             run_id_path.parent.mkdir(parents=True, exist_ok=True)
             run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
-        self._config_identities = config_identities(self.cfg, pipeline_sha256=self._config_sha256, source_definition_hashes=self._source_definition_hashes)
-        self._config_snapshots = snapshot_configs(self._out, self.cfg, self._config_identities, config_path=self._cfg_path)
+        self._config_identities = config_identities(
+            self.cfg,
+            pipeline_sha256=self._config_sha256,
+            source_definition_hashes=self._source_definition_hashes,
+        )
+        self.cfg["_source_definition_hashes"] = dict(self._source_definition_hashes)
+        self.cfg["_config_identities"] = dict(self._config_identities)
+        self._config_snapshots = snapshot_configs(
+            self._out,
+            self.cfg,
+            self._config_identities,
+            config_path=self._cfg_path,
+        )
         dataset_meta = {}
         if self._dataset_root is not None:
             meta_path = self._dataset_root / "dataset.json"
@@ -358,7 +373,10 @@ class Pipeline:
         self._signals = DomainSignalTracker(self._weights.signal_gate_config())
         self._stage_metrics: dict[str, dict[str, Any]] = {}
         self._source_observability: list[dict[str, Any]] = []
-        _setup_logging(self._out, str(self.cfg["pipeline"].get("log_level", "INFO")))
+        self._logging_handlers = _setup_logging(
+            self._out,
+            str(self.cfg["pipeline"].get("log_level", "INFO")),
+        )
         log.info("Pipeline '%s' initialized | config=%s", self.cfg["pipeline"].get("name", "pipeline"), self._cfg_path)
 
     def _provenance(self, stage: str, input_path: Path | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -737,12 +755,19 @@ class Pipeline:
 
     def stage_train(self) -> Path:
         import torch
+        from pipeline.trainer.train import checkpoint_metadata, select_checkpoint
+
         train_cfg = self.cfg.get("train", {})
         if not torch.cuda.is_available() and not bool(train_cfg.get("allow_cpu_training", False)):
             raise RuntimeError("CUDA is unavailable and allow_cpu_training=false; refusing accidental CPU pretraining.")
         self.cfg["_pipeline_config_sha256"] = self._config_sha256
         Trainer = _load_class("pipeline.trainer.train", "Trainer")
-        Trainer(self.cfg).run()
+        trainer = Trainer(self.cfg)
+        try:
+            trainer.run()
+        finally:
+            trainer.close()
+
         preflight_report = self._out / "preflight_report.json"
         if preflight_report.is_file():
             try:
@@ -751,21 +776,37 @@ class Pipeline:
                 }
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 self._stage_metrics["train"] = {"preflight_report": str(preflight_report)}
+
         ckpt_dir = self._out / "checkpoints"
-        candidates = sorted(ckpt_dir.glob("ckpt_[0-9]*.pt"))
-        if (ckpt_dir / "ckpt_best.pt").is_file():
-            candidates.append(ckpt_dir / "ckpt_best.pt")
-        if (ckpt_dir / "ckpt_final.pt").is_file():
-            candidates.append(ckpt_dir / "ckpt_final.pt")
-        if not candidates:
-            raise RuntimeError(f"Training completed without a checkpoint in {ckpt_dir}")
-        selected = (ckpt_dir / "ckpt_final.pt") if (ckpt_dir / "ckpt_final.pt").is_file() else (
-            ckpt_dir / "ckpt_best.pt" if (ckpt_dir / "ckpt_best.pt").is_file() else candidates[-1]
-        )
+        selected = None
+
+        for kind in ("final", "best", "latest"):
+            try:
+                candidate = select_checkpoint(ckpt_dir, kind)
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                log.warning("Checkpoint selection failed for %s: %s", kind, exc)
+                continue
+
+            if candidate is None:
+                continue
+
+            try:
+                checkpoint_metadata(candidate)
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                log.warning("Skipping invalid %s checkpoint: %s (%s)", kind, candidate, exc)
+                continue
+
+            selected = candidate
+            break
+
+        if selected is None:
+            raise RuntimeError(f"Training completed without a valid checkpoint in {ckpt_dir}")
+
         try:
             payload = torch.load(selected, map_location="cpu", weights_only=True)
         except Exception as exc:
             raise RuntimeError(f"Refusing unsafe checkpoint load for {selected}: {exc}") from exc
+
         training_metadata = payload.get("training_metadata") if isinstance(payload, dict) else {}
         self._stage_metrics["train"] = {
             **(self._stage_metrics.get("train") or {}),
@@ -776,10 +817,45 @@ class Pipeline:
         }
         return selected
 
-    def stage_export(self):
+    def stage_export(self) -> Path:
         exporter = _load_class("scripts.export_gguf", "export_checkpoint")
         exp = self.cfg.get("export", {})
-        exporter(output_dir=self._out, llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"), quant=str(exp.get("quant", "Q4_K_M")).upper(), model_name=exp.get("model_name", "model"))
+        result = exporter(
+            output_dir=self._out,
+            llamacpp_dir=PROJECT_ROOT / exp.get("llamacpp_dir", "llama.cpp"),
+            quant=str(exp.get("quant", "Q4_K_M")).upper(),
+            model_name=exp.get("model_name", "model"),
+        )
+
+        if not isinstance(result, dict):
+            raise RuntimeError("GGUF exporter returned no structured export result")
+
+        final_gguf = result.get("final_gguf")
+        if not final_gguf:
+            raise RuntimeError("GGUF exporter did not report a final_gguf artifact")
+
+        artifact = Path(str(final_gguf)).resolve()
+        if not artifact.is_file() or artifact.stat().st_size <= 0:
+            raise RuntimeError(f"GGUF export artifact is missing or empty: {artifact}")
+
+        reported_sha = result.get("final_gguf_sha256")
+        if reported_sha:
+            actual_sha = sha256_file(artifact)
+            if actual_sha != reported_sha:
+                raise RuntimeError(
+                    f"GGUF export SHA-256 mismatch for {artifact}: "
+                    f"reported={reported_sha}, actual={actual_sha}"
+                )
+
+        self._stage_metrics["export"] = {
+            "final_gguf": str(artifact),
+            "final_gguf_sha256": sha256_file(artifact),
+            "final_gguf_size": artifact.stat().st_size,
+            "quantization": result.get("quantization"),
+            "checkpoint": result.get("checkpoint"),
+            "checkpoint_step": result.get("checkpoint_step"),
+        }
+        return artifact
 
     def _run_stage(self, name: str, fn, inputs: list[Path] | None = None):
         tracked_inputs = [
@@ -803,76 +879,99 @@ class Pipeline:
             self._run_tracker.fail_stage(name, exc)
             raise
 
+    def close(self) -> None:
+        """Release resources owned by this Pipeline instance."""
+        handlers = getattr(self, "_logging_handlers", [])
+        self._logging_handlers = []
+        root = logging.getLogger()
+        for handler in handlers:
+            try:
+                handler.flush()
+            finally:
+                root.removeHandler(handler)
+                handler.close()
+
+        run_tracker = getattr(self, "_run_tracker", None)
+        self._run_tracker = None
+        if run_tracker is not None:
+            run_tracker.close()
+
     def run(self, stages: str = "all", dataset_group: str | None = None):
-        stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
-        if stages == "all":
-            configured = self.cfg.get("stages", {}) or {}
-            requested = [
-                stage for stage in stage_names
-                if bool(configured.get(stage, False))
-            ]
-        else:
-            requested = [s.strip() for s in stages.split(",") if s.strip()]
-        unknown = [s for s in requested if s not in stage_names]
-        if unknown:
-            raise ValueError(f"Unknown stages: {unknown}")
-        if not requested:
-            raise ValueError("No enabled pipeline stages are configured")
-
-        self._run_tracker.manifest["dataset_identity"]["requested_group"] = dataset_group or "all"
-        for stage in stage_names:
-            self._run_tracker.manifest["stages"].setdefault(stage, {
-                "run_id": self._run_tracker.run_id, "status": "PENDING",
-                "start": None, "end": None, "duration_seconds": None,
-                "warnings": [], "errors": [], "inputs": [], "outputs": [], "artifact_hashes": {},
-            })
-            if stage not in requested:
-                self._run_tracker.manifest["stages"][stage]["status"] = "SKIPPED"
-        self._run_tracker._write()
-
         try:
-            artifacts: dict[str, Any] = {}
-            if "crawl" in requested:
-                artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
-            if "clean" in requested:
-                inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
-                artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
-            if "dedup" in requested:
-                inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
-                artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
-            if "weight" in requested:
-                inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
-                artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
-            if "tokenize" in requested:
-                inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
-                artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
-            if "shard" in requested:
-                corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
-                tokenizer = artifacts.get("tokenizer") or self._out / "tokenizer"
-                artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus, tokenizer])
-            if "train" in requested:
-                inp = artifacts.get("shard", self._out / "shards")
-                artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
-            if "export" in requested:
-                artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
-    
-        except BaseException:
-            self._run_tracker.finish_run("FAILED")
-            raise
+            stage_names = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
+            if stages == "all":
+                configured = self.cfg.get("stages", {}) or {}
+                requested = [
+                    stage for stage in stage_names
+                    if bool(configured.get(stage, False))
+                ]
+            else:
+                requested = [s.strip() for s in stages.split(",") if s.strip()]
+            unknown = [s for s in requested if s not in stage_names]
+            if unknown:
+                raise ValueError(f"Unknown stages: {unknown}")
+            if not requested:
+                raise ValueError("No enabled pipeline stages are configured")
 
-        statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
-        final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")
-        report_path = self._out / "runs" / self._run_tracker.run_id / "dataset_report.json"
-        write_dataset_report(
-            report_path,
-            run_id=self._run_tracker.run_id,
-            stage_metrics=dict(self._stage_metrics),
-            sources=list(self._source_observability),
-        )
-        self._run_tracker.manifest["dataset_report"] = {
-            "path": str(report_path.resolve()),
-            "sha256": sha256_file(report_path),
-        }
-        self._run_tracker.finish_run(final_status)
-        log.info("Pipeline completed stages=%s run_id=%s dataset_report=%s", requested, self._run_tracker.run_id, report_path)
-        return artifacts
+            self._run_tracker.manifest["dataset_identity"]["requested_group"] = dataset_group or "all"
+            for stage in stage_names:
+                self._run_tracker.manifest["stages"].setdefault(stage, {
+                    "run_id": self._run_tracker.run_id, "status": "PENDING",
+                    "start": None, "end": None, "duration_seconds": None,
+                    "warnings": [], "errors": [], "inputs": [], "outputs": [], "artifact_hashes": {},
+                })
+                if stage not in requested:
+                    self._run_tracker.manifest["stages"][stage]["status"] = "SKIPPED"
+            self._run_tracker._write()
+
+            try:
+                artifacts: dict[str, Any] = {}
+                if "crawl" in requested:
+                    artifacts["crawl"] = self._run_stage("crawl", lambda: self.stage_crawl(dataset_group))
+                if "clean" in requested:
+                    inp = artifacts.get("crawl", self._scratch / "01_crawled.jsonl")
+                    artifacts["clean"] = self._run_stage("clean", lambda: self.stage_clean(inp), [inp])
+                if "dedup" in requested:
+                    inp = artifacts.get("clean", self._scratch / "02_cleaned.jsonl")
+                    artifacts["dedup"] = self._run_stage("dedup", lambda: self.stage_embed_dedup(inp), [inp])
+                if "weight" in requested:
+                    inp = artifacts.get("dedup", self._scratch / "03_deduped.jsonl")
+                    artifacts["weight"] = self._run_stage("weight", lambda: self.stage_weight(inp), [inp])
+                if "tokenize" in requested:
+                    inp = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+                    artifacts["tokenizer"] = self._run_stage("tokenize", lambda: self.stage_tokenize(inp), [inp])
+                if "shard" in requested:
+                    corpus = artifacts.get("weight", self._scratch / "04_weighted.jsonl")
+                    tokenizer = artifacts.get("tokenizer")
+                    if tokenizer is None:
+                        tokenizer_cls = _load_class("pipeline.tokenizer.train_tokenizer", "BPETokenizerTrainer")
+                        tokenizer = tokenizer_cls(self.cfg.get("tokenizer", {})).load()
+                    artifacts["shard"] = self._run_stage("shard", lambda: self.stage_shard(corpus, tokenizer), [corpus])
+                if "train" in requested:
+                    inp = artifacts.get("shard", self._out / "shards")
+                    artifacts["train"] = self._run_stage("train", self.stage_train, [inp])
+                if "export" in requested:
+                    artifacts["export"] = self._run_stage("export", self.stage_export, [artifacts.get("train")])
+
+            except BaseException:
+                self._run_tracker.finish_run("FAILED")
+                raise
+
+            statuses = [self._run_tracker.manifest["stages"][stage]["status"] for stage in requested]
+            final_status = "DEGRADED" if "DEGRADED" in statuses else ("WARN" if "WARN" in statuses else "PASS")
+            report_path = self._out / "runs" / self._run_tracker.run_id / "dataset_report.json"
+            write_dataset_report(
+                report_path,
+                run_id=self._run_tracker.run_id,
+                stage_metrics=dict(self._stage_metrics),
+                sources=list(self._source_observability),
+            )
+            self._run_tracker.manifest["dataset_report"] = {
+                "path": str(report_path.resolve()),
+                "sha256": sha256_file(report_path),
+            }
+            self._run_tracker.finish_run(final_status)
+            log.info("Pipeline completed stages=%s run_id=%s dataset_report=%s", requested, self._run_tracker.run_id, report_path)
+            return artifacts
+        finally:
+            self.close()

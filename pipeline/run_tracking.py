@@ -175,6 +175,13 @@ class RunTracker:
         obj._write()
         return obj
 
+    def close(self) -> None:
+        """Close the SQLite connection owned by this RunTracker."""
+        db = getattr(self, "db", None)
+        self.db = None
+        if db is not None:
+            db.close()
+
     def _write(self) -> None:
         self.manifest["timestamps"]["updated"] = _now()
         temporary = self.path.with_suffix(".json.tmp")

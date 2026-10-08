@@ -81,7 +81,7 @@ shard:
 train:
   resume: false
   allow_cpu_training: true
-  auto_size: true
+  auto_size: false
   target_training_hours: null
   observed_tokens_per_sec: null
   model_preset: "85M"

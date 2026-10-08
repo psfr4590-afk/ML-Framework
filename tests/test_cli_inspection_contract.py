@@ -33,6 +33,9 @@ def test_pipeline_log_level_is_reapplied_after_pipeline_initialization(monkeypat
         def run(self, *args, **kwargs):
             return None
 
+        def close(self):
+            return None
+
     import pipeline.orchestrator
     monkeypatch.setattr(pipeline.orchestrator, "Pipeline", FakePipeline)
     monkeypatch.setattr(sys, "argv", ["run_pipeline.py", "--log-level", "DEBUG"])

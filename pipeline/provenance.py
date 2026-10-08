@@ -33,6 +33,29 @@ CONFIG_SECTIONS = {
     "export": ("export",),
 }
 
+# These controls govern how a training run continues rather than what
+# checkpoint state is compatible with that run. They must not invalidate
+# deterministic checkpoint resume when intentionally changed.
+TRAIN_CONTINUATION_KEYS = {
+    "resume",
+    "total_steps",
+    "eval_every_steps",
+    "eval_batches",
+    "checkpoint_every_steps",
+    "keep_checkpoints",
+    "allow_cpu_training",
+    "auto_size",
+    "target_training_hours",
+    "observed_tokens_per_sec",
+}
+
+def training_compatibility_config(value: Any) -> dict[str, Any]:
+    """Return only training settings that define checkpoint compatibility."""
+    train = dict(value or {})
+    for key in TRAIN_CONTINUATION_KEYS:
+        train.pop(key, None)
+    return _semantic(train)
+
 
 def stable_hash(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
@@ -44,7 +67,10 @@ def config_identities(cfg: dict[str, Any], *, pipeline_sha256: str | None = None
     """Return independent immutable configuration identities for a run."""
     identities: dict[str, Any] = {}
     for name, sections in CONFIG_SECTIONS.items():
-        payload = {section: _semantic(cfg.get(section, {})) for section in sections}
+        if name == "train":
+            payload = {"train": training_compatibility_config(cfg.get("train", {}))}
+        else:
+            payload = {section: _semantic(cfg.get(section, {})) for section in sections}
         if name == "model":
             train = dict(payload.get("train") or {})
             payload["train"] = {

@@ -85,7 +85,8 @@ def test_torch_variant_matches_cuda_and_cpu(monkeypatch) -> None:
     assert bootstrap._torch_variant_matches("cpu")
 
 
-def test_torch_variant_matches_missing() -> None:
+def test_torch_variant_matches_missing(monkeypatch) -> None:
+    monkeypatch.setattr(bootstrap, "_installed_torch_version", lambda: None)
     assert not bootstrap._torch_variant_matches("cuda")
 
 

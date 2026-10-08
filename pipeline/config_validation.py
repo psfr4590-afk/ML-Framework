@@ -1,7 +1,7 @@
 """Strict configuration validation with actionable errors."""
 from __future__ import annotations
 
-QUANTS = {"F16", "Q4_K_M", "Q5_K_M", "Q8_0"}
+QUANTS = {"F16", "Q4_K_M", "Q5_K_M", "Q8_0", "ALL"}
 PRESETS = {"85M", "117M", "360M"}
 STAGES = {"crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"}
 SECTION_KEYS = {

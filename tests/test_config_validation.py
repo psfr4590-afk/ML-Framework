@@ -20,6 +20,12 @@ def test_smoke_config_is_validator_clean():
     validate_config(load_yaml(ROOT / "config" / "pipeline_config.smoke.yaml"))
 
 
+def test_export_all_quant_is_accepted():
+    cfg = load_yaml(ROOT / "config" / "pipeline_config.smoke.yaml")
+    cfg["export"]["quant"] = "ALL"
+    validate_config(cfg)
+
+
 def test_pipeline_level_model_preset_is_rejected():
     cfg = load_yaml(ROOT / "config" / "pipeline_config.yaml")
     cfg["pipeline"]["model_preset"] = "85M"

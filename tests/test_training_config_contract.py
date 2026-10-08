@@ -5,6 +5,7 @@ import torch
 import yaml
 
 from pipeline.trainer.model import LlamaModel, ModelConfig
+from pipeline.integrity import sha256_file
 from pipeline.trainer.train import best_checkpoint, latest_checkpoint, load_checkpoint, save_checkpoint, select_checkpoint
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,10 +31,32 @@ def test_checkpoint_retention_is_configurable_and_generation_knob_is_not_dead_co
 def test_latest_checkpoint_uses_highest_numeric_training_step(tmp_path):
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
-    for name in ("ckpt_0000010.pt", "ckpt_0000009.pt", "ckpt_best_0000099.pt", "ckpt_final_0000100.pt"):
+
+    for name in ("ckpt_0000010.pt", "ckpt_0000009.pt"):
         path = ckpt_dir / name
         path.write_bytes(b"checkpoint")
-        (ckpt_dir / f"{name}.manifest.json").write_text("{}", encoding="utf-8")
+        manifest = {
+            "kind": "checkpoint",
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+        (ckpt_dir / f"{name}.manifest.json").write_text(
+            json.dumps(manifest),
+            encoding="utf-8",
+        )
+
+    for name in ("ckpt_best_0000099.pt", "ckpt_final_0000100.pt"):
+        path = ckpt_dir / name
+        path.write_bytes(b"terminal")
+        manifest = {
+            "kind": "checkpoint",
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+        (ckpt_dir / f"{name}.manifest.json").write_text(
+            json.dumps(manifest),
+            encoding="utf-8",
+        )
 
     assert latest_checkpoint(ckpt_dir).name == "ckpt_0000010.pt"
 
@@ -89,12 +112,32 @@ def test_load_checkpoint_restores_model_optimizer_and_step(tmp_path):
 def test_resume_contract_uses_numbered_checkpoint_not_terminal_artifact(tmp_path):
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
+
     numbered = ckpt_dir / "ckpt_0000002.pt"
+    numbered.write_bytes(b"checkpoint")
+    manifest = {
+        "kind": "checkpoint",
+        "size": numbered.stat().st_size,
+        "sha256": sha256_file(numbered),
+    }
+    (ckpt_dir / f"{numbered.name}.manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+
     final = ckpt_dir / "ckpt_final_0000002.pt"
     best = ckpt_dir / "ckpt_best_0000002.pt"
-    for path in (numbered, final, best):
-        path.write_bytes(b"checkpoint")
-        (ckpt_dir / f"{path.name}.manifest.json").write_text("{}", encoding="utf-8")
+    for path in (final, best):
+        path.write_bytes(b"terminal")
+        manifest = {
+            "kind": "checkpoint",
+            "size": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+        (ckpt_dir / f"{path.name}.manifest.json").write_text(
+            json.dumps(manifest),
+            encoding="utf-8",
+        )
 
     selected = latest_checkpoint(ckpt_dir)
     assert selected == numbered

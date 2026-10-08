@@ -191,6 +191,8 @@ def main() -> int:
     except Exception as exc:
         print(f"\nPIPELINE FAILED: {type(exc).__name__}: {exc}")
         return 2
+    finally:
+        pipeline.close()
     return 0
 
 

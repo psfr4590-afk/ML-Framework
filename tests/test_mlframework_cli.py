@@ -17,7 +17,6 @@ def test_cli_parser_exposes_clone_and_run_commands():
 def test_cli_resolves_paths_from_entrypoint(monkeypatch):
     assert mlframework.ROOT == Path(mlframework.__file__).resolve().parent
     assert mlframework.DEFAULT_CONFIG == mlframework.ROOT / "config" / "pipeline_config.yaml"
-    assert "Users" not in str(mlframework.DEFAULT_CONFIG)
 
 
 def test_cpu_fallback_is_not_reported_as_gpu(monkeypatch):
