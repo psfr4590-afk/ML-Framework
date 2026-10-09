@@ -260,7 +260,7 @@ python scripts/verify_release.py --bootstrap-native
 The full RC gate can additionally exercise the UI/backend probe and clean-clone onboarding path:
 
 ```bash
-python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
+python scripts/verify_release.py --bootstrap-native --profile rc --ui-probe --clean-clone
 ```
 
 These commands are verification tools, not required steps for a newcomer who only wants to run the starter pipeline.
