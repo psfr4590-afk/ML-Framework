@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import tempfile
 import hashlib
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -497,15 +497,20 @@ def estimate_duration(
 
     tokens_per_step = batch_size * grad_accum_steps * seq_len
     training_seconds = total_steps * tokens_per_step / tokens_per_sec
-    eval_count = total_steps // eval_interval
-    checkpoint_count = total_steps // checkpoint_interval
+    scheduled_eval_count = total_steps // eval_interval
+    scheduled_checkpoint_count = total_steps // checkpoint_interval
+    # Trainer.run always performs a final evaluation and final checkpoint after
+    # the loop. A best-checkpoint save is also attempted after every scheduled
+    # evaluation, so count one checkpoint per evaluation as a conservative
+    # allowance for improving validation loss.
+    eval_count = scheduled_eval_count + 1
+    checkpoint_count = scheduled_checkpoint_count + eval_count + 1
 
     checkpoints = []
     evaluations = []
     elapsed_overhead = 0.0
     for step in range(1, total_steps + 1):
-        # The trainer evaluates before its scheduled checkpoint when both
-        # events fall on the same step, so keep the projected timeline aligned.
+        # The trainer evaluates before best/scheduled checkpoints at each step.
         if step % eval_interval == 0:
             elapsed_overhead += eval_seconds_value
             evaluations.append({
@@ -515,15 +520,44 @@ def estimate_duration(
                     3,
                 ),
             })
-        if step % checkpoint_interval == 0:
             elapsed_overhead += checkpoint_seconds_value
             checkpoints.append({
                 "step": step,
+                "kind": "best-checkpoint allowance",
                 "estimated_elapsed_seconds": round(
                     step * tokens_per_step / tokens_per_sec + elapsed_overhead,
                     3,
                 ),
             })
+        if step % checkpoint_interval == 0:
+            elapsed_overhead += checkpoint_seconds_value
+            checkpoints.append({
+                "step": step,
+                "kind": "scheduled",
+                "estimated_elapsed_seconds": round(
+                    step * tokens_per_step / tokens_per_sec + elapsed_overhead,
+                    3,
+                ),
+            })
+
+    # Final evaluation and final checkpoint always run after the loop, even
+    # when the final step is also an evaluation/checkpoint interval.
+    elapsed_overhead += eval_seconds_value
+    evaluations.append({
+        "step": total_steps,
+        "kind": "final",
+        "estimated_elapsed_seconds": round(
+            training_seconds + elapsed_overhead, 3,
+        ),
+    })
+    elapsed_overhead += checkpoint_seconds_value
+    checkpoints.append({
+        "step": total_steps,
+        "kind": "final",
+        "estimated_elapsed_seconds": round(
+            training_seconds + elapsed_overhead, 3,
+        ),
+    })
 
     total_seconds = (
         training_seconds
