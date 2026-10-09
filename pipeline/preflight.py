@@ -504,7 +504,7 @@ def estimate_duration(
     # evaluation, so count one checkpoint per evaluation as a conservative
     # allowance for improving validation loss.
     eval_count = scheduled_eval_count + 1
-    checkpoint_count = scheduled_checkpoint_count + eval_count + 1
+    checkpoint_count = scheduled_checkpoint_count + scheduled_eval_count + 1
 
     checkpoints = []
     evaluations = []
