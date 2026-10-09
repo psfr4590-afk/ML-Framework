@@ -471,8 +471,8 @@ def estimate_duration(
     eval_every_steps: int,
     eval_batches: int,
     checkpoint_every_steps: int,
-    checkpoint_seconds: float = 0.0,
-    eval_seconds: float = 0.0,
+    checkpoint_seconds: float | None = None,
+    eval_seconds: float | None = None,
 ) -> dict[str, Any]:
     if not tokens_per_sec or tokens_per_sec <= 0:
         return {"estimated_duration_seconds": None, "estimated_completion": None}
@@ -483,8 +483,17 @@ def estimate_duration(
     seq_len = max(1, int(seq_len))
     eval_interval = max(1, int(eval_every_steps))
     checkpoint_interval = max(1, int(checkpoint_every_steps))
-    eval_seconds = max(0.0, float(eval_seconds))
-    checkpoint_seconds = max(0.0, float(checkpoint_seconds))
+    missing_overhead_measurements = []
+    if eval_seconds is None:
+        missing_overhead_measurements.append("evaluation")
+        eval_seconds_value = 0.0
+    else:
+        eval_seconds_value = max(0.0, float(eval_seconds))
+    if checkpoint_seconds is None:
+        missing_overhead_measurements.append("checkpoint")
+        checkpoint_seconds_value = 0.0
+    else:
+        checkpoint_seconds_value = max(0.0, float(checkpoint_seconds))
 
     tokens_per_step = batch_size * grad_accum_steps * seq_len
     training_seconds = total_steps * tokens_per_step / tokens_per_sec
@@ -498,7 +507,7 @@ def estimate_duration(
         # The trainer evaluates before its scheduled checkpoint when both
         # events fall on the same step, so keep the projected timeline aligned.
         if step % eval_interval == 0:
-            elapsed_overhead += eval_seconds
+            elapsed_overhead += eval_seconds_value
             evaluations.append({
                 "step": step,
                 "estimated_elapsed_seconds": round(
@@ -507,7 +516,7 @@ def estimate_duration(
                 ),
             })
         if step % checkpoint_interval == 0:
-            elapsed_overhead += checkpoint_seconds
+            elapsed_overhead += checkpoint_seconds_value
             checkpoints.append({
                 "step": step,
                 "estimated_elapsed_seconds": round(
@@ -518,14 +527,18 @@ def estimate_duration(
 
     total_seconds = (
         training_seconds
-        + eval_count * eval_seconds
-        + checkpoint_count * checkpoint_seconds
+        + eval_count * eval_seconds_value
+        + checkpoint_count * checkpoint_seconds_value
     )
     return {
         "estimated_training_seconds": training_seconds,
         "estimated_duration_seconds": total_seconds,
         "estimated_eval_count": eval_count,
         "estimated_checkpoint_count": checkpoint_count,
+        "overhead_estimate_complete": not missing_overhead_measurements,
+        "missing_overhead_measurements": missing_overhead_measurements,
+        "estimated_eval_seconds_per_event": eval_seconds_value,
+        "estimated_checkpoint_seconds_per_event": checkpoint_seconds_value,
         "estimated_checkpoint_times": checkpoints,
         "estimated_eval_times": evaluations,
         "estimated_completion": time.time() + total_seconds,
