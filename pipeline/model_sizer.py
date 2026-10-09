@@ -214,7 +214,13 @@ def recommend_training_profile(
     hours = None
     if target_training_hours is not None and target_training_hours > 0 and observed_tokens_per_sec and observed_tokens_per_sec > 0:
         steps_for_target = int(target_training_hours * 3600 * observed_tokens_per_sec / tokens_per_step)
-        if steps_for_target > 0:
+        if steps_for_target < 1:
+            steps = min(steps, 1)
+            reasons.append(
+                "target duration is shorter than one training step; "
+                "minimum one step retained"
+            )
+        else:
             steps = min(steps, steps_for_target)
         hours = (steps * tokens_per_step) / observed_tokens_per_sec / 3600
     return TrainingProfile(
