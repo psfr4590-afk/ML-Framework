@@ -16,7 +16,7 @@ def test_release_docs_preserve_historical_bad_tag_and_define_next_candidate():
     data = (ROOT / "pyproject.toml").read_bytes()
     version = tomllib.loads(data.decode("utf-8"))["project"]["version"]
     docs = (ROOT / "docs" / "release" / "RELEASE_READINESS_PLAN.md").read_text(encoding="utf-8")
-    assert version == "1.3.0"
+    assert version == "1.3.0rc1"
     assert "v1.0.0-rc.1" in docs
     assert "v1.3.0-rc.1" in docs
     assert "must not be reused or force-moved" in docs
