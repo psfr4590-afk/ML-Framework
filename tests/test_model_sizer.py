@@ -76,3 +76,18 @@ def test_capability_matrix_contains_larger_models_and_contexts():
     assert ("117M", 1024) in candidates
     assert ("360M", 512) in candidates
     assert ("360M", 1024) in candidates
+
+def test_tiny_duration_target_retains_one_step_and_explains_limit():
+    hw = HardwareProfile("test", 8, 16.0, 1, 12.0, "test-gpu", True)
+    profile = recommend_training_profile(
+        hw,
+        configured_steps=100,
+        target_training_hours=0.000001,
+        observed_tokens_per_sec=1.0,
+    )
+    assert profile.recommended_steps == 1
+    assert profile.estimated_hours is not None
+    assert any(
+        "shorter than one training step" in reason
+        for reason in profile.decision_reasons
+    )
