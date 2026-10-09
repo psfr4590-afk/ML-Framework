@@ -39,8 +39,8 @@ def test_duration_estimate_records_live_schedule():
         checkpoint_every_steps=50,
     )
     assert estimate["estimated_duration_seconds"] is not None
-    assert len(estimate["estimated_checkpoint_times"]) == 2
-    assert len(estimate["estimated_eval_times"]) == 5
+    assert len([item for item in estimate["estimated_checkpoint_times"] if item.get("kind") == "scheduled"]) == 2
+    assert len([item for item in estimate["estimated_eval_times"] if item.get("kind") != "final"]) == 5
     assert estimate["estimated_completion"] is not None
 
 
