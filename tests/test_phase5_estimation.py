@@ -330,3 +330,43 @@ def test_capability_report_marks_verified_and_failed_results_with_architecture(m
     assert report["failed_combinations"] == 1
     assert report["results"][0]["architecture"]["d_model"] == 640
     assert report["results"][1]["viable"] is False
+
+def test_duration_counts_events_at_final_step():
+    estimate = estimate_duration(
+        total_steps=100,
+        batch_size=1,
+        grad_accum_steps=1,
+        seq_len=10,
+        tokens_per_sec=10.0,
+        eval_every_steps=20,
+        eval_batches=2,
+        checkpoint_every_steps=50,
+    )
+    assert estimate["estimated_eval_count"] == 5
+    assert estimate["estimated_checkpoint_count"] == 2
+    assert [item["step"] for item in estimate["estimated_eval_times"]] == [
+        20, 40, 60, 80, 100
+    ]
+    assert [item["step"] for item in estimate["estimated_checkpoint_times"]] == [
+        50, 100
+    ]
+
+
+def test_duration_milestones_include_configured_overhead_in_trainer_order():
+    estimate = estimate_duration(
+        total_steps=10,
+        batch_size=1,
+        grad_accum_steps=1,
+        seq_len=10,
+        tokens_per_sec=10.0,
+        eval_every_steps=5,
+        eval_batches=1,
+        checkpoint_every_steps=10,
+        eval_seconds=2.0,
+        checkpoint_seconds=3.0,
+    )
+    assert estimate["estimated_eval_count"] == 2
+    assert estimate["estimated_checkpoint_count"] == 1
+    assert estimate["estimated_eval_times"][-1]["estimated_elapsed_seconds"] == 14.0
+    assert estimate["estimated_checkpoint_times"][-1]["estimated_elapsed_seconds"] == 17.0
+    assert estimate["estimated_duration_seconds"] == 17.0
