@@ -30,7 +30,7 @@ This document defines the production-readiness contract for `main`. It distingui
 
 ## Release tag/version contract
 
-`pyproject.toml` is currently version `1.3.0`. The historical `v1.0.0-rc.1` tag does not match that metadata and is retained as a failed historical candidate. It must not be reused or force-moved. The next release candidate must use a matching tag, `v1.3.0-rc.1`, unless the project version is deliberately changed first. The release gate now validates the package version dynamically and the clean-clone gate verifies the exact approved commit instead of silently testing the default branch.
+`pyproject.toml` is version `1.3.0rc1` (PEP 440), matching the intended release-candidate tag `v1.3.0-rc.1`. The historical `v1.0.0-rc.1` tag is retained as a failed historical candidate and must not be reused or force-moved. Do not create or publish `v1.3.0-rc.1` until the required automated gates, native GGUF export/inference, target-hardware validation, and production-training evidence are complete. The release gate validates package version dynamically and the clean-clone gate verifies the exact approved commit instead of silently testing the default branch.
 
 ## Release commands
 
@@ -72,3 +72,19 @@ A release is approved only when every required automated gate is green and the n
 Missing evidence is a release-process failure, not an implicit pass.
 
 Historical reports remain historical records and must not be presented as current release evidence.
+
+
+## Open release blockers and closure evidence
+
+The source-level training-estimate integration calibrates validation-pass and checkpoint-write overhead during preflight. If either calibration fails, the estimate records the missing measurement explicitly rather than representing compute-only time as a complete estimate. Configuration may override the measured values with `estimated_eval_seconds` and `estimated_checkpoint_seconds` when operators have reliable measurements from the target environment.
+
+The following items cannot be closed by editing documentation or source code alone:
+
+- [ ] Exact-commit Linux and Windows CI jobs pass, including tests and coverage.
+- [ ] `python scripts/verify_release.py` passes on the approved commit.
+- [ ] `python scripts/verify_release.py --bootstrap-native` completes GGUF export, integrity checks, and native inference on the intended target.
+- [ ] Clean-clone acceptance succeeds for both Git clone and source ZIP installation paths.
+- [ ] A documented training run shows stable execution and evaluation evidence sufficient to assess convergence; a short smoke run is not convergence proof.
+- [ ] The release tag is created only after all required evidence above is retained.
+
+No checkbox may be marked complete without an attached run artifact or exact-commit CI result. A code change can close a code defect; it cannot manufacture hardware or convergence evidence.
