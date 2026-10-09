@@ -48,7 +48,7 @@ def test_project_metadata_declares_supported_python_and_cli():
     project = metadata["project"]
 
     assert project["name"] == "model-lab-framework"
-    assert project["version"] == "1.3.0"
+    assert project["version"] == "1.3.0rc1"
     assert project["requires-python"] == ">=3.11,<3.15"
     assert project["scripts"]["mlab"] == "run_pipeline:main"
 
