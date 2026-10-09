@@ -413,6 +413,16 @@ class Trainer:
                 eval_every_steps=int(t.get("eval_every_steps", 500)),
                 eval_batches=int(t.get("eval_batches", 20)),
                 checkpoint_every_steps=int(t.get("checkpoint_every_steps", 1000)),
+                eval_seconds=(
+                    float(t["estimated_eval_seconds"])
+                    if t.get("estimated_eval_seconds") is not None
+                    else preflight_result.eval_seconds_per_event
+                ),
+                checkpoint_seconds=(
+                    float(t["estimated_checkpoint_seconds"])
+                    if t.get("estimated_checkpoint_seconds") is not None
+                    else preflight_result.checkpoint_seconds_per_event
+                ),
             )
             capability_report = None
             if bool(preflight_cfg.get("capability_discovery", False)):
