@@ -111,25 +111,26 @@ def run_preflight(
             torch.cuda.synchronize()
             torch.cuda.reset_peak_memory_stats()
 
-        samples: list[float] = []
         started_bench = time.perf_counter()
         for _ in range(benchmark_steps):
             step_once()
             if device.type == "cuda":
                 torch.cuda.synchronize()
-            util = _gpu_utilization()
-            if util is not None:
-                samples.append(util)
         elapsed = max(time.perf_counter() - started_bench, 1e-9)
         tokens = benchmark_steps * batch_size * grad_accum * seq_len
         tok_s = tokens / elapsed
+
+        # Sample utilization after timing. Launching nvidia-smi inside the
+        # measured interval would contaminate throughput, especially for short
+        # benchmarks.
+        util = _gpu_utilization()
         peak = (torch.cuda.max_memory_allocated() / (1024**3)) if device.type == "cuda" else None
         return PreflightResult(
             viable=True,
             tokens_per_sec=tok_s,
             steps_per_sec=benchmark_steps / elapsed,
             peak_memory_gb=peak,
-            gpu_utilization_percent=(sum(samples) / len(samples)) if samples else None,
+            gpu_utilization_percent=util,
             benchmark_seconds=time.perf_counter() - started,
             warmup_steps=warmup_steps,
             benchmark_steps=benchmark_steps,
@@ -377,24 +378,51 @@ def estimate_duration(
 ) -> dict[str, Any]:
     if not tokens_per_sec or tokens_per_sec <= 0:
         return {"estimated_duration_seconds": None, "estimated_completion": None}
-    tokens = int(total_steps) * int(batch_size) * int(grad_accum_steps) * int(seq_len)
-    training_seconds = tokens / tokens_per_sec
-    eval_count = max(0, (int(total_steps) - 1) // max(1, int(eval_every_steps)))
-    checkpoint_count = max(0, (int(total_steps) - 1) // max(1, int(checkpoint_every_steps)))
-    total_seconds = training_seconds + eval_count * float(eval_seconds) + checkpoint_count * float(checkpoint_seconds)
+
+    total_steps = max(0, int(total_steps))
+    batch_size = max(1, int(batch_size))
+    grad_accum_steps = max(1, int(grad_accum_steps))
+    seq_len = max(1, int(seq_len))
+    eval_interval = max(1, int(eval_every_steps))
+    checkpoint_interval = max(1, int(checkpoint_every_steps))
+    eval_seconds = max(0.0, float(eval_seconds))
+    checkpoint_seconds = max(0.0, float(checkpoint_seconds))
+
+    tokens_per_step = batch_size * grad_accum_steps * seq_len
+    training_seconds = total_steps * tokens_per_step / tokens_per_sec
+    eval_count = total_steps // eval_interval
+    checkpoint_count = total_steps // checkpoint_interval
+
     checkpoints = []
     evaluations = []
-    for step in range(1, int(total_steps) + 1):
-        if step % max(1, int(checkpoint_every_steps)) == 0:
-            checkpoints.append({"step": step, "estimated_elapsed_seconds": round(
-                (step * int(batch_size) * int(grad_accum_steps) * int(seq_len)) / tokens_per_sec,
-                3,
-            )})
-        if step % max(1, int(eval_every_steps)) == 0:
-            evaluations.append({"step": step, "estimated_elapsed_seconds": round(
-                (step * int(batch_size) * int(grad_accum_steps) * int(seq_len)) / tokens_per_sec,
-                3,
-            )})
+    elapsed_overhead = 0.0
+    for step in range(1, total_steps + 1):
+        # The trainer evaluates before its scheduled checkpoint when both
+        # events fall on the same step, so keep the projected timeline aligned.
+        if step % eval_interval == 0:
+            elapsed_overhead += eval_seconds
+            evaluations.append({
+                "step": step,
+                "estimated_elapsed_seconds": round(
+                    step * tokens_per_step / tokens_per_sec + elapsed_overhead,
+                    3,
+                ),
+            })
+        if step % checkpoint_interval == 0:
+            elapsed_overhead += checkpoint_seconds
+            checkpoints.append({
+                "step": step,
+                "estimated_elapsed_seconds": round(
+                    step * tokens_per_step / tokens_per_sec + elapsed_overhead,
+                    3,
+                ),
+            })
+
+    total_seconds = (
+        training_seconds
+        + eval_count * eval_seconds
+        + checkpoint_count * checkpoint_seconds
+    )
     return {
         "estimated_training_seconds": training_seconds,
         "estimated_duration_seconds": total_seconds,
@@ -404,7 +432,6 @@ def estimate_duration(
         "estimated_eval_times": evaluations,
         "estimated_completion": time.time() + total_seconds,
     }
-
 
 def write_preflight_report(path: str | Path, payload: dict[str, Any]) -> None:
     target = Path(path)
