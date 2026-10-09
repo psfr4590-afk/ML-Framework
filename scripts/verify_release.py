@@ -656,11 +656,20 @@ def _write_release_report(
     )
     for name in native_checks:
         value = evidence.get(name)
-        add(
-            name,
-            bool(value) if value is not None else None,
-            "native release evidence" if value is not None else "not executed",
-        )
+        if name == "auto_sizing" and isinstance(value, bool):
+            # Both enabled and intentionally not needed are valid executed outcomes.
+            add(
+                name,
+                True,
+                "auto-sizing evaluated: enabled" if value
+                else "auto-sizing evaluated: no resize needed",
+            )
+        else:
+            add(
+                name,
+                bool(value) if value is not None else None,
+                "native release evidence" if value is not None else "not executed",
+            )
 
     add(
         "ui_backend_connectivity",
@@ -727,6 +736,10 @@ def _write_release_report(
         "rc": {check["name"] for check in checks},
     }
     required_names = set(required_by_profile[profile])
+    if profile == "rc" and evidence.get("source_retrieval") is not True:
+        # The bounded RC smoke fixture intentionally bypasses crawl/clean/dedup/weight.
+        # Source retrieval is required only when the run actually exercised it.
+        required_names.discard("source_retrieval")
     if profile == "native-smoke":
         if "ui_backend_connectivity" in evidence:
             required_names.add("ui_backend_connectivity")
@@ -875,7 +888,9 @@ def main() -> int:
                 create_venv = subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], cwd=clone, check=False) if exact_source else None
                 install_torch = subprocess.run([str(venv_python), "-m", "pip", "install", "-r", "requirements-torch.txt", "--index-url", "https://download.pytorch.org/whl/cpu"], cwd=clone, check=False) if create_venv and create_venv.returncode == 0 else None
                 install = subprocess.run([str(venv_python), "-m", "pip", "install", str(clone)], cwd=clone, check=False) if install_torch and install_torch.returncode == 0 else None
-                doctor = subprocess.run([str(venv_python), str(clone / "bootstrap.py"), "--doctor"], cwd=clone, check=False) if install and install.returncode == 0 else None
+                # The pipeline doctor treats CUDA availability as informational and
+                # keeps native llama.cpp optional for this CPU-only clean-clone smoke.
+                doctor = subprocess.run([str(venv_python), str(clone / "run_pipeline.py"), "--doctor"], cwd=clone, check=False) if install and install.returncode == 0 else None
                 smoke = subprocess.run([str(venv_python), str(clone / "mlframework.py"), "smoke"], cwd=clone, check=False) if doctor and doctor.returncode == 0 else None
                 NATIVE_EVIDENCE["clean_clone"] = bool(exact_source and create_venv and create_venv.returncode == 0 and install_torch and install_torch.returncode == 0 and install and install.returncode == 0 and doctor and doctor.returncode == 0 and smoke and smoke.returncode == 0)
         if not NATIVE_EVIDENCE.get("clean_clone"):

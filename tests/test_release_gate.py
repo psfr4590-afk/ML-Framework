@@ -83,6 +83,60 @@ def test_rc_report_fails_when_package_validation_fails(tmp_path, monkeypatch):
     assert statuses["package"] == "FAIL"
 
 
+
+def test_rc_report_accepts_auto_sizing_evaluated_false(tmp_path, monkeypatch):
+    _seed_report_environment(tmp_path, monkeypatch)
+    verify_release.NATIVE_EVIDENCE.clear()
+    verify_release.NATIVE_EVIDENCE.update({
+        "provenance": True, "lineage": True, "dataset": True,
+        "source_retrieval": None, "checkpoint": True, "best_checkpoint": True,
+        "reproducibility": True, "hardware": True, "auto_sizing": False,
+        "eta": True, "evaluation": True, "sqlite": True, "export": True,
+        "inference": True, "ui_backend_connectivity": True, "clean_clone": True,
+        "secrets": True, "package": True, "package_detail": "valid wheel fixture",
+    })
+
+    assert verify_release._write_release_report(
+        static_failures=[], native_requested=True, native_rc=0, profile="rc"
+    ) == 0
+    report = json.loads(
+        (tmp_path / "release-evidence" / "release_report.json").read_text(encoding="utf-8")
+    )
+    statuses = {item["name"]: item["status"] for item in report["checks"]}
+    assert statuses["auto_sizing"] == "PASS"
+    assert statuses["source_retrieval"] == "UNKNOWN"
+    assert "source_retrieval" not in report["required_checks"]
+
+
+def test_rc_source_retrieval_required_only_when_executed(tmp_path, monkeypatch):
+    _seed_report_environment(tmp_path, monkeypatch)
+    verify_release.NATIVE_EVIDENCE.clear()
+    verify_release.NATIVE_EVIDENCE.update({
+        "provenance": True, "lineage": True, "dataset": True,
+        "source_retrieval": None, "checkpoint": True, "best_checkpoint": True,
+        "reproducibility": True, "hardware": True, "auto_sizing": False,
+        "eta": True, "evaluation": True, "sqlite": True, "export": True,
+        "inference": True, "ui_backend_connectivity": True, "clean_clone": True,
+        "secrets": True, "package": True, "package_detail": "valid wheel fixture",
+    })
+
+    assert verify_release._write_release_report(
+        static_failures=[], native_requested=True, native_rc=0, profile="rc"
+    ) == 0
+    report_path = tmp_path / "release-evidence" / "release_report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert "source_retrieval" not in report["required_checks"]
+
+    verify_release.NATIVE_EVIDENCE["source_retrieval"] = True
+    assert verify_release._write_release_report(
+        static_failures=[], native_requested=True, native_rc=0, profile="rc"
+    ) == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert "source_retrieval" in report["required_checks"]
+    statuses = {item["name"]: item["status"] for item in report["checks"]}
+    assert statuses["source_retrieval"] == "PASS"
+
+
 def _mock_wheel_build(tmp_path, monkeypatch, fault=None):
     import zipfile
     from pathlib import Path
