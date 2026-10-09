@@ -342,12 +342,12 @@ def test_duration_counts_events_at_final_step():
         eval_batches=2,
         checkpoint_every_steps=50,
     )
-    assert estimate["estimated_eval_count"] == 5
-    assert estimate["estimated_checkpoint_count"] == 2
-    assert [item["step"] for item in estimate["estimated_eval_times"]] == [
+    assert estimate["estimated_eval_count"] == 6
+    assert estimate["estimated_checkpoint_count"] == 8
+    assert [item["step"] for item in estimate["estimated_eval_times"] if item.get("kind") != "final"] == [
         20, 40, 60, 80, 100
     ]
-    assert [item["step"] for item in estimate["estimated_checkpoint_times"]] == [
+    assert [item["step"] for item in estimate["estimated_checkpoint_times"] if item.get("kind") == "scheduled"] == [
         50, 100
     ]
 
@@ -365,11 +365,11 @@ def test_duration_milestones_include_configured_overhead_in_trainer_order():
         eval_seconds=2.0,
         checkpoint_seconds=3.0,
     )
-    assert estimate["estimated_eval_count"] == 2
-    assert estimate["estimated_checkpoint_count"] == 1
-    assert estimate["estimated_eval_times"][-1]["estimated_elapsed_seconds"] == 14.0
-    assert estimate["estimated_checkpoint_times"][-1]["estimated_elapsed_seconds"] == 17.0
-    assert estimate["estimated_duration_seconds"] == 17.0
+    assert estimate["estimated_eval_count"] == 3
+    assert estimate["estimated_checkpoint_count"] == 4
+    assert estimate["estimated_eval_times"][-1]["estimated_elapsed_seconds"] == 25.0
+    assert estimate["estimated_checkpoint_times"][-1]["estimated_elapsed_seconds"] == 28.0
+    assert estimate["estimated_duration_seconds"] == 28.0
 
 
 def test_duration_marks_missing_event_overhead_incomplete():
