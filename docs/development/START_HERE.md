@@ -157,7 +157,7 @@ python scripts/verify_release.py
 Full RC verification:
 
 ```bash
-python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
+python scripts/verify_release.py --bootstrap-native --profile rc --ui-probe --clean-clone
 ```
 
 See the [architecture guide](../architecture/ARCHITECTURE.md) for system design and the [release checklist](../release/RELEASE_CHECKLIST.md) for release-specific requirements.
