@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
+import hashlib
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -32,6 +34,8 @@ class PreflightResult:
     warmup_steps: int
     benchmark_steps: int
     failure: str | None = None
+    eval_seconds_per_event: float | None = None
+    checkpoint_seconds_per_event: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +66,81 @@ def _make_model(train_cfg: dict[str, Any]) -> LlamaModel:
     cfg.seq_len = int(train_cfg.get("seq_len", 256))
     cfg.dropout = float(train_cfg.get("dropout", 0.0))
     return LlamaModel(cfg)
+
+
+
+def _benchmark_eval_seconds(
+    train_cfg: dict[str, Any],
+    shard_dir: str | Path,
+    model: LlamaModel,
+    device: torch.device,
+    *,
+    batch_size: int,
+    seq_len: int,
+    dtype: Any,
+) -> float:
+    """Measure one configured validation pass on real validation shards."""
+    batches = max(1, int(train_cfg.get("eval_batches", 20)))
+    loader = ShardDataLoader(
+        shard_dir, "val", seq_len, dtype=dtype, seed=int(train_cfg.get("seed", 42))
+    )
+    model.eval()
+    started = time.perf_counter()
+    try:
+        with torch.no_grad():
+            for _ in range(batches):
+                x, y = loader.next_batch(batch_size)
+                x, y = x.to(device), y.to(device)
+                with torch.autocast(
+                    device_type=device.type,
+                    dtype=torch.float16,
+                    enabled=(device.type == "cuda"),
+                ):
+                    model(x, y)
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+        return max(0.0, time.perf_counter() - started)
+    finally:
+        model.train()
+
+
+def _benchmark_checkpoint_seconds(
+    model: LlamaModel,
+    optimizer: torch.optim.Optimizer,
+    scaler: Any,
+    shard_dir: str | Path,
+) -> float:
+    """Measure checkpoint serialization, disk write, hashing, and manifest write."""
+    checkpoint_path: Path | None = None
+    manifest_path: Path | None = None
+    started = time.perf_counter()
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=".mlframework-preflight-", suffix=".pt",
+            dir=shard_dir, delete=False,
+        ) as handle:
+            checkpoint_path = Path(handle.name)
+        manifest_path = checkpoint_path.with_name(checkpoint_path.name + ".manifest.json")
+        torch.save({
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scaler": scaler.state_dict(),
+        }, checkpoint_path)
+        digest = hashlib.sha256()
+        with checkpoint_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        manifest_path.write_text(json.dumps({
+            "kind": "preflight-checkpoint",
+            "size": checkpoint_path.stat().st_size,
+            "sha256": digest.hexdigest(),
+        }, sort_keys=True), encoding="utf-8")
+        return max(0.0, time.perf_counter() - started)
+    finally:
+        if checkpoint_path is not None:
+            checkpoint_path.unlink(missing_ok=True)
+        if manifest_path is not None:
+            manifest_path.unlink(missing_ok=True)
 
 
 def run_preflight(
@@ -125,6 +204,23 @@ def run_preflight(
         # benchmarks.
         util = _gpu_utilization()
         peak = (torch.cuda.max_memory_allocated() / (1024**3)) if device.type == "cuda" else None
+        eval_seconds = None
+        checkpoint_seconds = None
+        try:
+            eval_seconds = _benchmark_eval_seconds(
+                train_cfg, shard_dir, model, device,
+                batch_size=batch_size, seq_len=seq_len, dtype=dtype,
+            )
+        except (RuntimeError, OSError, ValueError, TypeError):
+            # Throughput viability is independent of whether overhead calibration succeeds.
+            pass
+        try:
+            checkpoint_seconds = _benchmark_checkpoint_seconds(
+                model, optimizer, scaler, shard_dir,
+            )
+        except (RuntimeError, OSError, ValueError, TypeError):
+            # Report missing checkpoint calibration rather than rejecting a viable model.
+            pass
         return PreflightResult(
             viable=True,
             tokens_per_sec=tok_s,
@@ -134,6 +230,8 @@ def run_preflight(
             benchmark_seconds=time.perf_counter() - started,
             warmup_steps=warmup_steps,
             benchmark_steps=benchmark_steps,
+            eval_seconds_per_event=eval_seconds,
+            checkpoint_seconds_per_event=checkpoint_seconds,
         )
     except (RuntimeError, OSError, ValueError, TypeError) as exc:
         if device.type == "cuda" and "out of memory" in str(exc).lower():
