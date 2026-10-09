@@ -370,3 +370,61 @@ def test_duration_milestones_include_configured_overhead_in_trainer_order():
     assert estimate["estimated_eval_times"][-1]["estimated_elapsed_seconds"] == 14.0
     assert estimate["estimated_checkpoint_times"][-1]["estimated_elapsed_seconds"] == 17.0
     assert estimate["estimated_duration_seconds"] == 17.0
+
+
+def test_duration_marks_missing_event_overhead_incomplete():
+    estimate = estimate_duration(
+        total_steps=10,
+        batch_size=1,
+        grad_accum_steps=1,
+        seq_len=10,
+        tokens_per_sec=10.0,
+        eval_every_steps=5,
+        eval_batches=1,
+        checkpoint_every_steps=10,
+    )
+    assert estimate["overhead_estimate_complete"] is False
+    assert estimate["missing_overhead_measurements"] == ["evaluation", "checkpoint"]
+
+
+def test_preflight_calibrates_evaluation_and_checkpoint_overhead(monkeypatch, tmp_path):
+    import torch
+    from types import SimpleNamespace
+    from pipeline import preflight
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(1))
+            self.cfg = SimpleNamespace(seq_len=4)
+
+        def forward(self, x, y):
+            return None, self.weight.square() + (x.float().mean() - y.float().mean()) * 0
+
+    class TinyLoader:
+        def __init__(self, _directory, _split, seq_len, **_kwargs):
+            self.seq_len = seq_len
+
+        def next_batch(self, batch_size):
+            values = torch.ones((batch_size, self.seq_len), dtype=torch.long)
+            return values, values
+
+    monkeypatch.setattr(preflight, "_make_model", lambda _cfg: TinyModel())
+    monkeypatch.setattr(preflight, "ShardDataLoader", TinyLoader)
+    result = preflight.run_preflight(
+        {
+            "seq_len": 4,
+            "batch_size": 1,
+            "grad_accum_steps": 1,
+            "eval_batches": 1,
+            "shard_dtype": "uint16",
+        },
+        tmp_path,
+        warmup_steps=0,
+        benchmark_steps=1,
+    )
+    assert result.viable is True
+    assert result.eval_seconds_per_event is not None
+    assert result.eval_seconds_per_event >= 0
+    assert result.checkpoint_seconds_per_event is not None
+    assert result.checkpoint_seconds_per_event > 0
