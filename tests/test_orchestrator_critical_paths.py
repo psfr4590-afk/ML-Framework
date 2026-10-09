@@ -357,3 +357,134 @@ def test_pipeline_run_records_failed_status_when_stage_raises(tmp_path, monkeypa
     assert manifest_path.is_file()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest.get("final_status") == "FAILED"
+
+def test_offline_crawl_clean_dedup_weight_vertical_slice(
+    pipeline_env, monkeypatch
+):
+    """Exercise crawl -> clean -> dedup -> weight without network access."""
+    import pipeline.orchestrator as orchestrator
+    from pipeline.types import Document
+
+    pl, out_dir, scratch_dir = pipeline_env
+    pl._resume = False
+
+    # Enable one synthetic seed so stage_crawl invokes the fake crawler.
+    crawl_cfg = pl.cfg.setdefault("crawl", {})
+    web_cfg = dict(crawl_cfg.get("web", {}))
+    web_cfg["seed_urls"] = ["https://example.invalid/offline-fixture"]
+    crawl_cfg["web"] = web_cfg
+
+    monkeypatch.setattr(
+        pl,
+        "_load_dataset_groups",
+        lambda: [{
+            "id": "swe_cs_systems",
+            "name": "offline integration fixture",
+            "sources": {
+                "web": True,
+                "github": False,
+                "arxiv": False,
+                "huggingface": False,
+                "google": False,
+            },
+        }],
+    )
+
+    base_text = (
+        "This deterministic integration fixture describes a software system, "
+        "its configuration, validation rules, data processing, and test results. "
+        "It contains enough ordinary technical prose to pass the production "
+        "cleaner's minimum-length requirement without triggering refusal filters. "
+        "The pipeline should preserve this content and its artifact provenance."
+    )
+    alternate_text = base_text.replace("deterministic", "Deterministic", 1)
+
+    class FakeCrawler:
+        def __init__(self, config, weights, signals):
+            self.stats = {"errors": 0, "skipped": 0}
+
+        def crawl(self):
+            yield Document(
+                doc_id="offline-doc-1",
+                url="https://example.invalid/fixture/1",
+                source="web",
+                title="Offline fixture one",
+                text=base_text,
+                meta={},
+            )
+            yield Document(
+                doc_id="offline-doc-2",
+                url="https://example.invalid/fixture/2",
+                source="web",
+                title="Offline fixture two",
+                text=alternate_text,
+                meta={},
+            )
+
+        def observability(self):
+            return {
+                "request_count": 1,
+                "document_count": 2,
+                "rate_limited": 0,
+                "revisions": [],
+                "licenses": [],
+                "source_hash": "offline-test-source",
+            }
+
+    class PassThroughDeduplicator:
+        def __init__(self, config):
+            self.stats = {"dropped": 0}
+
+        def stream(self, docs, buffer_size=10000):
+            yield from docs
+
+    original_load_class = orchestrator._load_class
+
+    def offline_load_class(module, name):
+        if module == "pipeline.crawler.web_crawler":
+            return FakeCrawler
+        if module == "pipeline.embedder.semantic_dedup":
+            return PassThroughDeduplicator
+        return original_load_class(module, name)
+
+    monkeypatch.setattr(orchestrator, "_load_class", offline_load_class)
+
+    crawled = pl.stage_crawl()
+    assert crawled.is_file()
+    assert crawled.with_name(crawled.name + ".manifest.json").is_file()
+
+    def read_records(path):
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+
+    crawled_records = read_records(crawled)
+    assert len(crawled_records) == 2
+
+    cleaned = pl.stage_clean(crawled)
+    assert cleaned.is_file()
+    assert cleaned.with_name(cleaned.name + ".manifest.json").is_file()
+
+    cleaned_records = read_records(cleaned)
+    assert len(cleaned_records) == 2
+
+    deduped = pl.stage_embed_dedup(cleaned)
+    assert deduped.is_file()
+    assert deduped.with_name(deduped.name + ".manifest.json").is_file()
+
+    deduped_records = read_records(deduped)
+    assert len(deduped_records) == 1
+
+    weighted = pl.stage_weight(deduped)
+    assert weighted.is_file()
+    assert weighted.with_name(weighted.name + ".manifest.json").is_file()
+
+    weighted_records = read_records(weighted)
+    assert weighted_records
+    assert all("final_weight" in record for record in weighted_records)
+
+    for artifact in (crawled, cleaned, deduped, weighted):
+        manifest_path = artifact.with_name(artifact.name + ".manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest.get("rows", 0) >= 1

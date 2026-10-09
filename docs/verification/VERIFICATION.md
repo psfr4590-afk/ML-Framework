@@ -17,10 +17,10 @@ This runs compilation, Ruff, pytest with coverage reporting, the project/runtime
 Run the native gate on the machine intended to perform export/inference:
 
 ```bash
-python scripts/verify_release.py --bootstrap-native --ui-probe --clean-clone
+python scripts/verify_release.py --bootstrap-native --profile rc --ui-probe --clean-clone
 ```
 
-The native gate exercises the deterministic local fixture, export integrity, native llama.cpp inference, UI/backend connectivity, and the documented clean-clone path. Its machine-readable result is written to `release-evidence/release_report.json`.
+The native gate exercises the deterministic local fixture, export integrity, native llama.cpp inference, UI/backend connectivity, and the documented clean-clone path. `--profile rc` enforces the full RC acceptance criteria and requires `--ui-probe` and `--clean-clone`. Its machine-readable result is written to `release-evidence/release_report.json`.
 
 ## Windows checks
 
