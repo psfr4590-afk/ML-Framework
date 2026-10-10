@@ -16,11 +16,18 @@ if (-not (Test-Path (Join-Path $Target ".git"))) {
     New-Item -ItemType Directory -Force -Path (Split-Path $Target) | Out-Null
 
     git clone --depth 1 --branch $Tag $Repo $Target
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama.cpp clone failed with exit code $LASTEXITCODE"
+    }
 }
 
 Set-Location $Target
 
-$Actual = (git rev-parse HEAD).Trim()
+$Actual = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to read the llama.cpp checkout commit"
+}
+$Actual = $Actual.Trim()
 
 if (-not $Actual.StartsWith($Commit)) {
     throw "llama.cpp pin mismatch: expected $Commit got $Actual"
@@ -50,13 +57,27 @@ $Args = @(
 )
 
 cmake @Args
+if ($LASTEXITCODE -ne 0) {
+    throw "CMake configuration failed with exit code $LASTEXITCODE"
+}
 
-Write-Host "`n=== BUILDING NATIVE ARTIFACTS ===" -ForegroundColor Cyan
+Write-Host "`n=== BUILDING LLAMA-QUANTIZE ===" -ForegroundColor Cyan
 
-cmake --build $Build `
-    --config Release `
-    --target llama-quantize llama-cli `
-    --parallel
+# Clean the generated build outputs first so a failed build cannot be
+# mistaken for success merely because an older executable is still present.
+cmake --build $Build --config Release --target llama-quantize --clean-first --parallel
+if ($LASTEXITCODE -ne 0) {
+    throw "llama-quantize build failed with exit code $LASTEXITCODE"
+}
+
+Write-Host "`n=== BUILDING LLAMA-CLI ===" -ForegroundColor Cyan
+
+# Build the targets separately. This also avoids relying on a multi-target
+# Visual Studio/MSBuild invocation that can fail to resolve a target project.
+cmake --build $Build --config Release --target llama-cli --parallel
+if ($LASTEXITCODE -ne 0) {
+    throw "llama-cli build failed with exit code $LASTEXITCODE"
+}
 
 $Quant = Get-ChildItem -Path $Build `
     -Recurse `
@@ -71,11 +92,11 @@ $Cli = Get-ChildItem -Path $Build `
     Select-Object -First 1
 
 if (-not $Quant) {
-    throw "llama-quantize.exe was not built"
+    throw "llama-quantize.exe was not produced by the successful build"
 }
 
 if (-not $Cli) {
-    throw "llama-cli.exe was not built"
+    throw "llama-cli.exe was not produced by the successful build"
 }
 
 Write-Host "`n=== LLAMA.CPP READY ===" -ForegroundColor Green
