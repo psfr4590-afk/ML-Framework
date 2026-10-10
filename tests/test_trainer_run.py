@@ -126,6 +126,57 @@ def tiny_training(monkeypatch):
     )
 
 
+def test_auto_sizing_respects_shard_sequence_length(
+    tmp_path, tiny_training, monkeypatch
+):
+    shard_dir = _make_shards(tmp_path, seq_len=128)
+    captured = {}
+
+    class Profile:
+        model_preset = "85M"
+        seq_len = 128
+        batch_size = 1
+        grad_accum_steps = 1
+        eval_batches = 1
+        eval_every_steps = 1
+        checkpoint_every_steps = 1
+        recommended_steps = 1
+
+        def to_dict(self):
+            return {"name": "cpu-safe", "seq_len": self.seq_len}
+
+    def fake_recommend_training_profile(hardware, **kwargs):
+        captured.update(kwargs)
+        assert kwargs["max_seq_len"] == 128
+        return Profile()
+
+    monkeypatch.setattr(
+        train_module,
+        "recommend_training_profile",
+        fake_recommend_training_profile,
+    )
+    monkeypatch.setattr(
+        train_module,
+        "estimate_total_tokens",
+        lambda _shard_dir: 256,
+    )
+
+    cfg = _tiny_cfg(
+        tmp_path,
+        shard_dir,
+        auto_size=True,
+        seq_len=128,
+        total_steps=1,
+    )
+    cfg["shard"]["sequence_length"] = 128
+
+    trainer = train_module.Trainer(cfg)
+    trainer.run()
+
+    assert captured["max_seq_len"] == 128
+    assert trainer.t_cfg["seq_len"] == 128
+
+
 def test_trainer_run_completes_and_writes_final_checkpoint(
     tmp_path, tiny_training
 ):

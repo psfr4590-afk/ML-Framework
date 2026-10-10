@@ -376,6 +376,11 @@ class Trainer:
                 configured_steps=int(t.get("total_steps", 100_000)),
                 target_training_hours=float(t["target_training_hours"]) if t.get("target_training_hours") is not None else None,
                 observed_tokens_per_sec=float(t["observed_tokens_per_sec"]) if t.get("observed_tokens_per_sec") is not None else None,
+                max_seq_len=(
+                    int(self.cfg["shard"]["sequence_length"])
+                    if self.cfg.get("shard", {}).get("sequence_length") is not None
+                    else None
+                ),
             )
             t.update({
                 "model_preset": profile.model_preset,
