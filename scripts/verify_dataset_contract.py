@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from pipeline.dataset_contract import validate_dataset_contract
+from pipeline.dataset_contract import validate_dataset_contract  # noqa: E402
 
 
 def main() -> int:

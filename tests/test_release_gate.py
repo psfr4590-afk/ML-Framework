@@ -144,19 +144,19 @@ def _mock_wheel_build(tmp_path, monkeypatch, fault=None):
 
     monkeypatch.setattr(verify_release, "ROOT", tmp_path)
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "model-lab-framework"\nversion = "1.3.0"\n',
+        '[project]\nname = "model-lab-framework"\nversion = "1.3.0rc1"\n',
         encoding="utf-8",
     )
 
     def fake_run(command, cwd, capture_output, text, check):
         wheel_dir = Path(command[command.index("--wheel-dir") + 1])
         wheel_dir.mkdir(parents=True, exist_ok=True)
-        wheel = wheel_dir / "model_lab_framework-1.3.0-py3-none-any.whl"
+        wheel = wheel_dir / "model_lab_framework-1.3.0rc1-py3-none-any.whl"
         if fault == "corrupt":
             wheel.write_bytes(b"not a zip archive")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        version = "9.9.9" if fault == "wrong_version" else "1.3.0"
+        version = "9.9.9" if fault == "wrong_version" else "1.3.0rc1"
         modules = [
             "run_pipeline.py", "mlframework.py", "run_command_center.py", "launch.py",
         ]
@@ -165,16 +165,16 @@ def _mock_wheel_build(tmp_path, monkeypatch, fault=None):
 
         with zipfile.ZipFile(wheel, "w") as archive:
             archive.writestr(
-                "model_lab_framework-1.3.0.dist-info/METADATA",
+                "model_lab_framework-1.3.0rc1.dist-info/METADATA",
                 f"Metadata-Version: 2.1\nName: model-lab-framework\nVersion: {version}\n\n",
             )
             archive.writestr(
-                "model_lab_framework-1.3.0.dist-info/WHEEL",
+                "model_lab_framework-1.3.0rc1.dist-info/WHEEL",
                 "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
             )
-            archive.writestr("model_lab_framework-1.3.0.dist-info/RECORD", "")
+            archive.writestr("model_lab_framework-1.3.0rc1.dist-info/RECORD", "")
             archive.writestr(
-                "model_lab_framework-1.3.0.dist-info/entry_points.txt",
+                "model_lab_framework-1.3.0rc1.dist-info/entry_points.txt",
                 "[console_scripts]\n"
                 "mlab = run_pipeline:main\n"
                 "mlframework = mlframework:main\n"
@@ -193,7 +193,7 @@ def test_build_and_validate_wheel_accepts_valid_wheel(tmp_path, monkeypatch):
     _mock_wheel_build(tmp_path, monkeypatch)
     ok, detail = verify_release._build_and_validate_wheel()
     assert ok is True
-    assert "Validated model_lab_framework-1.3.0-py3-none-any.whl" in detail
+    assert "Validated model_lab_framework-1.3.0rc1-py3-none-any.whl" in detail
 
 
 def test_build_and_validate_wheel_rejects_missing_module(tmp_path, monkeypatch):

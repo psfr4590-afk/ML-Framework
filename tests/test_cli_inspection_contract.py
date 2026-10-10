@@ -69,7 +69,7 @@ def test_version_is_stable_and_does_not_start_pipeline(monkeypatch, capsys):
     else:
         raise AssertionError("--version should terminate through argparse")
 
-    assert capsys.readouterr().out.strip() == "Model Lab 1.3.0"
+    assert capsys.readouterr().out.strip() == "Model Lab 1.3.0rc1"
 
 
 def test_hardware_report_requires_doctor(monkeypatch, capsys):
@@ -90,7 +90,7 @@ def test_help_exposes_canonical_examples(monkeypatch, capsys):
         raise AssertionError("--help should terminate through argparse")
 
     output = capsys.readouterr().out
-    assert "Model Lab 1.3.0" in output
+    assert "Model Lab 1.3.0rc1" in output
     assert "--no-resume" in output
     assert "python run_pipeline.py --doctor" in output
     assert "mlab --help" in output

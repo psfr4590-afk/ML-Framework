@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Evaluate a trained Model Lab checkpoint and write quantitative/qualitative evidence."""
 from __future__ import annotations
-import argparse, hashlib, json, math, random, re, time
+import argparse
+import hashlib
+import json
+import math
+import random
+import re
+import time
 from pathlib import Path
 from typing import Any
 import numpy as np

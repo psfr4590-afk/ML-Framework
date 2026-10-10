@@ -21,8 +21,10 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from pipeline.version import get_version  # noqa: E402
+
 STAGES = ["crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"]
-VERSION = "1.3.0"
+VERSION = get_version()
 DEFAULT_CONFIG = "config/pipeline_config.yaml"
 DATASET_SESSION_CONFIG = "config/pipeline_config.dataset.yaml"
 
@@ -54,7 +56,7 @@ def _parse_requested_stages(value: str) -> tuple[str, list[str] | None]:
 
 def _build_parser() -> argparse.ArgumentParser:
     return argparse.ArgumentParser(
-        description="Model Lab 1.3.0: local-first data and pretraining pipeline.",
+        description=f"Model Lab {VERSION}: local-first data and pretraining pipeline.",
         epilog=(
             "Examples:\n"
             "  python run_pipeline.py --doctor\n"

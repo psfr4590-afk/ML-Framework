@@ -821,6 +821,8 @@ def main() -> int:
         parser.error(f"--profile {profile} requires --bootstrap-native")
     if profile == "static" and args.bootstrap_native:
         parser.error("--profile static cannot be combined with --bootstrap-native")
+    if args.clean_clone and not args.bootstrap_native:
+        parser.error("--clean-clone requires --bootstrap-native")
     if profile == "rc" and not args.ui_probe:
         parser.error("--profile rc requires --ui-probe")
     if profile == "rc" and not args.clean_clone:
@@ -839,6 +841,8 @@ def main() -> int:
         return 2
     if args.ui_probe:
         NATIVE_EVIDENCE["ui_backend_connectivity"] = _ui_probe()
+        if not NATIVE_EVIDENCE["ui_backend_connectivity"]:
+            failures.append("ui-backend")
     security_rc = run([sys.executable, "scripts/security_gate.py"])
     NATIVE_EVIDENCE["secrets"] = security_rc == 0
     if security_rc:
@@ -895,7 +899,9 @@ def main() -> int:
                 NATIVE_EVIDENCE["clean_clone"] = bool(exact_source and create_venv and create_venv.returncode == 0 and install_torch and install_torch.returncode == 0 and install and install.returncode == 0 and doctor and doctor.returncode == 0 and smoke and smoke.returncode == 0)
         if not NATIVE_EVIDENCE.get("clean_clone"):
             failures.append("clean-clone")
-    if args.ui_probe and not NATIVE_EVIDENCE.get("ui_backend_connectivity"):
+    if (args.ui_probe
+            and not NATIVE_EVIDENCE.get("ui_backend_connectivity")
+            and "ui-backend" not in failures):
         failures.append("ui-backend")
     if profile == "rc":
         package_ok, package_detail = _build_and_validate_wheel()

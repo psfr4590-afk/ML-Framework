@@ -13,6 +13,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from pipeline.version import get_version
+
 from .runner import stop
 from .config import ROOT
 from pipeline.experiment_db import ExperimentDB
@@ -57,7 +59,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="M²S Model Training Pipeline", version="1.3.0", lifespan=lifespan)
+app = FastAPI(title="M²S Model Training Pipeline", version=get_version(), lifespan=lifespan)
 app.add_middleware(LocalhostOnlyMiddleware)
 
 
@@ -153,7 +155,7 @@ refresh();setInterval(refresh,2500);
 
 @app.get("/api/system")
 def system():
-    return {"application":"M²S Model Training Pipeline","version":"1.3.0","platform":sys.platform,"python":sys.version.split()[0],"machine":platform.machine(),"stages":list(store.STAGES) if hasattr(store,"STAGES") else ["crawl","clean","dedup","weight","tokenize","shard","train","export"],"security":{"api_access":"localhost-only","mutation_control":"custom-header"}}
+    return {"application":"M²S Model Training Pipeline","version":app.version,"platform":sys.platform,"python":sys.version.split()[0],"machine":platform.machine(),"stages":list(store.STAGES) if hasattr(store,"STAGES") else ["crawl","clean","dedup","weight","tokenize","shard","train","export"],"security":{"api_access":"localhost-only","mutation_control":"custom-header"}}
 
 
 
