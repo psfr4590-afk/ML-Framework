@@ -65,7 +65,7 @@ Write-Host "`n=== BUILDING LLAMA-QUANTIZE ===" -ForegroundColor Cyan
 
 # Clean the generated build outputs first so a failed build cannot be
 # mistaken for success merely because an older executable is still present.
-cmake --build $Build --config Release --target llama-quantize --clean-first --parallel
+cmake --build $Build --config Release --target llama-quantize --clean-first --parallel 2
 if ($LASTEXITCODE -ne 0) {
     throw "llama-quantize build failed with exit code $LASTEXITCODE"
 }
@@ -74,7 +74,7 @@ Write-Host "`n=== BUILDING LLAMA-CLI ===" -ForegroundColor Cyan
 
 # Build the targets separately. This also avoids relying on a multi-target
 # Visual Studio/MSBuild invocation that can fail to resolve a target project.
-cmake --build $Build --config Release --target llama-cli --parallel
+cmake --build $Build --config Release --target llama-cli --parallel 2
 if ($LASTEXITCODE -ne 0) {
     throw "llama-cli build failed with exit code $LASTEXITCODE"
 }
