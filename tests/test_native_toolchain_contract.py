@@ -60,3 +60,12 @@ def test_native_doctor_accepts_pinned_revision(monkeypatch, tmp_path):
     assert ok
     assert "b10516" in detail
     assert "b95502b" in detail
+
+
+def test_windows_native_bootstrap_resolves_nested_visual_studio_cli_project():
+    source = (ROOT / "scripts" / "bootstrap_llama_cpp.ps1").read_text(encoding="utf-8-sig")
+    assert 'CMAKE_GENERATOR:INTERNAL=' in source
+    assert 'llama-cli.vcxproj' in source
+    assert 'Microsoft.Component.MSBuild' in source
+    assert '$CliProject.FullName' in source
+    assert 'llama-cli MSBuild failed' in source

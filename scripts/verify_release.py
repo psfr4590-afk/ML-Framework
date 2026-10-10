@@ -591,10 +591,33 @@ def _build_and_validate_wheel() -> tuple[bool, str]:
                     "mlframework.py",
                     "run_command_center.py",
                     "launch.py",
+                    "scripts/__init__.py",
+                    "scripts/export_gguf.py",
+                    "scripts/export_cards.py",
                 }
                 missing = required_modules - names
                 if missing:
                     return False, f"Missing wheel modules: {sorted(missing)}"
+
+                required_config = {
+                    "config/__init__.py",
+                    "config/pipeline_config.yaml",
+                    "config/pipeline_config.dataset.yaml",
+                    "config/pipeline_config.full.yaml",
+                    "config/pipeline_config.smoke.yaml",
+                    "config/dataset_groups.yaml",
+                    "config/dataset_groups.smoke.yaml",
+                    "config/dataset_profiles.yaml",
+                    "config/dataset_source_policy.yaml",
+                    "config/source_weights.yaml",
+                    "config/cleaner_config.yaml",
+                    "config/seed_urls.txt",
+                }
+                missing_config = required_config - names
+                if missing_config:
+                    return False, (
+                        f"Missing wheel configuration assets: {sorted(missing_config)}"
+                    )
 
                 parser = configparser.ConfigParser()
                 parser.read_string(

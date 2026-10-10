@@ -16,11 +16,18 @@ if (-not (Test-Path (Join-Path $Target ".git"))) {
     New-Item -ItemType Directory -Force -Path (Split-Path $Target) | Out-Null
 
     git clone --depth 1 --branch $Tag $Repo $Target
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama.cpp clone failed with exit code $LASTEXITCODE"
+    }
 }
 
 Set-Location $Target
 
-$Actual = (git rev-parse HEAD).Trim()
+$Actual = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to read the llama.cpp checkout commit"
+}
+$Actual = $Actual.Trim()
 
 if (-not $Actual.StartsWith($Commit)) {
     throw "llama.cpp pin mismatch: expected $Commit got $Actual"
@@ -50,14 +57,61 @@ $Args = @(
 )
 
 cmake @Args
+if ($LASTEXITCODE -ne 0) {
+    throw "CMake configuration failed with exit code $LASTEXITCODE"
+}
 
-Write-Host "`n=== BUILDING NATIVE ARTIFACTS ===" -ForegroundColor Cyan
+Write-Host "`n=== BUILDING LLAMA-QUANTIZE ===" -ForegroundColor Cyan
 
-cmake --build $Build `
-    --config Release `
-    --target llama-quantize llama-cli `
-    --parallel
+# Clean the generated build outputs first so a failed build cannot be
+# mistaken for success merely because an older executable is still present.
+cmake --build $Build --config Release --target llama-quantize --clean-first --parallel 2
+if ($LASTEXITCODE -ne 0) {
+    throw "llama-quantize build failed with exit code $LASTEXITCODE"
+}
 
+Write-Host "`n=== BUILDING LLAMA-CLI ===" -ForegroundColor Cyan
+
+$CachePath = Join-Path $Build "CMakeCache.txt"
+$GeneratorLine = Get-Content $CachePath |
+    Where-Object { $_ -match "^CMAKE_GENERATOR:INTERNAL=" } |
+    Select-Object -First 1
+
+if ($GeneratorLine -match "Visual Studio") {
+    $CliProject = Get-ChildItem -Path $Build -Recurse -File -Filter "llama-cli.vcxproj" |
+        Select-Object -First 1
+
+    if (-not $CliProject) {
+        throw "Visual Studio build is missing the generated llama-cli.vcxproj"
+    }
+
+    $VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $VsWhere)) {
+        throw "Cannot locate Visual Studio vswhere.exe to resolve MSBuild"
+    }
+
+    $MsBuild = & $VsWhere -latest -products "*" `
+        -requires Microsoft.Component.MSBuild `
+        -find "MSBuild\**\Bin\amd64\MSBuild.exe" |
+        Select-Object -First 1
+
+    if (-not $MsBuild -or -not (Test-Path $MsBuild)) {
+        throw "Cannot locate the Visual Studio MSBuild executable"
+    }
+
+    & $MsBuild $CliProject.FullName `
+        /p:Configuration=Release /p:Platform=x64 /m:2 /v:minimal
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama-cli MSBuild failed with exit code $LASTEXITCODE"
+    }
+}
+else {
+    cmake --build $Build --config Release --target llama-cli --parallel 2
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama-cli build failed with exit code $LASTEXITCODE"
+    }
+}
 $Quant = Get-ChildItem -Path $Build `
     -Recurse `
     -File `
@@ -71,11 +125,11 @@ $Cli = Get-ChildItem -Path $Build `
     Select-Object -First 1
 
 if (-not $Quant) {
-    throw "llama-quantize.exe was not built"
+    throw "llama-quantize.exe was not produced by the successful build"
 }
 
 if (-not $Cli) {
-    throw "llama-cli.exe was not built"
+    throw "llama-cli.exe was not produced by the successful build"
 }
 
 Write-Host "`n=== LLAMA.CPP READY ===" -ForegroundColor Green
