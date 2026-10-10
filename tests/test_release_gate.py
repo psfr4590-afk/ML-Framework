@@ -159,9 +159,33 @@ def _mock_wheel_build(tmp_path, monkeypatch, fault=None):
         version = "9.9.9" if fault == "wrong_version" else "1.3.0rc1"
         modules = [
             "run_pipeline.py", "mlframework.py", "run_command_center.py", "launch.py",
+            "scripts/__init__.py",
+            "scripts/export_gguf.py",
+            "scripts/export_cards.py",
         ]
+
+        config_assets = [
+            "config/__init__.py",
+            "config/pipeline_config.yaml",
+            "config/pipeline_config.dataset.yaml",
+            "config/pipeline_config.full.yaml",
+            "config/pipeline_config.smoke.yaml",
+            "config/dataset_groups.yaml",
+            "config/dataset_groups.smoke.yaml",
+            "config/dataset_profiles.yaml",
+            "config/dataset_source_policy.yaml",
+            "config/source_weights.yaml",
+            "config/cleaner_config.yaml",
+            "config/seed_urls.txt",
+        ]
+        if fault == "missing_config":
+            config_assets.remove("config/dataset_groups.yaml")
         if fault == "missing_module":
             modules.remove("launch.py")
+        if fault == "missing_export_gguf":
+            modules.remove("scripts/export_gguf.py")
+        if fault == "missing_export_cards":
+            modules.remove("scripts/export_cards.py")
 
         with zipfile.ZipFile(wheel, "w") as archive:
             archive.writestr(
@@ -183,6 +207,8 @@ def _mock_wheel_build(tmp_path, monkeypatch, fault=None):
             )
             for module in modules:
                 archive.writestr(module, "# test module\n")
+            for asset in config_assets:
+                archive.writestr(asset, "# test config\n")
 
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -196,11 +222,33 @@ def test_build_and_validate_wheel_accepts_valid_wheel(tmp_path, monkeypatch):
     assert "Validated model_lab_framework-1.3.0rc1-py3-none-any.whl" in detail
 
 
+def test_build_and_validate_wheel_rejects_missing_config_asset(tmp_path, monkeypatch):
+    _mock_wheel_build(tmp_path, monkeypatch, fault="missing_config")
+    ok, detail = verify_release._build_and_validate_wheel()
+    assert ok is False
+    assert "Missing wheel configuration assets" in detail
+    assert "config/dataset_groups.yaml" in detail
+
+
 def test_build_and_validate_wheel_rejects_missing_module(tmp_path, monkeypatch):
     _mock_wheel_build(tmp_path, monkeypatch, fault="missing_module")
     ok, detail = verify_release._build_and_validate_wheel()
     assert ok is False
     assert "Missing wheel modules" in detail
+
+
+def test_build_and_validate_wheel_rejects_missing_gguf_exporter(tmp_path, monkeypatch):
+    _mock_wheel_build(tmp_path, monkeypatch, fault="missing_export_gguf")
+    ok, detail = verify_release._build_and_validate_wheel()
+    assert ok is False
+    assert "scripts/export_gguf.py" in detail
+
+
+def test_build_and_validate_wheel_rejects_missing_export_card_helper(tmp_path, monkeypatch):
+    _mock_wheel_build(tmp_path, monkeypatch, fault="missing_export_cards")
+    ok, detail = verify_release._build_and_validate_wheel()
+    assert ok is False
+    assert "scripts/export_cards.py" in detail
 
 
 def test_build_and_validate_wheel_rejects_wrong_version(tmp_path, monkeypatch):

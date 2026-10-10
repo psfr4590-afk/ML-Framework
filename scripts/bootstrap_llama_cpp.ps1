@@ -72,13 +72,46 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`n=== BUILDING LLAMA-CLI ===" -ForegroundColor Cyan
 
-# Build the targets separately. This also avoids relying on a multi-target
-# Visual Studio/MSBuild invocation that can fail to resolve a target project.
-cmake --build $Build --config Release --target llama-cli --parallel 2
-if ($LASTEXITCODE -ne 0) {
-    throw "llama-cli build failed with exit code $LASTEXITCODE"
-}
+$CachePath = Join-Path $Build "CMakeCache.txt"
+$GeneratorLine = Get-Content $CachePath |
+    Where-Object { $_ -match "^CMAKE_GENERATOR:INTERNAL=" } |
+    Select-Object -First 1
 
+if ($GeneratorLine -match "Visual Studio") {
+    $CliProject = Get-ChildItem -Path $Build -Recurse -File -Filter "llama-cli.vcxproj" |
+        Select-Object -First 1
+
+    if (-not $CliProject) {
+        throw "Visual Studio build is missing the generated llama-cli.vcxproj"
+    }
+
+    $VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $VsWhere)) {
+        throw "Cannot locate Visual Studio vswhere.exe to resolve MSBuild"
+    }
+
+    $MsBuild = & $VsWhere -latest -products "*" `
+        -requires Microsoft.Component.MSBuild `
+        -find "MSBuild\**\Bin\amd64\MSBuild.exe" |
+        Select-Object -First 1
+
+    if (-not $MsBuild -or -not (Test-Path $MsBuild)) {
+        throw "Cannot locate the Visual Studio MSBuild executable"
+    }
+
+    & $MsBuild $CliProject.FullName `
+        /p:Configuration=Release /p:Platform=x64 /m:2 /v:minimal
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama-cli MSBuild failed with exit code $LASTEXITCODE"
+    }
+}
+else {
+    cmake --build $Build --config Release --target llama-cli --parallel 2
+    if ($LASTEXITCODE -ne 0) {
+        throw "llama-cli build failed with exit code $LASTEXITCODE"
+    }
+}
 $Quant = Get-ChildItem -Path $Build `
     -Recurse `
     -File `
