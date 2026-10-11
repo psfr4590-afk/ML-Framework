@@ -117,3 +117,24 @@ This inventory is a discovery baseline, not a test-run report. File presence doe
 3. Redaction is a best-effort defense. It cannot reliably discover secrets not supplied to the redactor, arbitrary transformations, partial/chunked values, or secrets split across output lines. Prefer structured logging that never logs secret-bearing fields, plus output redaction as defense in depth.
 4. Orphan recovery currently relies on PID liveness. PID reuse can preserve a stale run incorrectly; process creation time or a per-run identity should be persisted and validated.
 5. No passing execution evidence is claimed by this inventory. Collect CI run URLs, exact commit SHA, platform/Python matrix, pass/fail/skip counts, coverage output, and known pre-existing failures before readiness decisions.
+
+
+## Evidence ledger update (2026-10-11)
+
+### Acceptance and logging review
+- Review document: `docs/governance/ACCEPTANCE_AND_LOGGING_AUDIT.md`.
+- Commit: `c2f536f5174cae2831c4c8c8c8233bd458e6234a`.
+- Scope: classified behavior-oriented targets versus structural/shallow targets; listed all sink families requiring synthetic-canary tests.
+- Result: static review only. Canonical normative catalog could not be retrieved from the repository paths checked; no unsupported requirement interpretations were silently promoted to acceptance criteria.
+
+### CI and regression evidence
+- Latest inspected commit: `c2f536f5174cae2831c4c8c8c8233bd458e6234a`.
+- GitHub workflow-runs lookup for this SHA: **0 runs returned**.
+- Combined commit status lookup: **no status entries returned**.
+- Coverage checker: source not found at `scripts/check_test_coverage.py` or `check_test_coverage.py` in the repository file API. The checker is described as part of the separate governance ZIP, but was not executable in this environment.
+- Baseline SHA / branch SHA test comparison: **NOT RUN**.
+- Pytest pass/fail/skip/error counts: **UNKNOWN - NO EXECUTION EVIDENCE**.
+- Reason: repository clone/test execution is blocked by network DNS failure in the current environment; GitHub API access does not execute repository code.
+
+### Current decision
+No claim of passing tests or CI is made. Before merge, execute the canonical checker and identical pytest commands against base and branch in a network-enabled runner, retain raw logs and exit codes, and classify each delta as pre-existing, regression, setup/environment, or flaky.
