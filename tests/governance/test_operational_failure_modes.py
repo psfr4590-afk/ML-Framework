@@ -11,36 +11,46 @@ import pytest
 
 
 def test_runner_stop_terminates_active_worker(monkeypatch):
+    import signal
     from command_center import runner
 
     class Process:
-        terminated = False
+        pid = 991101
         def poll(self):
             return None
-        def terminate(self):
-            self.terminated = True
+        def wait(self, timeout=None):
+            return -signal.SIGTERM
 
     process = Process()
+    signals = []
+    def fake_killpg(pid, sig):
+        assert pid == process.pid
+        signals.append(sig)
+    monkeypatch.setattr(runner.os, "killpg", fake_killpg)
     with runner.LOCK:
         runner.RUNS[991101] = process
     try:
         assert runner.stop(991101) is True
-        assert process.terminated is True
+        assert signals == [signal.SIGTERM]
     finally:
         with runner.LOCK:
             runner.RUNS.pop(991101, None)
+            runner.CANCEL_REQUESTED.discard(991101)
 
 
-def test_runner_stop_does_not_claim_to_cancel_starting_worker():
+def test_runner_stop_requests_cancellation_of_starting_worker():
     from command_center import runner
 
     with runner.LOCK:
         runner.RUNS[991102] = runner._STARTING
+        runner.CANCEL_REQUESTED.discard(991102)
     try:
-        assert runner.stop(991102) is False
+        assert runner.stop(991102) is True
+        assert 991102 in runner.CANCEL_REQUESTED
     finally:
         with runner.LOCK:
             runner.RUNS.pop(991102, None)
+            runner.CANCEL_REQUESTED.discard(991102)
 
 
 def test_orphan_recovery_marks_dead_worker_failed(monkeypatch, tmp_path):
@@ -127,9 +137,7 @@ def test_release_gate_rejects_skip_tests(monkeypatch):
     from scripts import verify_release
 
     monkeypatch.setattr("sys.argv", ["verify_release.py", "--skip-tests"])
-    with pytest.raises(SystemExit) as exc:
-        verify_release.main()
-    assert exc.value.code == 2
+    assert verify_release.main() == 2
 
 
 def test_project_version_matches_declared_package_version():
@@ -178,34 +186,40 @@ def test_stop_escalates_and_waits_for_process_tree(monkeypatch):
     from command_center import runner
     import subprocess
 
+    import signal
+
     class Process:
         pid = 765432
         def __init__(self):
-            self.terminated = False
             self.killed = False
             self.wait_calls = 0
         def poll(self):
-            return None if not self.killed else -9
-        def terminate(self):
-            self.terminated = True
+            return None if not self.killed else -signal.SIGKILL
         def wait(self, timeout=None):
             self.wait_calls += 1
             if not self.killed:
                 raise subprocess.TimeoutExpired("worker", timeout)
-            return -9
-        def kill(self):
-            self.killed = True
+            return -signal.SIGKILL
 
     proc = Process()
+    sent_signals = []
+    def fake_killpg(pid, sig):
+        assert pid == proc.pid
+        sent_signals.append(sig)
+        if sig == signal.SIGKILL:
+            proc.killed = True
+    monkeypatch.setattr(runner.os, "killpg", fake_killpg)
     with runner.LOCK:
         runner.RUNS[991108] = proc
     try:
         assert runner.stop(991108) is True
-        assert proc.terminated and proc.killed
+        assert sent_signals == [signal.SIGTERM, signal.SIGKILL]
+        assert proc.killed
         assert proc.wait_calls >= 2
     finally:
         with runner.LOCK:
             runner.RUNS.pop(991108, None)
+            runner.CANCEL_REQUESTED.discard(991108)
 
 
 def test_redaction_handles_short_secrets_and_common_encodings():
