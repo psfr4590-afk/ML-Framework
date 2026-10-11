@@ -9,12 +9,9 @@ each target.
 from __future__ import annotations
 
 import ast
-import configparser
 import hashlib
 import json
-import os
 from pathlib import Path
-import re
 import tomllib
 
 import pytest
