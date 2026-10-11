@@ -1,7 +1,6 @@
 """Behavioral tests for runner cancellation, launch cleanup, and process trees."""
 from __future__ import annotations
 
-import subprocess
 from types import SimpleNamespace
 
 import pytest
