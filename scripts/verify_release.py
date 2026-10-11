@@ -569,6 +569,15 @@ def _live_source_retrieval_evidence_is_valid(
             return False
         if not data.get("retrieval_started_at") or not data.get("retrieval_completed_at"):
             return False
+        sources = data.get("sources")
+        if not isinstance(sources, list) or not sources:
+            return False
+        configured_kinds = {
+            source.get("kind") for source in sources
+            if isinstance(source, dict)
+        } & {"web", "github", "arxiv", "huggingface", "google"}
+        if not configured_kinds:
+            return False
         retrieval = data.get("retrieval")
         if not isinstance(retrieval, list) or not retrieval:
             return False
