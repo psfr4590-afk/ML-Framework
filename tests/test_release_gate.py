@@ -315,3 +315,120 @@ def test_checkpoint_identity_chain_rejects_mismatch_and_malformed_hash():
     actual["export_config_sha256"] = "not-a-sha256"
     with pytest.raises(RuntimeError, match="export_config_sha256"):
         verify_release._validate_checkpoint_identity_chain(expected, actual)
+
+
+@pytest.mark.parametrize("value", [0, 0.0, 1.25, 1e-12])
+def test_finite_metric_accepts_numeric_values(value):
+    assert verify_release._is_finite_number(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, True, False, "1.25", [], {}, float("nan"), float("inf"), float("-inf")],
+)
+def test_finite_metric_rejects_invalid_values(value):
+    assert verify_release._is_finite_number(value) is False
+
+
+@pytest.mark.parametrize("digest", ["a" * 64, "ABCDEF0123456789" * 4])
+def test_sha256_validator_accepts_hex_digest(digest):
+    assert verify_release._is_sha256(digest) is True
+
+
+@pytest.mark.parametrize("digest", [None, "", "a" * 63, "a" * 65, "g" * 64, 123])
+def test_sha256_validator_rejects_malformed_digest(digest):
+    assert verify_release._is_sha256(digest) is False
+
+
+def test_dataset_evidence_requires_structured_nonempty_payloads():
+    assert verify_release._dataset_evidence_is_valid(
+        {"documents": 3}, {"dataset_id": "fixture"}, {"train": {"val_loss": 1.2}}
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "payload,identity,metrics",
+    [
+        (None, {"dataset_id": "fixture"}, {"train": {}}),
+        ([], {"dataset_id": "fixture"}, {"train": {}}),
+        ({}, {"dataset_id": "fixture"}, {"train": {}}),
+        ({"documents": 3}, None, {"train": {}}),
+        ({"documents": 3}, {}, {"train": {}}),
+        ({"documents": 3}, {"dataset_id": "fixture"}, None),
+        ({"documents": 3}, {"dataset_id": "fixture"}, {}),
+    ],
+)
+def test_dataset_evidence_rejects_missing_or_unstructured_payloads(payload, identity, metrics):
+    assert verify_release._dataset_evidence_is_valid(payload, identity, metrics) is False
+
+
+def test_evaluation_evidence_requires_finite_validation_losses():
+    assert verify_release._evaluation_evidence_is_valid(
+        {"val_loss": 2.0, "best_val_loss": 1.5}
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        None,
+        {},
+        {"val_loss": None, "best_val_loss": 1.5},
+        {"val_loss": float("nan"), "best_val_loss": 1.5},
+        {"val_loss": 2.0, "best_val_loss": float("inf")},
+        {"val_loss": "2.0", "best_val_loss": 1.5},
+        {"val_loss": True, "best_val_loss": 1.5},
+    ],
+)
+def test_evaluation_evidence_rejects_invalid_validation_losses(metrics):
+    assert verify_release._evaluation_evidence_is_valid(metrics) is False
+
+
+def test_reproducibility_evidence_requires_integer_seed_and_sha256():
+    assert verify_release._reproducibility_evidence_is_valid(
+        {"seed": 42, "random_state_sha256": "a" * 64}
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        None,
+        {},
+        {"seed": None, "random_state_sha256": "a" * 64},
+        {"seed": True, "random_state_sha256": "a" * 64},
+        {"seed": "42", "random_state_sha256": "a" * 64},
+        {"seed": 42, "random_state_sha256": "not-a-digest"},
+        {"seed": 42, "random_state_sha256": "a" * 63},
+    ],
+)
+def test_reproducibility_evidence_rejects_invalid_seed_or_digest(metrics):
+    assert verify_release._reproducibility_evidence_is_valid(metrics) is False
+
+
+def test_run_git_identity_requires_manifest_database_and_current_commit_to_match():
+    manifest = {"git": {"commit": "a" * 40}}
+    verify_release._validate_run_git_identity(
+        manifest=manifest, database_git_sha="a" * 40, expected_git_sha="a" * 40
+    )
+
+
+@pytest.mark.parametrize(
+    "manifest,database_git_sha,expected_git_sha",
+    [
+        ({"git": {"commit": "a" * 40}}, "a" * 40, "b" * 40),
+        ({"git": {"commit": "a" * 40}}, "b" * 40, "a" * 40),
+        ({}, "a" * 40, "a" * 40),
+        ({"git": {"commit": "a" * 40}}, None, "a" * 40),
+        ({"git": {"commit": "a" * 40}}, "a" * 40, None),
+    ],
+)
+def test_run_git_identity_rejects_missing_or_mismatched_identity(
+    manifest, database_git_sha, expected_git_sha
+):
+    with pytest.raises(RuntimeError):
+        verify_release._validate_run_git_identity(
+            manifest=manifest,
+            database_git_sha=database_git_sha,
+            expected_git_sha=expected_git_sha,
+        )
