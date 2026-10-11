@@ -187,12 +187,15 @@ def _source_retrieval_smoke() -> bool:
             deduped = pipeline.stage_embed_dedup(cleaned)
             weighted = pipeline.stage_weight(deduped)
 
-            if not _source_manifest_is_valid(
-                pipeline._source_manifest_path,
-                "release-source-smoke",
-                pipeline._source_definition_paths,
-            ):
+            if not _source_manifest_is_valid(pipeline._source_manifest_path):
                 raise RuntimeError("Source smoke source manifest failed validation")
+            source_manifest = json.loads(
+                pipeline._source_manifest_path.read_text(encoding="utf-8")
+            )
+            if not source_manifest.get("sources"):
+                raise RuntimeError("Source smoke source manifest contains no source definitions")
+            if not source_manifest.get("retrieval_completed_at"):
+                raise RuntimeError("Source smoke source manifest lacks retrieval completion evidence")
 
             from pipeline.integrity import artifact_valid
             artifacts = [
