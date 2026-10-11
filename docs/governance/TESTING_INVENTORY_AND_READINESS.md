@@ -96,7 +96,7 @@ This inventory is a discovery baseline, not a test-run report. File presence doe
 |---|---|---|
 | Direct child cancellation | terminate, bounded wait, kill fallback, final state | Implemented; execution unverified |
 | Descendant process cleanup | process-group/job-object termination and no surviving descendants | Not implemented/verified |
-| Start/cancel race | cancellation during STARTING cannot orphan an untracked process | Needs implementation and execution |
+| Start/cancel race | cancellation during STARTING cannot orphan an untracked process; duplicate launches rejected | Implementation and behavioral tests committed at `32fe5a3` and `624e1e1`; execution unverified |
 | Restart recovery | dead PID transitions run/stage to failure; live PID preserved | Test scenarios added; execution unverified |
 | PID reuse / stale state | persisted identity cannot mistake unrelated process for worker | Not covered yet |
 | Short/encoded secret redaction | raw, JSON-escaped, Base64, URL-encoded forms | Helper and tests added; execution unverified |
@@ -113,7 +113,7 @@ This inventory is a discovery baseline, not a test-run report. File presence doe
 ## Known limitations to resolve
 
 1. `Popen.terminate()` and `Popen.kill()` only target the direct child. POSIX process groups and Windows Job Objects or equivalent process-tree management are needed for a reliable descendant cleanup guarantee.
-2. The runner records `_STARTING` before the thread creates its process. `stop()` currently returns false in that window. Cancellation intent needs to be recorded and honored immediately after spawn, or start/cancel must be serialized.
+2. Startup cancellation intent is now recorded and checked before/after process creation; cancelled state is preserved through final reconciliation. Behavioral tests exist, but need execution. Windows descendant cleanup still needs Job Object containment or an equivalent verified mechanism.
 3. Redaction is a best-effort defense. It cannot reliably discover secrets not supplied to the redactor, arbitrary transformations, partial/chunked values, or secrets split across output lines. Prefer structured logging that never logs secret-bearing fields, plus output redaction as defense in depth.
 4. Orphan recovery currently relies on PID liveness. PID reuse can preserve a stale run incorrectly; process creation time or a per-run identity should be persisted and validated.
 5. No passing execution evidence is claimed by this inventory. Collect CI run URLs, exact commit SHA, platform/Python matrix, pass/fail/skip counts, coverage output, and known pre-existing failures before readiness decisions.
@@ -143,3 +143,12 @@ No claim of passing tests or CI is made. Before merge, execute the canonical che
 ## Evidence correction (2026-10-11)
 
 The supplied repository-mapped governance ZIP was inspected after the prior ledger update. It contains the actual coverage checker at `v11/check_test_coverage.py` and the canonical 64-row traceability register in `v11/TRACEABILITY.md`. Therefore, the checker is **located**, not missing; it has not yet been run against the development checkout because this execution environment cannot clone the repository (DNS failure). The checker is deliberately limited to checking required test-function names and must not be treated as proof of behavioral coverage. The newly supplied amendment-candidate ZIP contains 12 governance documents and no checker script; its proposed/effective status must be resolved against the authoritative v1.1.0 package before treating documents as interchangeable. The canonical traceability register states that the reviewed source snapshot was base SHA `f06bbedb55e252cd7033c615733c5d2554a7d0aa`, and marks all requirements `NOT_VERIFIED` pending evidence. No new test counts or pass claims are made.
+
+
+## Implementation update (2026-10-11)
+
+- Runner start/cancel handling updated on the development branch: commit `32fe5a3dfdc4e24bceb977b86b42820bb1722bb4` records cancellation intent while the runner is in `STARTING`, checks it before process launch and immediately after process registration, and adds a bounded process-tree termination helper for POSIX process groups.
+- Cancellation final-state preservation updated at `589c9af872add679751d11af59cb29bdc51bacc8`; terminal reconciliation no longer overwrites a `CANCELLED` stage/status.
+- Behavioral regression tests added in `tests/governance/test_runner_lifecycle.py`; latest test commit at time of writing: `433328c51d2010eb9cb4d5f9953098200885f05d`. Tests cover start-window cancellation intent, no subprocess launch after cancellation, terminal-state preservation, and duplicate launch rejection.
+- CI/workflow lookup for latest test commit returned zero workflow runs and no commit-status entries. These tests are **not claimed to pass**. Local execution remains blocked by unavailable repository clone/network DNS in this environment.
+- Remaining runner risks: Windows process-tree termination is still best-effort and requires Job Object or equivalent descendant containment; concurrent termination ownership should be tested to ensure the stop caller and worker cannot race to terminate the same process group twice.
