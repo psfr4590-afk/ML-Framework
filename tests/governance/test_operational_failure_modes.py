@@ -6,7 +6,6 @@ traceability identities. All filesystem effects are isolated in tmp_path.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
