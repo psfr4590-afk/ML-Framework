@@ -152,3 +152,14 @@ The supplied repository-mapped governance ZIP was inspected after the prior ledg
 - Behavioral regression tests added in `tests/governance/test_runner_lifecycle.py`; latest test commit at time of writing: `433328c51d2010eb9cb4d5f9953098200885f05d`. Tests cover start-window cancellation intent, no subprocess launch after cancellation, terminal-state preservation, and duplicate launch rejection.
 - CI/workflow lookup for latest test commit returned zero workflow runs and no commit-status entries. These tests are **not claimed to pass**. Local execution remains blocked by unavailable repository clone/network DNS in this environment.
 - Remaining runner risks: Windows process-tree termination is still best-effort and requires Job Object or equivalent descendant containment; concurrent termination ownership should be tested to ensure the stop caller and worker cannot race to terminate the same process group twice.
+
+
+## Security implementation update (2026-10-11)
+
+- Runner now derives redaction candidates from inherited environment variables with credential-like names as well as the credential store, then applies raw/JSON/Base64/URL encoding redaction to subprocess log lines. Helper: `_sensitive_environment_values` in `command_center/runner.py`.
+- Subprocess launch failures now emit the exception class only, rather than untrusted exception text, to avoid persisting paths/arguments/secrets in event data.
+- Stop now checks whether an already-launched process has exited before recording cancellation intent, preventing a false `CANCELLED` result when cancellation arrives after process completion. Thread-start failure also clears any pending cancellation marker.
+- Regression tests added in `tests/governance/test_runner_security.py` for inherited environment secret discovery, raw/encoded log redaction, and launch exception-message suppression.
+- Latest source commits include `11c4ce6`, `69ad850`, and `c984228`; security regression test commit `b43621d`.
+- CI lookup for `b43621d`: CodeQL run `38146183155`, Security run `38146183188`, and CI run `38146183253` were queued at lookup time; CodeRabbit status was successful. These are not test-pass results. Recheck final workflow conclusions before relying on them.
+- Important limitation: redaction is still line-oriented and cannot guarantee protection against a secret split across output chunks/lines or transformed in an unknown way. Prefer never emitting credential material from child processes. Windows descendant cleanup still needs a verified Job Object/equivalent implementation.
