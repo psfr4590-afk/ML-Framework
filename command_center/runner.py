@@ -20,6 +20,7 @@ from .secrets import credentials
 from .store import store
 
 RUNS: dict[int, subprocess.Popen | object] = {}
+CANCEL_REQUESTED: set[int] = set()
 STOP_TIMEOUT_SECONDS = 5
 LOCK = threading.RLock()
 _STARTING = object()
@@ -144,19 +145,36 @@ def _run(did, stage):
     logp = store.path(did) / "logs" / "command-center.log"
     logp.parent.mkdir(parents=True, exist_ok=True)
     try:
+        with LOCK:
+            cancelled_before_launch = did in CANCEL_REQUESTED
+        if cancelled_before_launch:
+            current = store.get(did)
+            stages = dict(current["stages"])
+            stages[stage] = "cancelled"
+            store.update(did, stages=stages, status="CANCELLED")
+            store.event(did, "stage.cancelled", {"stage": stage, "phase": "before_launch"})
+            return
         p = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, encoding="utf-8", errors="replace", start_new_session=(os.name == "posix"), creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0))
         with LOCK:
             RUNS[did] = p
             _write_state(did, stage=stage, pid=getattr(p, "pid", None), status="running")
+            cancel_after_launch = did in CANCEL_REQUESTED
+        if cancel_after_launch:
+            _terminate_process_tree(p)
         for line in p.stdout or []:
             with logp.open("a", encoding="utf-8") as f:
                 f.write(_redact_log_line(line.rstrip()) + "\n")
         code = p.wait()
         current = store.get(did)
         stages = dict(current["stages"])
-        stages[stage] = "complete" if code == 0 else "failed"
-        if code == 0:
+        with LOCK:
+            was_cancelled = did in CANCEL_REQUESTED
+        stages[stage] = "cancelled" if was_cancelled else ("complete" if code == 0 else "failed")
+        if was_cancelled:
+            store.update(did, stages=stages, status="CANCELLED")
+            store.event(did, "stage.cancelled", {"stage": stage, "exit_code": code})
+        elif code == 0:
             store.update(did, stages=stages, status=current.get("status", "RUNNING"))
             store.refresh_pipeline_state(did)
             refreshed = store.get(did) or current
@@ -179,6 +197,7 @@ def _run(did, stage):
     finally:
         with LOCK:
             RUNS.pop(did, None)
+            CANCEL_REQUESTED.discard(did)
             _clear_state(did)
         # Reconcile artifacts after the process exits, but preserve an explicit
         # failed stage rather than allowing refresh to hide it behind STALE/IN_PROGRESS.
@@ -196,21 +215,25 @@ def start_stage(did, stage):
         if did in RUNS:
             raise RuntimeError(f"Dataset {did} already has a running or starting pipeline stage")
         RUNS[did] = _STARTING
+        CANCEL_REQUESTED.discard(did)
         _write_state(did, stage=stage, pid=None, status="starting")
-        threading.Thread(target=_run, args=(did, stage), daemon=True).start()
+        try:
+            threading.Thread(target=_run, args=(did, stage), daemon=True).start()
+        except Exception:
+            RUNS.pop(did, None)
+            _clear_state(did)
+            raise
     return {"started": True, "dataset_id": did, "stage": stage}
 
 
-def stop(did):
-    with LOCK:
-        p = RUNS.get(did)
-    if p is None or p is _STARTING or p.poll() is not None:
-        return False
+def _terminate_process_tree(p) -> None:
+    """Request worker-tree termination and escalate if the leader won't exit."""
     try:
         if os.name == "posix":
             import signal
             os.killpg(p.pid, signal.SIGTERM)
         else:
+            # Best-effort fallback; Windows Job Object containment remains needed.
             p.terminate()
         p.wait(timeout=STOP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
@@ -225,6 +248,19 @@ def stop(did):
         p.wait()
     except ProcessLookupError:
         p.wait()
+
+
+def stop(did):
+    with LOCK:
+        p = RUNS.get(did)
+        if p is None:
+            return False
+        CANCEL_REQUESTED.add(did)
+        if p is _STARTING:
+            return True
+        if p.poll() is not None:
+            return False
+    _terminate_process_tree(p)
     return True
 
 
