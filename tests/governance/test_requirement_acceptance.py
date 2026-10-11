@@ -120,8 +120,8 @@ def test_REQ_WF_003():
 
 
 def test_REQ_WF_004():
-    source = _read("command_center/runner.py").lower()
-    assert any(word in source for word in ("state", "status", "cancel", "lifecycle"))
+    from command_center.runner import VALID_STAGES
+    assert VALID_STAGES == {"crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"}
 
 
 def test_REQ_WF_005():
@@ -138,8 +138,10 @@ def test_REQ_WF_007():
 
 
 def test_REQ_WF_008():
-    source = _read("command_center/runner.py").lower()
-    assert any(word in source for word in ("lock", "running", "active_job", "job_id"))
+    from command_center import runner
+    assert hasattr(runner, "LOCK")
+    assert hasattr(runner, "RUNS")
+    assert callable(runner.start_stage)
 
 
 # DATA (001-008): persistence, integrity, provenance, and schema discipline.
@@ -151,9 +153,14 @@ def test_REQ_DATA_002():
     assert (ROOT / "command_center" / "store.py").is_file()
 
 
-def test_REQ_DATA_003():
-    paths = [p for p in ROOT.rglob("*.py") if "integrity" in p.name.lower() or "manifest" in p.name.lower()]
-    assert paths, "Expected a dedicated integrity or manifest implementation"
+def test_REQ_DATA_003(tmp_path):
+    from pipeline.integrity import write_manifest, artifact_valid
+
+    artifact = tmp_path / "dataset.jsonl"
+    artifact.write_text('{"id": 1}\\n', encoding="utf-8")
+    write_manifest(artifact, kind="dataset", rows=1, provenance={"run_id": "acceptance"})
+    assert artifact_valid(artifact, expected_provenance={"run_id": "acceptance"})
+    assert not artifact_valid(artifact, expected_provenance={"run_id": "different"})
 
 
 def test_REQ_DATA_004():
@@ -175,9 +182,18 @@ def test_REQ_DATA_006():
     assert "run" in source or "artifact" in source
 
 
-def test_REQ_DATA_007():
-    source = _read("command_center/store.py").lower()
-    assert "sqlite" in source or "transaction" in source
+def test_REQ_DATA_007(tmp_path, monkeypatch):
+    from command_center import store as store_module
+
+    monkeypatch.setattr(store_module, "DATASETS", tmp_path)
+    instance = store_module.DatasetStore()
+    created = instance.create("acceptance dataset", description="isolated test")
+    loaded = instance.get(created["id"])
+    assert loaded["name"] == "acceptance dataset"
+    assert loaded["description"] == "isolated test"
+    assert loaded["status"] == "NEW"
+    with pytest.raises(ValueError):
+        instance.path(0)
 
 
 def test_REQ_DATA_008():
@@ -222,8 +238,15 @@ def test_REQ_ML_008():
 
 
 # ART (001-007): manifests, export cards, paired integrity and dataset cards.
-def test_REQ_ART_001():
-    assert any("manifest" in p.name.lower() or "integrity" in p.name.lower() for p in ROOT.rglob("*.py"))
+def test_REQ_ART_001(tmp_path):
+    from pipeline.integrity import write_manifest, artifact_valid
+
+    artifact = tmp_path / "model.bin"
+    artifact.write_bytes(b"original artifact bytes")
+    write_manifest(artifact, kind="model", provenance={"model_id": "fixture-1"})
+    assert artifact_valid(artifact)
+    artifact.write_bytes(b"tampered artifact bytes")
+    assert not artifact_valid(artifact)
 
 
 def test_REQ_ART_002():
@@ -243,9 +266,13 @@ def test_REQ_ART_005():
     assert "export" in _read("mlframework.py").lower()
 
 
-def test_REQ_ART_006():
-    sources = [p.read_text(encoding="utf-8", errors="replace") for p in ROOT.rglob("*.py")]
-    assert any("sha256" in s or "sha-256" in s.lower() for s in sources)
+def test_REQ_ART_006(tmp_path):
+    from pipeline.integrity import sha256_file
+    import hashlib
+
+    artifact = tmp_path / "bytes.bin"
+    artifact.write_bytes(b"known fixture")
+    assert sha256_file(artifact) == hashlib.sha256(b"known fixture").hexdigest()
 
 
 def test_REQ_ART_007():
@@ -268,8 +295,18 @@ def test_REQ_OPS_003():
     assert any(word in source for word in ("log", "error", "exception"))
 
 
-def test_REQ_OPS_004():
-    assert (ROOT / "command_center" / "secrets.py").is_file()
+def test_REQ_OPS_004(tmp_path, monkeypatch):
+    from cryptography.fernet import Fernet
+    from command_center import secrets
+
+    monkeypatch.setenv("PIPELINE_CREDENTIAL_KEY", Fernet.generate_key().decode())
+    vault = secrets.CredentialStore(tmp_path / "credentials.json")
+    result = vault.set("acceptance", "fixture-secret", env_var="HF_TOKEN")
+    assert result["stored"] is True
+    assert vault.reveal("acceptance") == "fixture-secret"
+    assert "fixture-secret" not in (tmp_path / "credentials.json").read_text(encoding="utf-8")
+    assert vault.delete("acceptance") is True
+    assert vault.delete("acceptance") is False
 
 
 def test_REQ_OPS_005():
@@ -312,7 +349,8 @@ def test_REQ_SEC_002():
 
 
 def test_REQ_SEC_003():
-    assert (ROOT / ".env.example").is_file()
+    tracked_env = [p for p in ROOT.rglob(".env") if ".git" not in p.parts and "example" not in p.name]
+    assert not tracked_env, f"Unexpected real environment files in source tree: {tracked_env}"
 
 
 def test_REQ_SEC_004(monkeypatch):
@@ -345,8 +383,8 @@ def test_REQ_REL_002():
 
 
 def test_REQ_REL_003():
-    candidates = [p for p in ROOT.rglob("*.py") if "release" in p.name.lower() or "verify" in p.name.lower()]
-    assert candidates, "Expected a release verification entrypoint"
+    import scripts.verify_release as gate
+    assert callable(gate.main)
 
 
 def test_REQ_REL_004():
