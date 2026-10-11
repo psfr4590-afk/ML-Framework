@@ -334,6 +334,17 @@ def _auto_sizing_evidence(train_metrics: object) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+
+def _validate_final_checkpoint_metadata(meta: object) -> None:
+    """Enforce the metadata contract for the final checkpoint artifact."""
+    if not isinstance(meta, dict):
+        raise RuntimeError("final checkpoint metadata is invalid")
+    if meta.get("checkpoint_kind") != "final":
+        raise RuntimeError("final checkpoint manifest is not marked as final")
+    if not _is_nonnegative_int(meta.get("step")):
+        raise RuntimeError("final checkpoint step metadata is invalid")
+
+
 def _validate_best_checkpoint_metadata(meta: dict) -> None:
     """Enforce the checkpoint manifest contract used by best_checkpoint()."""
     if not isinstance(meta, dict):
@@ -498,11 +509,7 @@ def _harvest_native_evidence(
         if not isinstance(final_meta, dict) or not isinstance(best_meta, dict):
             raise RuntimeError("checkpoint metadata is invalid")
 
-        if not _is_nonnegative_int(final_meta.get("step")):
-            raise RuntimeError("final checkpoint step metadata is invalid")
-        if not _is_nonnegative_int(best_meta.get("step")):
-            raise RuntimeError("best checkpoint step metadata is invalid")
-
+        _validate_final_checkpoint_metadata(final_meta)
         _validate_best_checkpoint_metadata(best_meta)
         evidence["checkpoint"] = True
         evidence["best_checkpoint"] = True
