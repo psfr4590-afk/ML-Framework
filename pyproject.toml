@@ -29,7 +29,10 @@ include-package-data = true
 py-modules = ["run_pipeline", "run_command_center", "launch", "mlframework"]
 
 [tool.setuptools.packages.find]
-include = ["pipeline*", "command_center*"]
+include = ["pipeline*", "command_center*", "scripts*", "config*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml", "*.txt"]
 
 [tool.ruff]
 line-length = 120
