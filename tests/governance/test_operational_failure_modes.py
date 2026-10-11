@@ -173,3 +173,79 @@ def test_worker_log_redacts_injected_credential_value(monkeypatch, tmp_path):
     output = log_path.read_text(encoding="utf-8")
     assert "[REDACTED]" in output
     assert secret not in output
+
+
+def test_stop_escalates_and_waits_for_process_tree(monkeypatch):
+    from command_center import runner
+    import subprocess
+
+    class Process:
+        pid = 765432
+        def __init__(self):
+            self.terminated = False
+            self.killed = False
+            self.wait_calls = 0
+        def poll(self):
+            return None if not self.killed else -9
+        def terminate(self):
+            self.terminated = True
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            if not self.killed:
+                raise subprocess.TimeoutExpired("worker", timeout)
+            return -9
+        def kill(self):
+            self.killed = True
+
+    proc = Process()
+    with runner.LOCK:
+        runner.RUNS[991108] = proc
+    try:
+        assert runner.stop(991108) is True
+        assert proc.terminated and proc.killed
+        assert proc.wait_calls >= 2
+    finally:
+        with runner.LOCK:
+            runner.RUNS.pop(991108, None)
+
+
+def test_redaction_handles_short_secrets_and_common_encodings():
+    import base64
+    from command_center.runner import _redact_text
+
+    secret = "xY9"
+    encoded = base64.b64encode(secret.encode()).decode()
+    line = " ".join([secret, encoded, __import__("urllib.parse", fromlist=["quote"]).quote(secret),
+                     __import__("json").dumps(secret)])
+    cleaned = _redact_text(line, [secret])
+    assert secret not in cleaned
+    assert encoded not in cleaned
+    assert __import__("json").dumps(secret) not in cleaned
+
+
+def test_redaction_sanitizes_exception_text_and_structured_fields():
+    import json
+    from command_center.runner import _redact_text
+
+    secret = "exception-secret-456"
+    message = json.dumps({"event": "worker.error", "message": f"request failed token={secret}",
+                          "exception": f"RuntimeError({secret})"})
+    cleaned = _redact_text(message, [secret])
+    assert secret not in cleaned
+    assert "[REDACTED]" in cleaned
+
+
+def test_restart_recovery_does_not_clear_live_process_state(monkeypatch, tmp_path):
+    from command_center import runner
+
+    state_path = tmp_path / "runner_state.json"
+    state_path.write_text(json.dumps({"schema": 1, "dataset_id": 991109, "stage": "train",
+                                      "pid": 991110, "status": "running"}), encoding="utf-8")
+    dataset = {"id": 991109, "status": "RUNNING", "stages": {"train": "running"}}
+    monkeypatch.setattr(runner.store, "list", lambda: [dataset])
+    monkeypatch.setattr(runner, "_state_path", lambda did: state_path)
+    monkeypatch.setattr(runner, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(runner.store, "update", lambda *args, **kwargs: pytest.fail("must preserve live run"))
+    monkeypatch.setattr(runner.store, "event", lambda *args: pytest.fail("must not emit orphan event"))
+    runner.reconcile_orphaned_runs()
+    assert state_path.exists()
