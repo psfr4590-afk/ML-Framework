@@ -237,10 +237,16 @@ def _source_retrieval_smoke() -> bool:
 
 
 
+def _record_source_pipeline_integration_smoke() -> bool:
+    """Record the offline upstream-stage smoke without claiming live source retrieval."""
+    passed = _source_retrieval_smoke()
+    NATIVE_EVIDENCE["source_pipeline_integration"] = passed
+    return passed
+
+
 def _native_smoke(verify_ollama: bool = False) -> int:
     source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
-    NATIVE_EVIDENCE["source_retrieval"] = _source_retrieval_smoke()
-    if not NATIVE_EVIDENCE["source_retrieval"]:
+    if not _record_source_pipeline_integration_smoke():
         return 2
     with tempfile.TemporaryDirectory(prefix="model-lab-release-") as tmp:
         tmp_root = Path(tmp); output = tmp_root / "output"; scratch = tmp_root / "scratch"; config.setdefault("pipeline", {})["output_dir"] = str(output); config["pipeline"]["scratch_dir"] = str(scratch); config["pipeline"]["resume"] = False; config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp"); config["export"]["quant"] = "ALL"; config_path = tmp_root / "release_smoke.yaml"; config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8"); from pipeline.orchestrator import Pipeline
@@ -615,14 +621,10 @@ def _harvest_native_evidence(
             manifest.get("metrics"),
         )
 
-        # Upstream retrieval is verified by a separate offline vertical slice.
-        # Do not erase that evidence merely because the native-training run uses
-        # a pre-weighted fixture to keep its training/export path bounded.
-        evidence["source_retrieval"] = (
-            True
-            if source_retrieval_exercised or NATIVE_EVIDENCE.get("source_retrieval") is True
-            else None
-        )
+        # This native run uses a pre-weighted fixture. Only mark source retrieval
+        # when the harvested run itself actually passed an upstream retrieval stage.
+        # The offline integration smoke is tracked separately and is not live-source evidence.
+        evidence["source_retrieval"] = True if source_retrieval_exercised else None
 
         train_metrics = (
             manifest.get("metrics", {}).get("train")
