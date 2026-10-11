@@ -553,6 +553,47 @@ def _validate_checkpoint_identity_chain(expected: dict, actual: dict) -> None:
             raise RuntimeError(f"checkpoint provenance identity mismatch: {key}")
 
 
+def _live_source_retrieval_evidence_is_valid(
+    *, source_manifest_path: Path, expected_run_id: str, stages: dict
+) -> bool | None:
+    """Validate durable evidence for a successful non-fixture source crawl."""
+    if (stages.get("crawl") or {}).get("status") != "PASS":
+        return None
+    try:
+        data = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or int(data.get("schema", 0)) < 3:
+            return False
+        if data.get("run_id") != expected_run_id:
+            return False
+        if not _is_sha256(data.get("source_definition_sha256")):
+            return False
+        if not data.get("retrieval_started_at") or not data.get("retrieval_completed_at"):
+            return False
+        retrieval = data.get("retrieval")
+        if not isinstance(retrieval, list) or not retrieval:
+            return False
+        for record in retrieval:
+            if not isinstance(record, dict):
+                continue
+            if record.get("kind") not in {"web", "github", "arxiv", "huggingface", "google"}:
+                continue
+            if str(record.get("status", "")).upper() in {"DISABLED", "FAILED", "ERROR"}:
+                continue
+            stats = record.get("stats")
+            if not isinstance(stats, dict):
+                stats = record
+            try:
+                documents = int(stats.get("document_count", 0))
+                requests = int(stats.get("request_count", 0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if documents > 0 and requests > 0:
+                return True
+        return False
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+
+
 def _harvest_native_evidence(
     *,
     output: Path,
@@ -608,10 +649,13 @@ def _harvest_native_evidence(
                 "required native stages are not all PASS"
             )
 
-        skipped_upstream = ("crawl", "clean", "dedup", "weight")
-        source_retrieval_exercised = any(
-            (stages.get(name) or {}).get("status") == "PASS"
-            for name in skipped_upstream
+        # The native release smoke deliberately uses a pre-weighted local fixture.
+        # Live source retrieval must be established independently by a real crawl stage
+        # and its durable source manifest, never by the offline integration smoke.
+        evidence["source_retrieval"] = _live_source_retrieval_evidence_is_valid(
+            source_manifest_path=output.parent / "source_manifest.json",
+            expected_run_id=run_id,
+            stages=stages,
         )
 
         # Dataset evidence is intentionally bounded to the local native smoke fixture.
@@ -620,11 +664,6 @@ def _harvest_native_evidence(
             manifest.get("dataset_identity"),
             manifest.get("metrics"),
         )
-
-        # This native run uses a pre-weighted fixture. Only mark source retrieval
-        # when the harvested run itself actually passed an upstream retrieval stage.
-        # The offline integration smoke is tracked separately and is not live-source evidence.
-        evidence["source_retrieval"] = True if source_retrieval_exercised else None
 
         train_metrics = (
             manifest.get("metrics", {}).get("train")
