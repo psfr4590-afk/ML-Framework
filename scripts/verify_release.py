@@ -603,7 +603,7 @@ def _live_source_retrieval_evidence_is_valid(
             if documents > 0 and requests > 0:
                 return True
         return False
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):
         return False
 
 
