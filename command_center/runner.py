@@ -229,6 +229,7 @@ def start_stage(did, stage):
             threading.Thread(target=_run, args=(did, stage), daemon=True).start()
         except Exception:
             RUNS.pop(did, None)
+            CANCEL_REQUESTED.discard(did)
             _clear_state(did)
             raise
     return {"started": True, "dataset_id": did, "stage": stage}
@@ -263,11 +264,12 @@ def stop(did):
         p = RUNS.get(did)
         if p is None:
             return False
-        CANCEL_REQUESTED.add(did)
         if p is _STARTING:
+            CANCEL_REQUESTED.add(did)
             return True
         if p.poll() is not None:
             return False
+        CANCEL_REQUESTED.add(did)
     _terminate_process_tree(p)
     return True
 
