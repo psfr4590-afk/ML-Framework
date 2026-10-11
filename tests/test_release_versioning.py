@@ -30,3 +30,8 @@ def test_release_readiness_docs_distinguish_native_smoke_from_full_rc():
         "--ui-probe --clean-clone"
     ) in docs
     assert "does not implicitly run the full RC profile" in docs
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert (
+        "verify_release.py --profile rc --bootstrap-native --ui-probe --clean-clone"
+        in contributing
+    )
