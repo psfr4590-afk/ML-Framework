@@ -569,6 +569,10 @@ def _live_source_retrieval_evidence_is_valid(
             return False
         if not data.get("retrieval_started_at") or not data.get("retrieval_completed_at"):
             return False
+        started = datetime.fromisoformat(str(data["retrieval_started_at"]).replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(str(data["retrieval_completed_at"]).replace("Z", "+00:00"))
+        if started.tzinfo is None or completed.tzinfo is None or completed < started:
+            return False
         sources = data.get("sources")
         if not isinstance(sources, list) or not sources:
             return False
@@ -584,9 +588,9 @@ def _live_source_retrieval_evidence_is_valid(
         for record in retrieval:
             if not isinstance(record, dict):
                 continue
-            if record.get("kind") not in {"web", "github", "arxiv", "huggingface", "google"}:
+            if record.get("kind") not in configured_kinds:
                 continue
-            if str(record.get("status", "")).upper() in {"DISABLED", "FAILED", "ERROR"}:
+            if str(record.get("status", "")).upper() != "SUCCESS":
                 continue
             stats = record.get("stats")
             if not isinstance(stats, dict):
