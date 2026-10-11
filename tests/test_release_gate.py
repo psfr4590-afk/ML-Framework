@@ -109,6 +109,13 @@ def test_source_retrieval_smoke_exercises_offline_upstream_stages():
              "retrieval_started_at": "start", "retrieval_completed_at": "end",
              "sources": [{"kind": "local_fixture"}],
              "retrieval": [{"kind": "web", "status": "PASS", "stats": {"document_count": 1, "request_count": 1}}]},
+            {"crawl": {"status": "PASS"}}, False,
+        ),
+        (
+            {"schema": 3, "run_id": "run-1", "source_definition_sha256": "a" * 64,
+             "retrieval_started_at": "start", "retrieval_completed_at": "end",
+             "sources": [{"kind": "web", "identifier": "https://example.com"}],
+             "retrieval": [{"kind": "web", "status": "PASS", "stats": {"document_count": 1, "request_count": 1}}]},
             {"crawl": {"status": "PASS"}}, True,
         ),
         (
