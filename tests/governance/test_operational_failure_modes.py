@@ -10,7 +10,7 @@ import json
 import pytest
 
 
-def test_runner_stop_terminates_active_worker(monkeypatch):
+def test_runner_stop_delegates_active_worker_termination(monkeypatch):
     from command_center import runner
 
     class Process:
