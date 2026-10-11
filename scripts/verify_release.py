@@ -221,6 +221,34 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+
+def _is_nonnegative_int(value: object) -> bool:
+    """Accept non-negative integers, excluding booleans."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_artifact_id(value: object) -> bool:
+    """Validate the kind:digest shape emitted by pipeline.provenance.artifact_id."""
+    if not isinstance(value, str):
+        return False
+    kind, separator, digest = value.partition(":")
+    return bool(kind and separator and ":" not in digest and _is_sha256(digest))
+
+
+def _lineage_evidence_is_valid(provenance: object, run_id: str) -> bool:
+    """Require well-formed artifact identities for every required lineage link."""
+    if not isinstance(provenance, dict) or provenance.get("run_id") != run_id:
+        return False
+    parent_ids = provenance.get("parent_artifact_ids")
+    return (
+        isinstance(parent_ids, list)
+        and bool(parent_ids)
+        and all(_is_artifact_id(parent_id) for parent_id in parent_ids)
+        and _is_artifact_id(provenance.get("dataset_artifact_id"))
+        and _is_artifact_id(provenance.get("tokenizer_artifact_id"))
+    )
+
+
 def _dataset_evidence_is_valid(
     dataset_payload: object,
     dataset_identity: object,
@@ -470,8 +498,10 @@ def _harvest_native_evidence(
         if not isinstance(final_meta, dict) or not isinstance(best_meta, dict):
             raise RuntimeError("checkpoint metadata is invalid")
 
-        if final_meta.get("step") is None or best_meta.get("step") is None:
-            raise RuntimeError("checkpoint step metadata missing")
+        if not _is_nonnegative_int(final_meta.get("step")):
+            raise RuntimeError("final checkpoint step metadata is invalid")
+        if not _is_nonnegative_int(best_meta.get("step")):
+            raise RuntimeError("best checkpoint step metadata is invalid")
 
         _validate_best_checkpoint_metadata(best_meta)
         evidence["checkpoint"] = True
@@ -494,14 +524,7 @@ def _harvest_native_evidence(
 
         evidence["provenance"] = True
 
-        parent_ids = provenance.get("parent_artifact_ids")
-        evidence["lineage"] = bool(
-            provenance.get("run_id") == run_id
-            and isinstance(parent_ids, list)
-            and parent_ids
-            and provenance.get("dataset_artifact_id")
-            and provenance.get("tokenizer_artifact_id")
-        )
+        evidence["lineage"] = _lineage_evidence_is_valid(provenance, run_id)
 
         # SQLite must contain the same run and durable tracking evidence.
         db_path = output / "experiment.db"
