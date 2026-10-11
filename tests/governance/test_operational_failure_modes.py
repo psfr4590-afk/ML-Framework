@@ -141,17 +141,35 @@ def test_project_version_matches_declared_package_version():
     assert _project_version() == declared
 
 
-def test_credential_storage_does_not_emit_plaintext_to_log(monkeypatch, tmp_path, caplog):
-    import logging
-    from cryptography.fernet import Fernet
-    from command_center.secrets import CredentialStore
+def test_worker_log_redacts_injected_credential_value(monkeypatch, tmp_path):
+    from command_center import runner
 
-    secret = "fixture-secret-never-log-this"
-    monkeypatch.setenv("PIPELINE_CREDENTIAL_KEY", Fernet.generate_key().decode())
-    logger = logging.getLogger("governance.credential.boundary")
-    caplog.set_level(logging.DEBUG)
-    logger.info("credential configured: %s", {"name": "fixture", "stored": True})
-    vault = CredentialStore(tmp_path / "credentials.json")
-    vault.set("fixture", secret)
-    assert secret not in caplog.text
-    assert secret not in (tmp_path / "credentials.json").read_text(encoding="utf-8")
+    secret = "fixture-secret-value-123"
+    log_path = tmp_path / "logs" / "command-center.log"
+    class FakeProcess:
+        pid = 123456
+        stdout = iter([f"starting worker with token={secret}\\n"])
+        def wait(self):
+            return 1
+
+    dataset = {"id": 991107, "stages": {}, "status": "NEW"}
+    monkeypatch.setattr(runner.store, "get", lambda did: dict(dataset))
+    def update(did, **fields):
+        dataset.update(fields)
+    monkeypatch.setattr(runner.store, "update", update)
+    monkeypatch.setattr(runner.store, "event", lambda *args: None)
+    monkeypatch.setattr(runner.store, "path", lambda did: tmp_path)
+    monkeypatch.setattr(runner, "_write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_clear_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "ROOT", tmp_path)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(runner, "credentials", type("Credentials", (), {
+        "environment": staticmethod(lambda: {"HF_TOKEN": secret})
+    })())
+    monkeypatch.setattr(runner.store, "refresh_stats", lambda did: None)
+    monkeypatch.setattr(runner.store, "refresh_pipeline_state", lambda did: None)
+
+    runner._run(991107, "clean")
+    output = log_path.read_text(encoding="utf-8")
+    assert "[REDACTED]" in output
+    assert secret not in output
