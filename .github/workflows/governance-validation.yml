@@ -1,0 +1,60 @@
+name: Governance validation
+
+on:
+  pull_request:
+    paths:
+      - "governance/**"
+      - ".github/workflows/governance-validation.yml"
+      - "pyproject.toml"
+      - "tests/**"
+  push:
+    branches:
+      - "governance/**"
+    paths:
+      - "governance/**"
+      - ".github/workflows/governance-validation.yml"
+      - "pyproject.toml"
+      - "tests/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  governance-package:
+    name: Validate governance package and traceability
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out candidate commit
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Require complete v1.1.0 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f governance/v11/validate_governance.py || {
+            echo "::error::Governance v1.1.0 package is not imported. Copy the complete supplied v11/ directory to governance/v11/ before claiming validation."
+            exit 1
+          }
+          test -f governance/v11/check_test_coverage.py
+          test -f governance/v11/SHA256SUMS.txt
+          test -f governance/v11/SHA256SUMS-HISTORY.txt
+          test -f governance/v11/REQUIREMENTS.md
+          test -f governance/v11/TRACEABILITY_REGISTER.csv
+          test -f governance/v11/TEST_CASE_CATALOG.csv
+      - name: Verify governance checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd governance/v11
+          sha256sum --check SHA256SUMS.txt
+          if [ -f SHA256SUMS-HISTORY.txt ]; then
+            echo "Historical checksum manifest present; verify it using the package's documented history-relative paths."
+          fi
+      - name: Run structural governance validator
+        run: python governance/v11/validate_governance.py
+      - name: Run requirement-to-test coverage checker
+        run: python governance/v11/check_test_coverage.py --repo-root .
