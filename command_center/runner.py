@@ -134,11 +134,13 @@ def _run(did, stage):
     try:
         credential_env = credentials.environment()
         env.update(credential_env)
-        redacted_values = [value for value in credential_env.values() if isinstance(value, str) and value]
     except Exception:
-        # Credential retrieval failure must not prevent the pipeline from running
-        # with the caller's existing environment, but no unknown secret is logged.
-        pass
+        # Do not echo credential-store exceptions; messages can expose sensitive context.
+        credential_env = {}
+    # Child processes inherit the caller environment, not just stored credentials.
+    import re
+    sensitive_name = re.compile(r'(TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)', re.I)
+    redacted_values = [value for name, value in env.items() if sensitive_name.search(name) and isinstance(value, str) and value]
     def _redact_log_line(value: str) -> str:
         return _redact_text(value, redacted_values)
     cmd = [sys.executable, str(ROOT / "run_pipeline.py"), "--dataset-id", str(did), "--stages", stage]
@@ -193,7 +195,8 @@ def _run(did, stage):
         stages[stage] = "failed"
         store.update(did, stages=stages, status="ERROR")
         store.refresh_stats(did)
-        store.event(did, "stage.launch_failed", {"stage": stage, "error": str(exc)})
+        # Exception text may expose paths, command arguments, or credentials.
+        store.event(did, "stage.launch_failed", {"stage": stage, "error_type": type(exc).__name__})
     finally:
         with LOCK:
             RUNS.pop(did, None)
