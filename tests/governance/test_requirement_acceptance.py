@@ -116,7 +116,10 @@ def test_REQ_WF_002():
 
 
 def test_REQ_WF_003():
-    assert (ROOT / "command_center" / "runner.py").is_file()
+    from command_center import runner
+    assert callable(runner.start_stage)
+    assert callable(runner.stop)
+    assert callable(runner.reconcile_orphaned_runs)
 
 
 def test_REQ_WF_004():
@@ -137,11 +140,29 @@ def test_REQ_WF_007():
     assert (ROOT / "config" / "dataset_groups.yaml").is_file()
 
 
-def test_REQ_WF_008():
+def test_REQ_WF_008(monkeypatch):
     from command_center import runner
-    assert hasattr(runner, "LOCK")
-    assert hasattr(runner, "RUNS")
-    assert callable(runner.start_stage)
+
+    class FakeThread:
+        def __init__(self, *args, **kwargs):
+            pass
+        def start(self):
+            return None
+
+    monkeypatch.setattr(runner.store, "get", lambda did: {"id": did, "stages": {}})
+    monkeypatch.setattr(runner, "_write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.threading, "Thread", FakeThread)
+    with runner.LOCK:
+        runner.RUNS.pop(912345, None)
+    try:
+        assert runner.start_stage(912345, "clean") == {
+            "started": True, "dataset_id": 912345, "stage": "clean"
+        }
+        with pytest.raises(RuntimeError, match="already has a running"):
+            runner.start_stage(912345, "tokenize")
+    finally:
+        with runner.LOCK:
+            runner.RUNS.pop(912345, None)
 
 
 # DATA (001-008): persistence, integrity, provenance, and schema discipline.
@@ -290,9 +311,29 @@ def test_REQ_OPS_002():
     assert "health" in source or "status" in source
 
 
-def test_REQ_OPS_003():
-    source = _read("command_center/runner.py").lower()
-    assert any(word in source for word in ("log", "error", "exception"))
+def test_REQ_OPS_003(monkeypatch, tmp_path):
+    from command_center import runner
+
+    class FailedProcess:
+        pid = 987654
+        stdout = None
+        def wait(self):
+            return 17
+
+    events = []
+    state = {"id": 72, "stages": {}, "status": "RUNNING"}
+    monkeypatch.setattr(runner.store, "get", lambda did: dict(state))
+    monkeypatch.setattr(runner.store, "update", lambda did, **fields: state.update(fields))
+    monkeypatch.setattr(runner.store, "event", lambda did, name, payload: events.append((name, payload)))
+    monkeypatch.setattr(runner.store, "path", lambda did: tmp_path)
+    monkeypatch.setattr(runner, "_write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_clear_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: FailedProcess())
+    monkeypatch.setattr(runner, "ROOT", tmp_path)
+    runner._run(72, "clean")
+    assert state["status"] == "ERROR"
+    assert state["stages"]["clean"] == "failed"
+    assert any(name == "stage.failed" and payload["exit_code"] == 17 for name, payload in events)
 
 
 def test_REQ_OPS_004(tmp_path, monkeypatch):
