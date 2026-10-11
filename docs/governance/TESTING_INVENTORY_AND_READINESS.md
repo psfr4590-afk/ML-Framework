@@ -131,10 +131,15 @@ This inventory is a discovery baseline, not a test-run report. File presence doe
 - Latest inspected commit: `c2f536f5174cae2831c4c8c8c8233bd458e6234a`.
 - GitHub workflow-runs lookup for this SHA: **0 runs returned**.
 - Combined commit status lookup: **no status entries returned**.
-- Coverage checker: source not found at `scripts/check_test_coverage.py` or `check_test_coverage.py` in the repository file API. The checker is described as part of the separate governance ZIP, but was not executable in this environment.
+- Coverage checker: located in the supplied governance package at `v11/check_test_coverage.py` (not at the two repository paths checked). Its CLI requires `--repo-root PATH_TO_ML_FRAMEWORK`; it validates exact test-function presence only, not assertion quality or test execution. Execution remains blocked until a repository checkout is available in the execution environment.
 - Baseline SHA / branch SHA test comparison: **NOT RUN**.
 - Pytest pass/fail/skip/error counts: **UNKNOWN - NO EXECUTION EVIDENCE**.
 - Reason: repository clone/test execution is blocked by network DNS failure in the current environment; GitHub API access does not execute repository code.
 
 ### Current decision
 No claim of passing tests or CI is made. Before merge, execute the canonical checker and identical pytest commands against base and branch in a network-enabled runner, retain raw logs and exit codes, and classify each delta as pre-existing, regression, setup/environment, or flaky.
+
+
+## Evidence correction (2026-10-11)
+
+The supplied repository-mapped governance ZIP was inspected after the prior ledger update. It contains the actual coverage checker at `v11/check_test_coverage.py` and the canonical 64-row traceability register in `v11/TRACEABILITY.md`. Therefore, the checker is **located**, not missing; it has not yet been run against the development checkout because this execution environment cannot clone the repository (DNS failure). The checker is deliberately limited to checking required test-function names and must not be treated as proof of behavioral coverage. The newly supplied amendment-candidate ZIP contains 12 governance documents and no checker script; its proposed/effective status must be resolved against the authoritative v1.1.0 package before treating documents as interchangeable. The canonical traceability register states that the reviewed source snapshot was base SHA `f06bbedb55e252cd7033c615733c5d2554a7d0aa`, and marks all requirements `NOT_VERIFIED` pending evidence. No new test counts or pass claims are made.
