@@ -432,3 +432,65 @@ def test_run_git_identity_rejects_missing_or_mismatched_identity(
             database_git_sha=database_git_sha,
             expected_git_sha=expected_git_sha,
         )
+
+
+@pytest.mark.parametrize("value", [0, 1, 42])
+def test_nonnegative_checkpoint_step_accepts_integer_values(value):
+    assert verify_release._is_nonnegative_int(value) is True
+
+
+@pytest.mark.parametrize("value", [None, -1, True, False, 1.0, "1"])
+def test_nonnegative_checkpoint_step_rejects_invalid_values(value):
+    assert verify_release._is_nonnegative_int(value) is False
+
+
+def test_artifact_id_validator_accepts_kind_and_sha256():
+    assert verify_release._is_artifact_id("dataset-manifest:" + "a" * 64) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        ": " + "a" * 64,
+        "dataset-manifest",
+        "dataset-manifest:" + "a" * 63,
+        "dataset-manifest:" + "g" * 64,
+        "dataset-manifest:" + "a" * 64 + ":extra",
+    ],
+)
+def test_artifact_id_validator_rejects_malformed_ids(value):
+    assert verify_release._is_artifact_id(value) is False
+
+
+def test_lineage_evidence_requires_valid_parent_dataset_and_tokenizer_ids():
+    provenance = {
+        "run_id": "run-1",
+        "parent_artifact_ids": ["shard-manifest:" + "a" * 64],
+        "dataset_artifact_id": "dataset-manifest:" + "b" * 64,
+        "tokenizer_artifact_id": "tokenizer-manifest:" + "c" * 64,
+    }
+    assert verify_release._lineage_evidence_is_valid(provenance, "run-1") is True
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"run_id": "different-run"},
+        {"parent_artifact_ids": []},
+        {"parent_artifact_ids": ["not-an-artifact-id"]},
+        {"dataset_artifact_id": None},
+        {"dataset_artifact_id": "dataset-manifest:bad"},
+        {"tokenizer_artifact_id": ""},
+    ],
+)
+def test_lineage_evidence_rejects_missing_or_malformed_links(changes):
+    provenance = {
+        "run_id": "run-1",
+        "parent_artifact_ids": ["shard-manifest:" + "a" * 64],
+        "dataset_artifact_id": "dataset-manifest:" + "b" * 64,
+        "tokenizer_artifact_id": "tokenizer-manifest:" + "c" * 64,
+    }
+    provenance.update(changes)
+    assert verify_release._lineage_evidence_is_valid(provenance, "run-1") is False
