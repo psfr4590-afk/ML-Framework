@@ -201,6 +201,81 @@ def _native_smoke(verify_ollama: bool = False) -> int:
     return 0
 
 
+
+def _is_finite_number(value: object) -> bool:
+    """Accept finite numeric metrics, excluding booleans and non-numeric JSON values."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def _is_sha256(value: object) -> bool:
+    """Return whether value is exactly a hexadecimal SHA-256 digest."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
+def _dataset_evidence_is_valid(
+    dataset_payload: object,
+    dataset_identity: object,
+    metrics: object,
+) -> bool:
+    """Require structured, non-empty dataset evidence rather than field presence alone."""
+    return (
+        isinstance(dataset_payload, dict)
+        and bool(dataset_payload)
+        and isinstance(dataset_identity, dict)
+        and bool(dataset_identity)
+        and isinstance(metrics, dict)
+        and bool(metrics)
+    )
+
+
+def _evaluation_evidence_is_valid(train_metrics: object) -> bool:
+    """Require both recorded validation losses to be finite numeric values."""
+    return (
+        isinstance(train_metrics, dict)
+        and _is_finite_number(train_metrics.get("val_loss"))
+        and _is_finite_number(train_metrics.get("best_val_loss"))
+    )
+
+
+def _reproducibility_evidence_is_valid(train_metrics: object) -> bool:
+    """Require an integer seed and a syntactically valid random-state digest."""
+    if not isinstance(train_metrics, dict):
+        return False
+    seed = train_metrics.get("seed")
+    return (
+        isinstance(seed, int)
+        and not isinstance(seed, bool)
+        and _is_sha256(train_metrics.get("random_state_sha256"))
+    )
+
+
+def _validate_run_git_identity(
+    *, manifest: dict, database_git_sha: object, expected_git_sha: str | None
+) -> None:
+    """Ensure manifest and SQLite run identity match the source being verified."""
+    git_metadata = manifest.get("git")
+    manifest_git_sha = git_metadata.get("commit") if isinstance(git_metadata, dict) else None
+    if not isinstance(expected_git_sha, str) or not expected_git_sha:
+        raise RuntimeError("current repository commit is unavailable for run identity validation")
+    if manifest_git_sha != expected_git_sha:
+        raise RuntimeError(
+            f"run manifest git SHA mismatch: expected={expected_git_sha!r} actual={manifest_git_sha!r}"
+        )
+    if database_git_sha != manifest_git_sha:
+        raise RuntimeError(
+            f"SQLite git SHA mismatch: manifest={manifest_git_sha!r} database={database_git_sha!r}"
+        )
+
+
 def _auto_sizing_evidence(train_metrics: object) -> bool | None:
     """Read auto-sizing evidence from persisted train metrics."""
     if not isinstance(train_metrics, dict):
@@ -342,10 +417,10 @@ def _harvest_native_evidence(
         )
 
         # Dataset evidence is intentionally bounded to the local native smoke fixture.
-        evidence["dataset"] = bool(
-            dataset_payload
-            and manifest.get("dataset_identity")
-            and (manifest.get("metrics") or {})
+        evidence["dataset"] = _dataset_evidence_is_valid(
+            dataset_payload,
+            manifest.get("dataset_identity"),
+            manifest.get("metrics"),
         )
 
         # The native smoke intentionally bypasses external retrieval.
@@ -373,15 +448,9 @@ def _harvest_native_evidence(
 
         evidence["auto_sizing"] = _auto_sizing_evidence(train_metrics)
 
-        evidence["evaluation"] = bool(
-            train_metrics.get("val_loss") is not None
-            and train_metrics.get("best_val_loss") is not None
-        )
+        evidence["evaluation"] = _evaluation_evidence_is_valid(train_metrics)
 
-        evidence["reproducibility"] = bool(
-            train_metrics.get("seed") is not None
-            and train_metrics.get("random_state_sha256")
-        )
+        evidence["reproducibility"] = _reproducibility_evidence_is_valid(train_metrics)
 
         # Checkpoint evidence.
         checkpoint_dir = output / "checkpoints"
@@ -454,6 +523,12 @@ def _harvest_native_evidence(
                 raise RuntimeError(
                     f"SQLite run status is {row['status']!r}, expected PASS"
                 )
+
+            _validate_run_git_identity(
+                manifest=manifest,
+                database_git_sha=row["git_sha"],
+                expected_git_sha=_git(ROOT, "rev-parse", "HEAD"),
+            )
 
             stage_count = conn.execute(
                 "SELECT COUNT(*) FROM stages WHERE run_id = ?",
