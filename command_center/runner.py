@@ -88,9 +88,11 @@ def _same_process_identity(state: dict) -> bool:
     identity = state.get("process_identity")
     if not _pid_alive(pid):
         return False
-    # Legacy records without creation time cannot safely establish identity.
+    # Preserve a live PID when identity evidence is unavailable. This avoids
+    # killing/reclassifying an unrelated process; emit a diagnostic in future.
+    # PID-reuse detection is only definitive when creation-time evidence exists.
     if not isinstance(identity, dict) or identity.get("pid") != pid or psutil is None:
-        return False
+        return True
     try:
         return abs(psutil.Process(pid).create_time() - float(identity["create_time"])) < 0.01
     except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError, TypeError, ValueError):
