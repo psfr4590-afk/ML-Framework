@@ -11,27 +11,24 @@ import pytest
 
 
 def test_runner_stop_terminates_active_worker(monkeypatch):
-    import signal
     from command_center import runner
 
     class Process:
         pid = 991101
+
         def poll(self):
             return None
-        def wait(self, timeout=None):
-            return -signal.SIGTERM
 
     process = Process()
-    signals = []
-    def fake_killpg(pid, sig):
-        assert pid == process.pid
-        signals.append(sig)
-    monkeypatch.setattr(runner.os, "killpg", fake_killpg)
+    terminated = []
+    monkeypatch.setattr(runner, "_terminate_process_tree", lambda proc: terminated.append(proc))
     with runner.LOCK:
         runner.RUNS[991101] = process
+        runner.CANCEL_REQUESTED.discard(991101)
     try:
         assert runner.stop(991101) is True
-        assert signals == [signal.SIGTERM]
+        assert terminated == [process]
+        assert 991101 in runner.CANCEL_REQUESTED
     finally:
         with runner.LOCK:
             runner.RUNS.pop(991101, None)
@@ -184,37 +181,55 @@ def test_worker_log_redacts_injected_credential_value(monkeypatch, tmp_path):
 
 def test_stop_escalates_and_waits_for_process_tree(monkeypatch):
     from command_center import runner
-    import subprocess
-
     import signal
+    import subprocess
 
     class Process:
         pid = 765432
+
         def __init__(self):
             self.killed = False
+            self.terminated = False
             self.wait_calls = 0
+
         def poll(self):
             return None if not self.killed else -signal.SIGKILL
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
         def wait(self, timeout=None):
             self.wait_calls += 1
-            if not self.killed:
+            if timeout is not None and not self.killed:
                 raise subprocess.TimeoutExpired("worker", timeout)
             return -signal.SIGKILL
 
     proc = Process()
-    sent_signals = []
-    def fake_killpg(pid, sig):
-        assert pid == proc.pid
-        sent_signals.append(sig)
-        if sig == signal.SIGKILL:
-            proc.killed = True
-    monkeypatch.setattr(runner.os, "killpg", fake_killpg)
+    if runner.os.name == "posix":
+        sent_signals = []
+
+        def fake_killpg(pid, sig):
+            assert pid == proc.pid
+            sent_signals.append(sig)
+            if sig == signal.SIGKILL:
+                proc.killed = True
+
+        monkeypatch.setattr(runner.os, "killpg", fake_killpg)
     with runner.LOCK:
         runner.RUNS[991108] = proc
+        runner.CANCEL_REQUESTED.discard(991108)
     try:
         assert runner.stop(991108) is True
-        assert sent_signals == [signal.SIGTERM, signal.SIGKILL]
-        assert proc.killed
+        if runner.os.name == "posix":
+            assert sent_signals == [signal.SIGTERM, signal.SIGKILL]
+        else:
+            # Windows currently guarantees direct-child termination only;
+            # process-tree containment via Job Objects remains a release blocker.
+            assert proc.terminated
+            assert proc.killed
         assert proc.wait_calls >= 2
     finally:
         with runner.LOCK:
