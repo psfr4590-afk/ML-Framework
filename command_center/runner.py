@@ -56,6 +56,13 @@ def _clear_state(did: int) -> None:
         pass
 
 
+def _sensitive_environment_values(env: dict[str, str]) -> list[str]:
+    """Return values from environment variables that conventionally hold secrets."""
+    import re
+    sensitive_name = re.compile(r"(TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)", re.I)
+    return [value for name, value in env.items() if sensitive_name.search(name) and isinstance(value, str) and value]
+
+
 def _redact_text(value: str, secrets: list[str] | tuple[str, ...]) -> str:
     """Redact raw secrets and common textual encodings before logging."""
     candidates: set[str] = set()
@@ -138,9 +145,7 @@ def _run(did, stage):
         # Do not echo credential-store exceptions; messages can expose sensitive context.
         credential_env = {}
     # Child processes inherit the caller environment, not just stored credentials.
-    import re
-    sensitive_name = re.compile(r'(TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)', re.I)
-    redacted_values = [value for name, value in env.items() if sensitive_name.search(name) and isinstance(value, str) and value]
+    redacted_values = _sensitive_environment_values(env)
     def _redact_log_line(value: str) -> str:
         return _redact_text(value, redacted_values)
     cmd = [sys.executable, str(ROOT / "run_pipeline.py"), "--dataset-id", str(did), "--stages", stage]
