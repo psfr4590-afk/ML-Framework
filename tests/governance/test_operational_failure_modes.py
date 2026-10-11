@@ -193,7 +193,7 @@ def test_stop_escalates_and_waits_for_process_tree(monkeypatch):
             self.wait_calls = 0
 
         def poll(self):
-            return None if not self.killed else -signal.SIGKILL
+            return None if not self.killed else -getattr(signal, "SIGKILL", 9)
 
         def terminate(self):
             self.terminated = True
@@ -205,7 +205,7 @@ def test_stop_escalates_and_waits_for_process_tree(monkeypatch):
             self.wait_calls += 1
             if timeout is not None and not self.killed:
                 raise subprocess.TimeoutExpired("worker", timeout)
-            return -signal.SIGKILL
+            return -getattr(signal, "SIGKILL", 9)
 
     proc = Process()
     if runner.os.name == "posix":
