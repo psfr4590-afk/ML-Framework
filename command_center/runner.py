@@ -7,7 +7,13 @@ import threading
 import json
 import base64
 import urllib.parse
+import time
 from pathlib import Path
+
+try:
+    import psutil
+except ImportError:  # optional; without it, recovery fails closed for live PIDs
+    psutil = None
 
 from .config import ROOT
 from .secrets import credentials
@@ -24,11 +30,21 @@ def _state_path(did: int) -> Path:
     return store.path(did) / "runner_state.json"
 
 
+def _process_identity(pid: int | None) -> dict | None:
+    if not pid or psutil is None:
+        return None
+    try:
+        proc = psutil.Process(pid)
+        return {"pid": pid, "create_time": proc.create_time()}
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+        return None
+
+
 def _write_state(did: int, *, stage: str, pid: int | None, status: str) -> None:
     path = _state_path(did)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"schema": 1, "dataset_id": did, "stage": stage, "pid": pid, "status": status}, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps({"schema": 2, "dataset_id": did, "stage": stage, "pid": pid, "process_identity": _process_identity(pid), "status": status}, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
@@ -67,6 +83,20 @@ def _pid_alive(pid: int | None) -> bool:
     return True
 
 
+def _same_process_identity(state: dict) -> bool:
+    pid = state.get("pid")
+    identity = state.get("process_identity")
+    if not _pid_alive(pid):
+        return False
+    # Legacy records without creation time cannot safely establish identity.
+    if not isinstance(identity, dict) or identity.get("pid") != pid or psutil is None:
+        return False
+    try:
+        return abs(psutil.Process(pid).create_time() - float(identity["create_time"])) < 0.01
+    except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError, TypeError, ValueError):
+        return False
+
+
 def reconcile_orphaned_runs() -> None:
     """Recover persisted RUNNING state after a Command Center restart."""
     for dataset in store.list():
@@ -77,7 +107,7 @@ def reconcile_orphaned_runs() -> None:
             state = json.loads(state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             state = {}
-        if _pid_alive(state.get("pid")):
+        if _same_process_identity(state):
             continue
         did = int(dataset["id"])
         stage = str(state.get("stage") or next((name for name, value in dataset.get("stages", {}).items() if value == "running"), "unknown"))
@@ -113,7 +143,7 @@ def _run(did, stage):
     logp.parent.mkdir(parents=True, exist_ok=True)
     try:
         p = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, encoding="utf-8", errors="replace")
+                             text=True, encoding="utf-8", errors="replace", start_new_session=(os.name == "posix"), creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0))
         with LOCK:
             RUNS[did] = p
             _write_state(did, stage=stage, pid=getattr(p, "pid", None), status="running")
@@ -174,11 +204,24 @@ def stop(did):
         p = RUNS.get(did)
     if p is None or p is _STARTING or p.poll() is not None:
         return False
-    p.terminate()
     try:
+        if os.name == "posix":
+            import signal
+            os.killpg(p.pid, signal.SIGTERM)
+        else:
+            p.terminate()
         p.wait(timeout=STOP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
-        p.kill()
+        if os.name == "posix":
+            import signal
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            p.kill()
+        p.wait()
+    except ProcessLookupError:
         p.wait()
     return True
 
