@@ -42,12 +42,22 @@ def _tracked_paths():
 
 # UI (001-006): public operator surface and its documented entrypoints.
 def test_REQ_UI_001():
-    assert (ROOT / "command_center" / "web.py").is_file()
+    from fastapi.testclient import TestClient
+    from command_center.web import app
+
+    response = TestClient(app).get("/")
+    assert response.status_code == 200
+    assert "M²S Model Training Pipeline" in response.text
 
 
 def test_REQ_UI_002():
-    source = _read("command_center/web.py")
-    assert "FastAPI" in source
+    from fastapi.testclient import TestClient
+    from command_center.web import app
+
+    response = TestClient(app).get("/api/dashboard")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert isinstance(response.json(), dict)
 
 
 def test_REQ_UI_003():
@@ -151,9 +161,13 @@ def test_REQ_DATA_004():
     assert source.strip() and ":" in source
 
 
-def test_REQ_DATA_005():
-    sources = [p.read_text(encoding="utf-8", errors="replace") for p in ROOT.rglob("*.py")]
-    assert any(any(token in s.lower() for token in ("os.replace", "atomic", "fsync")) for s in sources)
+def test_REQ_DATA_005(tmp_path):
+    from command_center.store import atomic_json
+
+    target = tmp_path / "nested" / "state.json"
+    atomic_json(target, {"status": "complete", "count": 3})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "complete", "count": 3}
+    assert not target.with_suffix(".json.tmp").exists()
 
 
 def test_REQ_DATA_006():
@@ -275,22 +289,40 @@ def test_REQ_OPS_008():
 
 
 # SEC (001-006): traversal boundaries, loopback defaults, secrets, dependencies.
-def test_REQ_SEC_001():
-    source = _read("command_center/security.py").lower()
-    assert any(word in source for word in ("resolve", "commonpath", "travers", "path"))
+def test_REQ_SEC_001(tmp_path, monkeypatch):
+    from command_center import security
+
+    imports = tmp_path / "imports"
+    imports.mkdir()
+    (imports / "allowed.txt").write_text("safe", encoding="utf-8")
+    monkeypatch.setattr(security, "IMPORT_ROOT", imports)
+    assert security.validate_import_source("allowed.txt") == (imports / "allowed.txt").resolve()
+    with pytest.raises(ValueError):
+        security.validate_import_source("../outside.txt")
+    with pytest.raises(ValueError):
+        security.validate_import_source(str(tmp_path / "outside.txt"))
 
 
 def test_REQ_SEC_002():
-    source = _read("command_center/web.py") + _read("run_command_center.py")
-    assert "127.0.0.1" in source or "localhost" in source
+    from command_center.security import validate_tail_lines, MAX_LOG_LINES
+
+    assert validate_tail_lines(-20) == 1
+    assert validate_tail_lines(10) == 10
+    assert validate_tail_lines(MAX_LOG_LINES + 500) == MAX_LOG_LINES
 
 
 def test_REQ_SEC_003():
     assert (ROOT / ".env.example").is_file()
 
 
-def test_REQ_SEC_004():
-    assert (ROOT / "command_center" / "secrets.py").is_file()
+def test_REQ_SEC_004(monkeypatch):
+    from command_center.secrets import validate_env_var
+
+    assert validate_env_var("HF_TOKEN") == "HF_TOKEN"
+    with pytest.raises(ValueError):
+        validate_env_var("PATH")
+    with pytest.raises(ValueError):
+        validate_env_var("bad-name")
 
 
 def test_REQ_SEC_005():
