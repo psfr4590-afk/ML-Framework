@@ -494,3 +494,26 @@ def test_lineage_evidence_rejects_missing_or_malformed_links(changes):
     }
     provenance.update(changes)
     assert verify_release._lineage_evidence_is_valid(provenance, "run-1") is False
+
+
+def test_final_checkpoint_requires_final_kind_and_valid_step():
+    verify_release._validate_final_checkpoint_metadata(
+        {"checkpoint_kind": "final", "step": 12}
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        {},
+        {"checkpoint_kind": "best", "step": 12},
+        {"checkpoint_kind": "final", "step": None},
+        {"checkpoint_kind": "final", "step": -1},
+        {"checkpoint_kind": "final", "step": True},
+        {"checkpoint_kind": "final", "step": 1.0},
+    ],
+)
+def test_final_checkpoint_rejects_invalid_metadata(metadata):
+    with pytest.raises(RuntimeError):
+        verify_release._validate_final_checkpoint_metadata(metadata)
