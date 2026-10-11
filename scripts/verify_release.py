@@ -831,8 +831,15 @@ def _harvest_native_evidence(
     import shutil
     evidence_root = ROOT / "release-evidence" / "native-smoke" / run_id
     evidence_root.mkdir(parents=True, exist_ok=True)
-    for source in (run_manifest_path, dataset_report, db_path):
-        shutil.copy2(source, evidence_root / source.name)
+    durable_sources = (
+        run_manifest_path,
+        dataset_report,
+        db_path,
+        output.parent / "source_manifest.json",
+    )
+    for source in durable_sources:
+        if source.is_file():
+            shutil.copy2(source, evidence_root / source.name)
     for source in output.rglob("*"):
         if source.is_file() and (
             source.suffix.lower() == ".json" and "manifest" in source.name.lower()
