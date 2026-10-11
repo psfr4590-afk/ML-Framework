@@ -30,7 +30,7 @@ def test_worker_honors_cancel_before_spawning_subprocess(monkeypatch, tmp_path):
     monkeypatch.setattr(runner.store, "update", lambda _did, **fields: dataset.update(fields))
     monkeypatch.setattr(runner.store, "event", lambda _did, name, payload: events.append((name, payload)))
     monkeypatch.setattr(runner.store, "path", lambda _did: tmp_path)
-    monkeypatch.setattr(runner.store, "refresh_pipeline_state", lambda _did: None)
+    monkeypatch.setattr(runner.store, "refresh_pipeline_state", lambda _did: (_ for _ in ()).throw(AssertionError("cancellation state must not be overwritten")))
     monkeypatch.setattr(runner.store, "refresh_stats", lambda _did: None)
     monkeypatch.setattr(runner, "_write_state", lambda *args, **kwargs: None)
     monkeypatch.setattr(runner, "_clear_state", lambda _did: None)
