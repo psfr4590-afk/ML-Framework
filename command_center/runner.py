@@ -7,7 +7,6 @@ import threading
 import json
 import base64
 import urllib.parse
-import time
 from pathlib import Path
 
 try:
