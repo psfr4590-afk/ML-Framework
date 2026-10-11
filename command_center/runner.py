@@ -5,6 +5,8 @@ import subprocess
 import sys
 import threading
 import json
+import base64
+import urllib.parse
 from pathlib import Path
 
 from .config import ROOT
@@ -12,6 +14,7 @@ from .secrets import credentials
 from .store import store
 
 RUNS: dict[int, subprocess.Popen | object] = {}
+STOP_TIMEOUT_SECONDS = 5
 LOCK = threading.RLock()
 _STARTING = object()
 VALID_STAGES = {"crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "export"}
@@ -34,6 +37,24 @@ def _clear_state(did: int) -> None:
         _state_path(did).unlink()
     except FileNotFoundError:
         pass
+
+
+def _redact_text(value: str, secrets: list[str] | tuple[str, ...]) -> str:
+    """Redact raw secrets and common textual encodings before logging."""
+    candidates: set[str] = set()
+    for secret in secrets:
+        if not isinstance(secret, str) or not secret:
+            continue
+        candidates.add(secret)
+        candidates.add(json.dumps(secret, ensure_ascii=False))
+        candidates.add(base64.b64encode(secret.encode()).decode())
+        candidates.add(base64.urlsafe_b64encode(secret.encode()).decode())
+        candidates.add(urllib.parse.quote(secret, safe=""))
+        candidates.add(urllib.parse.quote_plus(secret))
+    for candidate in sorted(candidates, key=len, reverse=True):
+        if candidate:
+            value = value.replace(candidate, "[REDACTED]")
+    return value
 
 
 def _pid_alive(pid: int | None) -> bool:
@@ -80,19 +101,13 @@ def _run(did, stage):
     try:
         credential_env = credentials.environment()
         env.update(credential_env)
-        redacted_values = sorted(
-            {value for value in credential_env.values() if isinstance(value, str) and len(value) >= 4},
-            key=len,
-            reverse=True,
-        )
+        redacted_values = [value for value in credential_env.values() if isinstance(value, str) and value]
     except Exception:
         # Credential retrieval failure must not prevent the pipeline from running
         # with the caller's existing environment, but no unknown secret is logged.
         pass
     def _redact_log_line(value: str) -> str:
-        for secret_value in redacted_values:
-            value = value.replace(secret_value, "[REDACTED]")
-        return value
+        return _redact_text(value, redacted_values)
     cmd = [sys.executable, str(ROOT / "run_pipeline.py"), "--dataset-id", str(did), "--stages", stage]
     logp = store.path(did) / "logs" / "command-center.log"
     logp.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +175,11 @@ def stop(did):
     if p is None or p is _STARTING or p.poll() is not None:
         return False
     p.terminate()
+    try:
+        p.wait(timeout=STOP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
     return True
 
 
