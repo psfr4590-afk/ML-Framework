@@ -24,7 +24,7 @@ python .\\scripts\\verify_release.py
 For the full native release gate, use:
 
 ```powershell
-python .\\scripts\\verify_release.py --bootstrap-native --ui-probe --clean-clone
+python .\\scripts\\verify_release.py --profile rc --bootstrap-native --ui-probe --clean-clone
 ```
 
 Target-machine checks should be run on the hardware that will actually execute training or export. Native and production evidence must be recorded separately from static CI results.
