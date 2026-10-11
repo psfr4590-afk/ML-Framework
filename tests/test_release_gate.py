@@ -88,6 +88,15 @@ def test_source_retrieval_smoke_exercises_offline_upstream_stages():
     assert verify_release._source_retrieval_smoke() is True
 
 
+def test_offline_pipeline_smoke_does_not_claim_live_source_retrieval(monkeypatch):
+    verify_release.NATIVE_EVIDENCE.clear()
+    monkeypatch.setattr(verify_release, "_source_retrieval_smoke", lambda: True)
+
+    assert verify_release._record_source_pipeline_integration_smoke() is True
+    assert verify_release.NATIVE_EVIDENCE["source_pipeline_integration"] is True
+    assert "source_retrieval" not in verify_release.NATIVE_EVIDENCE
+
+
 def test_rc_report_fails_when_source_retrieval_evidence_is_missing(tmp_path, monkeypatch):
     _seed_report_environment(tmp_path, monkeypatch)
     verify_release.NATIVE_EVIDENCE.clear()
