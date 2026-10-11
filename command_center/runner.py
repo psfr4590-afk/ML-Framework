@@ -202,7 +202,7 @@ def _run(did, stage):
         # Reconcile artifacts after the process exits, but preserve an explicit
         # failed stage rather than allowing refresh to hide it behind STALE/IN_PROGRESS.
         final = store.get(did)
-        if final and final.get("stages", {}).get(stage) != "failed":
+        if final and final.get("status") != "CANCELLED" and final.get("stages", {}).get(stage) not in {"failed", "cancelled"}:
             store.refresh_pipeline_state(did)
 
 
