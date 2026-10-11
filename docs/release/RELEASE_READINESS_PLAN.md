@@ -40,11 +40,19 @@ Static verification:
 python scripts/verify_release.py
 ```
 
-Full native RC/release verification:
+Native smoke verification (native export and inference, but not full RC certification):
 
 ```text
 python scripts/verify_release.py --bootstrap-native
 ```
+
+Full release-candidate verification (also requires the UI/backend probe and clean-clone acceptance path):
+
+```text
+python scripts/verify_release.py --profile rc --bootstrap-native --ui-probe --clean-clone
+```
+
+Add `--verify-ollama` when Ollama deployment verification is part of the release target. The `--bootstrap-native` flag alone selects the `native-smoke` profile; it does not implicitly run the full RC profile.
 
 The native gate is intentionally separate from ordinary CI because it requires the pinned llama.cpp toolchain and a target environment. A green CI run is necessary but is not sufficient for a native production release.
 
