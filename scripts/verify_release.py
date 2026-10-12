@@ -21,8 +21,11 @@ from email.parser import Parser
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 NATIVE_EVIDENCE: dict[str, object] = {}
+SOURCE_MANIFEST_PATH: Path | None = None
+SOURCE_RUN_MANIFEST_PATH: Path | None = None
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
@@ -87,8 +90,167 @@ def _validate_source_manifest(path: Path) -> None:
         if digest is not None and (not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest.lower())): raise RuntimeError("Source manifest raw_source_sha256 is invalid")
 
 
+
+def _source_retrieval_smoke() -> bool:
+    """Exercise crawl -> clean -> dedup -> weight using a deterministic offline crawler."""
+    import yaml
+    import pipeline.orchestrator as orchestrator
+
+    source = ROOT / "config" / "pipeline_config.smoke.yaml"
+    config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    with tempfile.TemporaryDirectory(prefix="model-lab-source-smoke-") as tmp:
+        tmp_root = Path(tmp)
+        output = tmp_root / "output"
+        scratch = tmp_root / "scratch"
+        output.mkdir()
+        scratch.mkdir()
+        groups_path = tmp_root / "dataset_groups.yaml"
+        groups_path.write_text(
+            yaml.safe_dump({
+                "dataset_groups": [{
+                    "id": "release-source-smoke",
+                    "name": "Offline source retrieval verification",
+                    "sources": {
+                        "web": True, "github": False, "arxiv": False,
+                        "huggingface": False, "google": False,
+                    },
+                    "web": {"seed_urls": ["https://example.invalid/release-smoke"]},
+                }]
+            }, sort_keys=False),
+            encoding="utf-8",
+        )
+        config.setdefault("pipeline", {})["output_dir"] = str(output)
+        config["pipeline"]["scratch_dir"] = str(scratch)
+        config["pipeline"]["resume"] = False
+        config["stages"] = {
+            "crawl": True, "clean": True, "dedup": True, "weight": True,
+            "tokenize": False, "shard": False, "train": False, "export": False,
+        }
+        config.setdefault("crawl", {})["dataset_groups_file"] = str(groups_path)
+        config["crawl"]["sources"] = {
+            "web": True, "github": False, "arxiv": False,
+            "huggingface": False, "google": False,
+        }
+        config["crawl"]["web"] = {"seed_urls": ["https://example.invalid/release-smoke"]}
+        config_path = tmp_root / "source_smoke.yaml"
+        config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+        base_text = (
+            "This deterministic offline source retrieval fixture exercises the production "
+            "pipeline crawl, clean, deduplication, and weighting stages. It contains "
+            "technical details about data validation, artifact integrity, reproducible "
+            "processing, configuration, and provenance tracking. The fixture is deliberately "
+            "long enough to pass the configured cleaner and does not require network access."
+        )
+
+        class OfflineCrawler:
+            def __init__(self, _config, _weights, _signals):
+                self.stats = {"errors": 0, "skipped": 0}
+
+            def crawl(self):
+                from pipeline.types import Document
+                yield Document(
+                    doc_id="release-source-1",
+                    url="https://example.invalid/release-smoke/1",
+                    source="web",
+                    title="Offline source fixture one",
+                    text=base_text,
+                    meta={},
+                )
+                yield Document(
+                    doc_id="release-source-2",
+                    url="https://example.invalid/release-smoke/2",
+                    source="web",
+                    title="Offline source fixture two",
+                    text=base_text + " Additional unique material describes corpus weighting and dataset provenance.",
+                    meta={},
+                )
+
+            def observability(self):
+                return {
+                    "request_count": 1, "document_count": 2, "rate_limited": 0,
+                    "revisions": [], "licenses": ["project-test-fixture"],
+                    "source_hash": "offline-release-fixture",
+                }
+
+        original_load_class = orchestrator._load_class
+
+        def offline_load_class(module, name):
+            if module == "pipeline.crawler.web_crawler" and name == "WebCrawler":
+                return OfflineCrawler
+            return original_load_class(module, name)
+
+        orchestrator._load_class = offline_load_class
+        pipeline = None
+        try:
+            from pipeline.orchestrator import Pipeline, _source_manifest_is_valid
+            pipeline = Pipeline(str(config_path), resume=False)
+            crawled = pipeline.stage_crawl()
+            cleaned = pipeline.stage_clean(crawled)
+            deduped = pipeline.stage_embed_dedup(cleaned)
+            weighted = pipeline.stage_weight(deduped)
+
+            if not _source_manifest_is_valid(pipeline._source_manifest_path):
+                raise RuntimeError("Source smoke source manifest failed validation")
+            source_manifest = json.loads(
+                pipeline._source_manifest_path.read_text(encoding="utf-8")
+            )
+            if not source_manifest.get("sources"):
+                raise RuntimeError("Source smoke source manifest contains no source definitions")
+            if not source_manifest.get("retrieval_completed_at"):
+                raise RuntimeError("Source smoke source manifest lacks retrieval completion evidence")
+
+            from pipeline.integrity import artifact_valid
+            artifacts = [
+                (crawled, "crawl"), (cleaned, "clean"),
+                (deduped, "dedup"), (weighted, "weight"),
+            ]
+            for path, stage in artifacts:
+                manifest_path = path.with_name(path.name + ".manifest.json")
+                if not path.is_file() or not manifest_path.is_file():
+                    raise RuntimeError(f"Source smoke missing {stage} artifact or manifest")
+                if not artifact_valid(path):
+                    raise RuntimeError(f"Source smoke {stage} artifact failed integrity validation")
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if manifest.get("rows", 0) < 1:
+                    raise RuntimeError(f"Source smoke {stage} artifact contains no rows")
+                provenance = manifest.get("provenance", {})
+                if provenance.get("stage") != stage:
+                    raise RuntimeError(f"Source smoke {stage} manifest has incorrect stage provenance")
+
+            records = [
+                json.loads(line)
+                for line in weighted.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if not records or not all(
+                isinstance(record.get("final_weight"), (int, float))
+                and not isinstance(record.get("final_weight"), bool)
+                for record in records
+            ):
+                raise RuntimeError("Source smoke weighted output lacks final_weight values")
+            return True
+        except Exception as exc:
+            print(f"Source retrieval smoke failed: {exc}")
+            return False
+        finally:
+            if pipeline is not None:
+                pipeline.close()
+            orchestrator._load_class = original_load_class
+
+
+
+def _record_source_pipeline_integration_smoke() -> bool:
+    """Record the offline upstream-stage smoke without claiming live source retrieval."""
+    passed = _source_retrieval_smoke()
+    NATIVE_EVIDENCE["source_pipeline_integration"] = passed
+    return passed
+
+
 def _native_smoke(verify_ollama: bool = False) -> int:
     source = ROOT / "config" / "pipeline_config.smoke.yaml"; config = yaml.safe_load(source.read_text(encoding="utf-8")) or {}; config["stages"] = {"crawl": False, "clean": False, "dedup": False, "weight": False, "tokenize": True, "shard": True, "train": True, "export": True}
+    if not _record_source_pipeline_integration_smoke():
+        return 2
     with tempfile.TemporaryDirectory(prefix="model-lab-release-") as tmp:
         tmp_root = Path(tmp); output = tmp_root / "output"; scratch = tmp_root / "scratch"; config.setdefault("pipeline", {})["output_dir"] = str(output); config["pipeline"]["scratch_dir"] = str(scratch); config["pipeline"]["resume"] = False; config.setdefault("export", {})["llamacpp_dir"] = str(ROOT / "third_party" / "llama.cpp"); config["export"]["quant"] = "ALL"; config_path = tmp_root / "release_smoke.yaml"; config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8"); from pipeline.orchestrator import Pipeline
         smoke_pipeline = Pipeline(str(config_path), resume=False)
@@ -394,6 +556,146 @@ def _validate_checkpoint_identity_chain(expected: dict, actual: dict) -> None:
             raise RuntimeError(f"checkpoint provenance identity mismatch: {key}")
 
 
+def _live_source_retrieval_evidence_is_valid(
+    *,
+    source_manifest_path: Path,
+    expected_run_id: str | None = None,
+    stages: dict | None = None,
+    source_run_manifest_path: Path | None = None,
+) -> bool | None:
+    """Validate a real online crawl against its own durable run and source manifests.
+
+    The independent source run is not required to share the native training smoke's
+    run ID. Fixture-based pipeline tests are not evidence of external retrieval.
+    """
+    try:
+        # RC certification must be tied to a completed independent run, not just
+        # counters in a source manifest. Without the run manifest, evidence is
+        # unknown rather than a pass.
+        if source_run_manifest_path is None:
+            return None
+        run_manifest = json.loads(source_run_manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(run_manifest, dict):
+            return False
+        if run_manifest.get("final_status") != "PASS":
+            return False
+        if run_manifest.get("errors") or run_manifest.get("degraded_stages"):
+            return False
+        expected_run_id = run_manifest.get("run_id")
+        stages = run_manifest.get("stages")
+        if not isinstance(expected_run_id, str) or not expected_run_id:
+            return False
+        if not isinstance(stages, dict):
+            return False
+        crawl_stage = stages.get("crawl")
+        if not isinstance(crawl_stage, dict) or crawl_stage.get("status") != "PASS":
+            return False
+        if crawl_stage.get("errors"):
+            return False
+        stage_start = datetime.fromisoformat(str(crawl_stage.get("start", "")).replace("Z", "+00:00"))
+        stage_end = datetime.fromisoformat(str(crawl_stage.get("end", "")).replace("Z", "+00:00"))
+        if stage_start.tzinfo is None or stage_end.tzinfo is None or stage_end < stage_start:
+            return False
+
+        data = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or int(data.get("schema", 0)) < 3:
+            return False
+        if data.get("run_id") != expected_run_id:
+            return False
+        if not _is_sha256(data.get("source_definition_sha256")):
+            return False
+        if not data.get("retrieval_started_at") or not data.get("retrieval_completed_at"):
+            return False
+        started = datetime.fromisoformat(str(data["retrieval_started_at"]).replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(str(data["retrieval_completed_at"]).replace("Z", "+00:00"))
+        if started.tzinfo is None or completed.tzinfo is None or completed < started:
+            return False
+        if started < stage_start or completed > stage_end:
+            return False
+
+        sources = data.get("sources")
+        if not isinstance(sources, list) or not sources:
+            return False
+        configured_kinds = {
+            source.get("kind") for source in sources
+            if isinstance(source, dict)
+        } & {"web", "github", "arxiv", "huggingface", "google"}
+        if not configured_kinds:
+            return False
+        retrieval = data.get("retrieval")
+        if not isinstance(retrieval, list) or not retrieval:
+            return False
+
+        successful_counts: dict[str, int] = {}
+        for record in retrieval:
+            if not isinstance(record, dict) or record.get("kind") not in configured_kinds:
+                continue
+            if str(record.get("status", "")).upper() != "SUCCESS":
+                continue
+            stats = record.get("stats")
+            if not isinstance(stats, dict):
+                stats = record
+            documents = stats.get("document_count", 0)
+            requests = stats.get("request_count", 0)
+            if not _is_nonnegative_int(documents) or not _is_nonnegative_int(requests):
+                return False
+            if documents > 0 and requests > 0:
+                kind = str(record["kind"])
+                successful_counts[kind] = successful_counts.get(kind, 0) + documents
+        if not successful_counts:
+            return False
+
+        # Bind claimed retrieval to the actual crawl artifact. The run manifest
+        # must contain a SHA-256-addressed crawl output that still matches disk;
+        # that JSONL must contain non-empty HTTP(S) documents from the claimed
+        # online source kinds. Positive counters alone are not retrieval proof.
+        outputs = crawl_stage.get("outputs")
+        if not isinstance(outputs, list) or not outputs:
+            return False
+        verified_documents: dict[str, int] = {}
+        for artifact in outputs:
+            if not isinstance(artifact, dict):
+                continue
+            artifact_path = artifact.get("path")
+            artifact_digest = artifact.get("sha256")
+            if not isinstance(artifact_path, str) or not _is_sha256(artifact_digest):
+                continue
+            path = Path(artifact_path)
+            if not path.is_absolute():
+                path = ROOT / path
+            path = path.resolve()
+            try:
+                path.relative_to(ROOT.resolve())
+            except ValueError:
+                return False
+            if not path.is_file() or _sha256(path) != artifact_digest:
+                return False
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        document = json.loads(line)
+                        if not isinstance(document, dict):
+                            return False
+                        kind = document.get("source")
+                        url = document.get("url")
+                        content = document.get("text")
+                        if kind not in successful_counts or not isinstance(url, str):
+                            continue
+                        parsed_url = urlsplit(url)
+                        if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+                            continue
+                        if not isinstance(content, str) or not content.strip():
+                            continue
+                        verified_documents[str(kind)] = verified_documents.get(str(kind), 0) + 1
+            except (OSError, UnicodeError, ValueError, TypeError):
+                return False
+        return any(verified_documents.get(kind, 0) > 0 for kind in successful_counts)
+    except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):
+        return False
+
+
 def _harvest_native_evidence(
     *,
     output: Path,
@@ -449,22 +751,22 @@ def _harvest_native_evidence(
                 "required native stages are not all PASS"
             )
 
-        skipped_upstream = ("crawl", "clean", "dedup", "weight")
-        source_retrieval_exercised = any(
-            (stages.get(name) or {}).get("status") == "PASS"
-            for name in skipped_upstream
-        )
+        # The native release smoke deliberately uses a pre-weighted local fixture.
+        # Online retrieval must be supplied as an independent completed crawl run;
+        # never infer it from the offline integration smoke or synthetic smoke manifest.
+        if SOURCE_MANIFEST_PATH is not None and SOURCE_RUN_MANIFEST_PATH is not None:
+            evidence["source_retrieval"] = _live_source_retrieval_evidence_is_valid(
+                source_manifest_path=SOURCE_MANIFEST_PATH,
+                source_run_manifest_path=SOURCE_RUN_MANIFEST_PATH,
+            )
+        else:
+            evidence["source_retrieval"] = None
 
         # Dataset evidence is intentionally bounded to the local native smoke fixture.
         evidence["dataset"] = _dataset_evidence_is_valid(
             dataset_payload,
             manifest.get("dataset_identity"),
             manifest.get("metrics"),
-        )
-
-        # The native smoke intentionally bypasses external retrieval.
-        evidence["source_retrieval"] = (
-            True if source_retrieval_exercised else None
         )
 
         train_metrics = (
@@ -599,7 +901,9 @@ def _harvest_native_evidence(
         print(f"Native evidence validation failed: {exc}")
         validated_export = NATIVE_EVIDENCE.get("export") is True
         validated_inference = NATIVE_EVIDENCE.get("inference") is True
+        validated_source_retrieval = NATIVE_EVIDENCE.get("source_retrieval") is True
         NATIVE_EVIDENCE.clear()
+        NATIVE_EVIDENCE["source_retrieval"] = validated_source_retrieval
         NATIVE_EVIDENCE["provenance"] = False
         NATIVE_EVIDENCE["lineage"] = False
         NATIVE_EVIDENCE["dataset"] = False
@@ -618,8 +922,15 @@ def _harvest_native_evidence(
     import shutil
     evidence_root = ROOT / "release-evidence" / "native-smoke" / run_id
     evidence_root.mkdir(parents=True, exist_ok=True)
-    for source in (run_manifest_path, dataset_report, db_path):
-        shutil.copy2(source, evidence_root / source.name)
+    durable_sources = (
+        run_manifest_path,
+        dataset_report,
+        db_path,
+        output.parent / "source_manifest.json",
+    )
+    for source in durable_sources:
+        if source.is_file():
+            shutil.copy2(source, evidence_root / source.name)
     for source in output.rglob("*"):
         if source.is_file() and (
             source.suffix.lower() == ".json" and "manifest" in source.name.lower()
@@ -864,10 +1175,6 @@ def _write_release_report(
         "rc": {check["name"] for check in checks},
     }
     required_names = set(required_by_profile[profile])
-    if profile == "rc" and evidence.get("source_retrieval") is not True:
-        # The bounded RC smoke fixture intentionally bypasses crawl/clean/dedup/weight.
-        # Source retrieval is required only when the run actually exercised it.
-        required_names.discard("source_retrieval")
     if profile == "native-smoke":
         if "ui_backend_connectivity" in evidence:
             required_names.add("ui_backend_connectivity")
@@ -936,12 +1243,27 @@ def main() -> int:
     parser.add_argument("--ui-probe", action="store_true", help="probe the localhost FastAPI backend")
     parser.add_argument("--clean-clone", action="store_true", help="exercise the documented clone/install/doctor/smoke path in a temporary clone")
     parser.add_argument(
+        "--source-manifest",
+        type=Path,
+        help="source_manifest.json from an independently completed online crawl run",
+    )
+    parser.add_argument(
+        "--source-run-manifest",
+        type=Path,
+        help="run_manifest.json from that same online crawl run",
+    )
+    parser.add_argument(
         "--profile",
         choices=("static", "native-smoke", "rc"),
         default=None,
-        help="verification profile; rc requires --bootstrap-native, --ui-probe, and --clean-clone",
+        help="verification profile; rc requires native, UI, clean-clone, and independent online-crawl evidence",
     )
     args = parser.parse_args()
+    global SOURCE_MANIFEST_PATH, SOURCE_RUN_MANIFEST_PATH
+    SOURCE_MANIFEST_PATH = args.source_manifest
+    SOURCE_RUN_MANIFEST_PATH = args.source_run_manifest
+    if (SOURCE_MANIFEST_PATH is None) != (SOURCE_RUN_MANIFEST_PATH is None):
+        parser.error("--source-manifest and --source-run-manifest must be supplied together")
     profile = args.profile or (
         "native-smoke" if args.bootstrap_native else "static"
     )
@@ -955,6 +1277,8 @@ def main() -> int:
         parser.error("--profile rc requires --ui-probe")
     if profile == "rc" and not args.clean_clone:
         parser.error("--profile rc requires --clean-clone")
+    if profile == "rc" and SOURCE_MANIFEST_PATH is None:
+        parser.error("--profile rc requires --source-manifest and --source-run-manifest")
     if args.skip_tests: print("RELEASE VERIFICATION FAILED: --skip-tests is not allowed for a production verification."); return 2
     failures: list[str] = []; compile_targets = ["pipeline", "command_center", "scripts", "ui", "run_pipeline.py", "run_command_center.py", "launch.py"]
     if run([sys.executable, "-m", "compileall", "-q", *compile_targets]): failures.append("compileall")

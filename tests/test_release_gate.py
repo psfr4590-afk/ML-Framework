@@ -84,7 +84,20 @@ def test_rc_report_fails_when_package_validation_fails(tmp_path, monkeypatch):
 
 
 
-def test_rc_report_accepts_auto_sizing_evaluated_false(tmp_path, monkeypatch):
+def test_source_retrieval_smoke_exercises_offline_upstream_stages():
+    assert verify_release._source_retrieval_smoke() is True
+
+
+def test_offline_pipeline_smoke_does_not_claim_live_source_retrieval(monkeypatch):
+    verify_release.NATIVE_EVIDENCE.clear()
+    monkeypatch.setattr(verify_release, "_source_retrieval_smoke", lambda: True)
+
+    assert verify_release._record_source_pipeline_integration_smoke() is True
+    assert verify_release.NATIVE_EVIDENCE["source_pipeline_integration"] is True
+    assert "source_retrieval" not in verify_release.NATIVE_EVIDENCE
+
+
+def test_rc_report_fails_when_source_retrieval_evidence_is_missing(tmp_path, monkeypatch):
     _seed_report_environment(tmp_path, monkeypatch)
     verify_release.NATIVE_EVIDENCE.clear()
     verify_release.NATIVE_EVIDENCE.update({
@@ -98,22 +111,23 @@ def test_rc_report_accepts_auto_sizing_evaluated_false(tmp_path, monkeypatch):
 
     assert verify_release._write_release_report(
         static_failures=[], native_requested=True, native_rc=0, profile="rc"
-    ) == 0
+    ) == 2
     report = json.loads(
         (tmp_path / "release-evidence" / "release_report.json").read_text(encoding="utf-8")
     )
     statuses = {item["name"]: item["status"] for item in report["checks"]}
+    assert report["status"] == "FAIL"
     assert statuses["auto_sizing"] == "PASS"
     assert statuses["source_retrieval"] == "UNKNOWN"
-    assert "source_retrieval" not in report["required_checks"]
+    assert "source_retrieval" in report["required_checks"]
 
 
-def test_rc_source_retrieval_required_only_when_executed(tmp_path, monkeypatch):
+def test_rc_source_retrieval_evidence_must_be_explicitly_true(tmp_path, monkeypatch):
     _seed_report_environment(tmp_path, monkeypatch)
     verify_release.NATIVE_EVIDENCE.clear()
     verify_release.NATIVE_EVIDENCE.update({
         "provenance": True, "lineage": True, "dataset": True,
-        "source_retrieval": None, "checkpoint": True, "best_checkpoint": True,
+        "source_retrieval": False, "checkpoint": True, "best_checkpoint": True,
         "reproducibility": True, "hardware": True, "auto_sizing": False,
         "eta": True, "evaluation": True, "sqlite": True, "export": True,
         "inference": True, "ui_backend_connectivity": True, "clean_clone": True,
@@ -122,10 +136,12 @@ def test_rc_source_retrieval_required_only_when_executed(tmp_path, monkeypatch):
 
     assert verify_release._write_release_report(
         static_failures=[], native_requested=True, native_rc=0, profile="rc"
-    ) == 0
+    ) == 2
     report_path = tmp_path / "release-evidence" / "release_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert "source_retrieval" not in report["required_checks"]
+    assert "source_retrieval" in report["required_checks"]
+    statuses = {item["name"]: item["status"] for item in report["checks"]}
+    assert statuses["source_retrieval"] == "FAIL"
 
     verify_release.NATIVE_EVIDENCE["source_retrieval"] = True
     assert verify_release._write_release_report(
@@ -562,3 +578,162 @@ def test_final_checkpoint_requires_final_kind_and_valid_step():
 def test_final_checkpoint_rejects_invalid_metadata(metadata):
     with pytest.raises(RuntimeError):
         verify_release._validate_final_checkpoint_metadata(metadata)
+
+
+
+def test_online_source_evidence_uses_matching_independent_run_manifests(
+    tmp_path, monkeypatch
+):
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
+    ) is True
+
+
+@pytest.mark.parametrize("run_manifest_changes", [
+    {"final_status": "FAIL"},
+    {"errors": ["crawler failed"]},
+    {"degraded_stages": ["crawl"]},
+    {"run_id": "different-run"},
+    {"stages": {"crawl": {"status": "SKIPPED"}}},
+])
+def test_online_source_evidence_rejects_failed_or_mismatched_run(
+    tmp_path, monkeypatch, run_manifest_changes
+):
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
+    run_manifest = json.loads(run_path.read_text(encoding="utf-8"))
+    run_manifest.update(run_manifest_changes)
+    run_path.write_text(json.dumps(run_manifest), encoding="utf-8")
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
+    ) is False
+
+
+def test_local_filesystem_retrieval_does_not_claim_online_retrieval(
+    tmp_path, monkeypatch
+):
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
+    source_manifest = json.loads(source_path.read_text(encoding="utf-8"))
+    source_manifest["sources"] = [
+        {"kind": "local_files", "identifier": "E:/USB/corpus"}
+    ]
+    source_manifest["retrieval"] = [{
+        "kind": "local_files", "source_mode": "local", "status": "SUCCESS",
+        "stats": {"document_count": 12, "request_count": 12},
+    }]
+    source_path.write_text(json.dumps(source_manifest), encoding="utf-8")
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
+    ) is False
+
+
+def _write_live_source_evidence_fixture(tmp_path, monkeypatch, *, fault=None):
+    monkeypatch.setattr(verify_release, "ROOT", tmp_path)
+    run_id = "online-run-1"
+    crawl_path = tmp_path / "output" / "runs" / run_id / "01_crawled.jsonl"
+    crawl_path.parent.mkdir(parents=True)
+    document = {
+        "doc_id": "doc-1",
+        "source": "web",
+        "url": "https://example.com/research",
+        "text": "A real fetched document body with enough content to prove non-empty retrieval.",
+    }
+    if fault == "local_url":
+        document["url"] = "file:///tmp/fixture.txt"
+    if fault == "empty_body":
+        document["text"] = "  "
+    crawl_path.write_text(json.dumps(document) + "\n", encoding="utf-8")
+    digest = verify_release._sha256(crawl_path)
+    if fault == "tampered_artifact":
+        digest = "0" * 64
+
+    source_manifest = {
+        "schema": 3,
+        "run_id": run_id if fault != "mismatched_run_id" else "other-run",
+        "source_definition_sha256": "a" * 64,
+        "retrieval_started_at": "2026-01-01T00:00:01+00:00",
+        "retrieval_completed_at": "2026-01-01T00:00:09+00:00",
+        "sources": [{"kind": "web", "identifier": "https://example.com"}],
+        "retrieval": [{
+            "kind": "web",
+            "status": "SUCCESS",
+            "stats": {
+                "document_count": True if fault == "boolean_count" else 1,
+                "request_count": 1,
+            },
+        }],
+    }
+    source_path = tmp_path / "source_manifest.json"
+    source_path.write_text(json.dumps(source_manifest), encoding="utf-8")
+
+    crawl_stage = {
+        "status": "PASS",
+        "start": "2026-01-01T00:00:00+00:00",
+        "end": "2026-01-01T00:00:10+00:00",
+        "errors": [],
+        "outputs": [{"path": crawl_path.relative_to(tmp_path).as_posix(), "sha256": digest}],
+    }
+    if fault == "failed_crawl":
+        crawl_stage["status"] = "FAILED"
+    if fault == "timestamp_outside_run":
+        source_manifest["retrieval_completed_at"] = "2026-01-01T00:00:11+00:00"
+        source_path.write_text(json.dumps(source_manifest), encoding="utf-8")
+    if fault == "missing_output":
+        crawl_stage["outputs"] = []
+
+    run_manifest = {
+        "run_id": run_id,
+        "final_status": "PASS",
+        "errors": [],
+        "degraded_stages": [],
+        "stages": {"crawl": crawl_stage},
+    }
+    run_path = tmp_path / "run_manifest.json"
+    run_path.write_text(json.dumps(run_manifest), encoding="utf-8")
+    return source_path, run_path
+
+
+def test_live_source_retrieval_requires_hashed_http_document_and_matching_run(
+    tmp_path, monkeypatch
+):
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "tampered_artifact",
+        "local_url",
+        "empty_body",
+        "mismatched_run_id",
+        "failed_crawl",
+        "timestamp_outside_run",
+        "missing_output",
+        "boolean_count",
+    ],
+)
+def test_live_source_retrieval_rejects_unsubstantiated_or_invalid_evidence(
+    tmp_path, monkeypatch, fault
+):
+    source_path, run_path = _write_live_source_evidence_fixture(
+        tmp_path, monkeypatch, fault=fault
+    )
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
+    ) is False
+
+
+def test_live_source_retrieval_is_unknown_without_independent_run_manifest(tmp_path):
+    source_path = tmp_path / "source_manifest.json"
+    source_path.write_text("{}", encoding="utf-8")
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_path,
+    ) is None
