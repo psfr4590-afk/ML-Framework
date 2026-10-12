@@ -156,7 +156,7 @@ Requirement identifiers are stable. Status should be tracked separately in an im
 
 **REQ-REL-006 — Honest release gate.** Any mandatory criterion marked failed, blocked, or not tested shall prevent a release from being described as fully certified.
 
-**REQ-REL-007 — Evidence retention and release status.** Test reports and release evidence shall be retained in a form that can be reviewed and tied to the candidate. Release records shall summarize mandatory criteria using the controlled statuses `PASS`, `FAIL`, `BLOCKED`, `SKIPPED`, and `NOT RUN`.
+**REQ-REL-007 — Evidence retention.** Test reports and release evidence shall be retained in a form that can be reviewed and tied to the candidate.
 
 ## 11. Requirement quality rules
 
