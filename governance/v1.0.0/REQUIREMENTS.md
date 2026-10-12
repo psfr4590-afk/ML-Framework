@@ -87,7 +87,7 @@ Requirement IDs are stable identifiers. Verification may use inspection, analysi
 - **REQ-REL-004:** Installation and startup must not depend on undeclared local state.
 - **REQ-REL-005:** Artifact export and associated documentation must pass integrity validation.
 - **REQ-REL-006:** Release claims must not exceed available verification evidence.
-- **REQ-REL-007:** Release records must distinguish pass, fail, blocked, skipped, and not tested.
+- **REQ-REL-007:** Release records must use the controlled statuses `PASS`, `FAIL`, `BLOCKED`, `SKIPPED`, and `NOT RUN`.
 
 ## 10. Baseline authority
 
