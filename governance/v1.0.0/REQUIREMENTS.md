@@ -164,4 +164,4 @@ Each approved requirement must be uniquely identified, necessary, unambiguous, f
 
 ## 12. Change history
 
-Version 1.0.0 establishes the proposed foundational requirements baseline informed by project experience. Approval and later revisions must be recorded explicitly.
+Version 1.0.0 establishes the approved foundational requirements baseline informed by project experience. Approval is recorded in the document metadata; later revisions must be recorded explicitly.
