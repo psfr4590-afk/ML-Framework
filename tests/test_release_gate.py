@@ -636,32 +636,13 @@ def test_final_checkpoint_rejects_invalid_metadata(metadata):
 
 
 
-def test_online_source_evidence_uses_matching_independent_run_manifests(tmp_path):
-    source_manifest_path = tmp_path / "source_manifest.json"
-    run_manifest_path = tmp_path / "run_manifest.json"
-    source_manifest_path.write_text(json.dumps({
-        "schema": 3,
-        "run_id": "online-crawl-42",
-        "source_definition_sha256": "a" * 64,
-        "retrieval_started_at": "2026-10-11T10:00:00+00:00",
-        "retrieval_completed_at": "2026-10-11T10:01:00+00:00",
-        "sources": [{"kind": "web", "identifier": "https://example.com"}],
-        "retrieval": [{
-            "kind": "web", "status": "SUCCESS",
-            "document_count": 2, "request_count": 1,
-        }],
-    }), encoding="utf-8")
-    run_manifest_path.write_text(json.dumps({
-        "run_id": "online-crawl-42",
-        "final_status": "PASS",
-        "errors": [],
-        "degraded_stages": [],
-        "stages": {"crawl": {"status": "PASS"}},
-    }), encoding="utf-8")
-
+def test_online_source_evidence_uses_matching_independent_run_manifests(
+    tmp_path, monkeypatch
+):
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
     assert verify_release._live_source_retrieval_evidence_is_valid(
-        source_manifest_path=source_manifest_path,
-        source_run_manifest_path=run_manifest_path,
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
     ) is True
 
 
@@ -673,65 +654,34 @@ def test_online_source_evidence_uses_matching_independent_run_manifests(tmp_path
     {"stages": {"crawl": {"status": "SKIPPED"}}},
 ])
 def test_online_source_evidence_rejects_failed_or_mismatched_run(
-    tmp_path, run_manifest_changes
+    tmp_path, monkeypatch, run_manifest_changes
 ):
-    source_manifest_path = tmp_path / "source_manifest.json"
-    run_manifest_path = tmp_path / "run_manifest.json"
-    source_manifest_path.write_text(json.dumps({
-        "schema": 3,
-        "run_id": "online-crawl-42",
-        "source_definition_sha256": "a" * 64,
-        "retrieval_started_at": "2026-10-11T10:00:00+00:00",
-        "retrieval_completed_at": "2026-10-11T10:01:00+00:00",
-        "sources": [{"kind": "web", "identifier": "https://example.com"}],
-        "retrieval": [{
-            "kind": "web", "status": "SUCCESS",
-            "document_count": 2, "request_count": 1,
-        }],
-    }), encoding="utf-8")
-    run_manifest = {
-        "run_id": "online-crawl-42",
-        "final_status": "PASS",
-        "errors": [],
-        "degraded_stages": [],
-        "stages": {"crawl": {"status": "PASS"}},
-    }
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
+    run_manifest = json.loads(run_path.read_text(encoding="utf-8"))
     run_manifest.update(run_manifest_changes)
-    run_manifest_path.write_text(json.dumps(run_manifest), encoding="utf-8")
-
+    run_path.write_text(json.dumps(run_manifest), encoding="utf-8")
     assert verify_release._live_source_retrieval_evidence_is_valid(
-        source_manifest_path=source_manifest_path,
-        source_run_manifest_path=run_manifest_path,
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
     ) is False
 
 
-
-def test_local_filesystem_retrieval_does_not_claim_online_retrieval(tmp_path):
-    source_manifest_path = tmp_path / "source_manifest.json"
-    run_manifest_path = tmp_path / "run_manifest.json"
-    source_manifest_path.write_text(json.dumps({
-        "schema": 3,
-        "run_id": "local-crawl-42",
-        "source_definition_sha256": "a" * 64,
-        "retrieval_started_at": "2026-10-11T10:00:00+00:00",
-        "retrieval_completed_at": "2026-10-11T10:01:00+00:00",
-        "sources": [{"kind": "local_files", "identifier": "E:/USB/corpus"}],
-        "retrieval": [{
-            "kind": "local_files", "source_mode": "local", "status": "SUCCESS",
-            "document_count": 12, "request_count": 12,
-        }],
-    }), encoding="utf-8")
-    run_manifest_path.write_text(json.dumps({
-        "run_id": "local-crawl-42",
-        "final_status": "PASS",
-        "errors": [],
-        "degraded_stages": [],
-        "stages": {"crawl": {"status": "PASS"}},
-    }), encoding="utf-8")
-
+def test_local_filesystem_retrieval_does_not_claim_online_retrieval(
+    tmp_path, monkeypatch
+):
+    source_path, run_path = _write_live_source_evidence_fixture(tmp_path, monkeypatch)
+    source_manifest = json.loads(source_path.read_text(encoding="utf-8"))
+    source_manifest["sources"] = [
+        {"kind": "local_files", "identifier": "E:/USB/corpus"}
+    ]
+    source_manifest["retrieval"] = [{
+        "kind": "local_files", "source_mode": "local", "status": "SUCCESS",
+        "stats": {"document_count": 12, "request_count": 12},
+    }]
+    source_path.write_text(json.dumps(source_manifest), encoding="utf-8")
     assert verify_release._live_source_retrieval_evidence_is_valid(
-        source_manifest_path=source_manifest_path,
-        source_run_manifest_path=run_manifest_path,
+        source_manifest_path=source_path,
+        source_run_manifest_path=run_path,
     ) is False
 
 
@@ -753,7 +703,7 @@ def _write_live_source_evidence_fixture(tmp_path, monkeypatch, *, fault=None):
         document["url"] = "file:///tmp/fixture.txt"
     if fault == "empty_body":
         document["text"] = "  "
-    crawl_path.write_text(json.dumps(document) + "\\n", encoding="utf-8")
+    crawl_path.write_text(json.dumps(document) + "\n", encoding="utf-8")
     digest = verify_release._sha256(crawl_path)
     if fault == "tampered_artifact":
         digest = "0" * 64
