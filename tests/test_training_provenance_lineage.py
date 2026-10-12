@@ -146,3 +146,57 @@ def test_export_accepts_independent_stage_config_identities_without_pipeline_has
         "model_cfg": {"vocab_size": 8},
     }
     _enforce_training_provenance(output, payload)
+
+
+@pytest.mark.parametrize("schema", [2, 3])
+def test_lineage_validator_accepts_supported_source_manifest_schemas(tmp_path, schema):
+    import hashlib
+    from scripts.validate_lineage import validate
+
+    output = tmp_path / "output"
+    scratch = tmp_path / "scratch"
+    (output / "tokenizer").mkdir(parents=True)
+    (output / "shards").mkdir(parents=True)
+    scratch.mkdir()
+    weighted = scratch / "04_weighted.jsonl"
+    weighted.write_text('{"text":"fixture"}\n', encoding="utf-8")
+    (scratch / "04_weighted.jsonl.manifest.json").write_text(json.dumps({"schema": 2, "sha256": hashlib.sha256(weighted.read_bytes()).hexdigest(), "provenance": {}}), encoding="utf-8")
+    tokenizer = output / "tokenizer" / "tokenizer.json"
+    tokenizer.write_text('{"model":{"vocab":{}}}\n', encoding="utf-8")
+    (output / "tokenizer" / "tokenizer.json.manifest.json").write_text(json.dumps({"schema": 2, "sha256": hashlib.sha256(tokenizer.read_bytes()).hexdigest(), "provenance": {}}), encoding="utf-8")
+    (output / "shards" / "shards.manifest.json").write_text(json.dumps({"schema": 4, "files": [], "provenance": {}}), encoding="utf-8")
+    source = tmp_path / "source_manifest.json"
+    source.write_text(json.dumps({"schema": schema, "run_id": "fixture-run", "source_definition_sha256": hashlib.sha256(b"{}").hexdigest(), "source_definition_files": {}, "sources": []}), encoding="utf-8")
+
+    checks, code = validate(output)
+
+    assert code == 0
+    assert not any(item["name"] == "Configuration" and item["status"] == "FAIL" for item in checks)
+    assert next(item for item in checks if item["name"] == "Source configuration")["status"] == "PASS"
+
+
+def test_lineage_validator_rejects_unknown_source_manifest_schema(tmp_path):
+    import hashlib
+    from scripts.validate_lineage import validate
+
+    output = tmp_path / "output"
+    scratch = tmp_path / "scratch"
+    (output / "tokenizer").mkdir(parents=True)
+    (output / "shards").mkdir(parents=True)
+    scratch.mkdir()
+    weighted = scratch / "04_weighted.jsonl"
+    weighted.write_text('{"text":"fixture"}\n', encoding="utf-8")
+    (scratch / "04_weighted.jsonl.manifest.json").write_text(json.dumps({"schema": 2, "sha256": hashlib.sha256(weighted.read_bytes()).hexdigest(), "provenance": {}}), encoding="utf-8")
+    tokenizer = output / "tokenizer" / "tokenizer.json"
+    tokenizer.write_text('{"model":{"vocab":{}}}\n', encoding="utf-8")
+    (output / "tokenizer" / "tokenizer.json.manifest.json").write_text(json.dumps({"schema": 2, "sha256": hashlib.sha256(tokenizer.read_bytes()).hexdigest(), "provenance": {}}), encoding="utf-8")
+    (output / "shards" / "shards.manifest.json").write_text(json.dumps({"schema": 4, "files": [], "provenance": {}}), encoding="utf-8")
+    source = tmp_path / "source_manifest.json"
+    source.write_text(json.dumps({"schema": 4, "run_id": "fixture-run", "source_definition_sha256": hashlib.sha256(b"{}").hexdigest(), "source_definition_files": {}, "sources": []}), encoding="utf-8")
+
+    checks, code = validate(output)
+
+    assert code == 2
+    configuration = next(item for item in checks if item["name"] == "Configuration")
+    assert configuration["status"] == "FAIL"
+    assert "unsupported schema" in configuration["detail"]

@@ -16,7 +16,7 @@ This document defines the production-readiness contract for `main`. It distingui
 | Python compile | Gated | CI + `scripts/verify_release.py` |
 | Ruff F lint | Gated | CI + `scripts/verify_release.py` |
 | Automated test coverage | Reported by pytest-cov | `pyproject.toml` coverage configuration |
-| Source provenance | Implemented | schema-2 source manifests |
+| Source provenance | Implemented | schema-3 source manifests (schema 2 remains readable) |
 | Artifact source/config/code identity | Implemented | stage provenance contracts |
 | Network-dependent release smoke | Removed | native release smoke uses local fixture |
 | GGUF integrity | Gated | `scripts/verify_gguf.py` |

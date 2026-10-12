@@ -259,6 +259,33 @@ def _source_manifest_is_valid(path: Path, expected_group_id: str | None = None, 
         return False
 
 
+def _load_or_create_run_id(output_dir: Path, resume: bool) -> str:
+    """Reuse only an unfinished run when resume is explicitly enabled.
+
+    A persisted run_id.txt is a pointer, not permission to overwrite a completed
+    run. Fresh executions always receive a new identity, even when a previous
+    run manifest is missing or malformed.
+    """
+    run_id_path = output_dir / "provenance" / "run_id.txt"
+    persisted = run_id_path.read_text(encoding="utf-8").strip() if run_id_path.is_file() else ""
+    if resume and persisted:
+        manifest_path = output_dir / "runs" / persisted / "run_manifest.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                ended = (manifest.get("timestamps") or {}).get("ended")
+                terminal = manifest.get("final_status") in {"PASS", "WARN", "FAILED", "DEGRADED", "CANCELLED"}
+                if ended is None and not terminal:
+                    return persisted
+            except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
+                # Never overwrite an unreadable historical manifest.
+                pass
+    run_id = new_run_id()
+    run_id_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(run_id_path, run_id + "\n")
+    return run_id
+
+
 class Pipeline:
     def __init__(self, config_path: str = "config/pipeline_config.yaml", dataset_id: int | None = None, resume: bool | None = None):
         requested = Path(config_path)
@@ -303,13 +330,7 @@ class Pipeline:
         self._clean_config_path = PROJECT_ROOT / self.cfg.get("clean", {}).get("config_file", "config/cleaner_config.yaml")
         self._source_definition_paths = _source_definition_paths(self.cfg, PROJECT_ROOT)
         self._source_definition_hashes = {name: _file_hash(path) for name, path in self._source_definition_paths.items()}
-        run_id_path = self._out / "provenance" / "run_id.txt"
-        if run_id_path.is_file() and run_id_path.read_text(encoding="utf-8").strip():
-            self.cfg["_run_id"] = run_id_path.read_text(encoding="utf-8").strip()
-        else:
-            self.cfg["_run_id"] = new_run_id()
-            run_id_path.parent.mkdir(parents=True, exist_ok=True)
-            run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
+        self.cfg["_run_id"] = _load_or_create_run_id(self._out, self._resume)
         self._config_identities = config_identities(
             self.cfg,
             pipeline_sha256=self._config_sha256,
@@ -357,7 +378,8 @@ class Pipeline:
                 self._run_tracker = RunTracker.resume(PROJECT_ROOT, self._out, manifest_path)
             else:
                 self.cfg["_run_id"] = new_run_id()
-                run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
+                run_id_path = self._out / "provenance" / "run_id.txt"
+                atomic_write_text(run_id_path, self.cfg["_run_id"] + "\n")
                 self._run_tracker = RunTracker(
                     PROJECT_ROOT, self._out, run_id=self.cfg["_run_id"],
                     dataset_id=dataset_identity["dataset_id"], experiment_id=experiment_id,
@@ -887,7 +909,22 @@ class Pipeline:
         try:
             result = fn()
             elapsed = time.perf_counter() - started
-            outputs = [result] if isinstance(result, Path) else []
+            if isinstance(result, Path):
+                outputs = [result]
+            elif name == "tokenize":
+                tokenizer_path = Path(self.cfg.get("tokenizer", {}).get("output_path", self._out / "tokenizer")) / "tokenizer.json"
+                outputs = [tokenizer_path, Path(str(tokenizer_path) + ".manifest.json")]
+            else:
+                outputs = []
+            missing_outputs = [
+                path for path in outputs
+                if not path.exists() or (path.is_file() and path.stat().st_size <= 0)
+            ]
+            if missing_outputs:
+                raise RuntimeError(
+                    f"Stage {name!r} returned without materializing required outputs: "
+                    + ", ".join(str(path) for path in missing_outputs)
+                )
             metrics = dict(self._stage_metrics.get(name, {}))
             metrics["duration_seconds"] = round(elapsed, 6)
             metrics["throughput_docs_per_second"] = throughput(metrics.get("document_count"), elapsed)

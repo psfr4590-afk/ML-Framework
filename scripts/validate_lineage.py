@@ -95,8 +95,8 @@ def validate(output_dir: Path, checkpoint: Path | None = None) -> tuple[list[dic
         checks.append(result("Checkpoint", "PASS" if actual == checkpoint_meta.get("sha256") else "FAIL",
                              f"sha256={actual}"))
 
-    if int(source.get("schema", -1)) != 2 or not source.get("run_id") or not source.get("source_definition_sha256"):
-        checks.append(result("Configuration", "FAIL", "source manifest lacks Phase 1 configuration identity"))
+    if int(source.get("schema", -1)) not in {2, 3} or not source.get("run_id") or not source.get("source_definition_sha256"):
+        checks.append(result("Configuration", "FAIL", "source manifest has an unsupported schema or lacks Phase 1 configuration identity"))
         return checks, 2
 
     source_defs = {

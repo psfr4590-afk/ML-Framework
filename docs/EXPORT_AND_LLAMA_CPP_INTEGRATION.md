@@ -212,9 +212,9 @@ llama-cli -m model.gguf -p "Hello" -n 1 --single-turn --no-display-prompt --simp
 |--------|-----------|
 | **llama.cpp version** | Pinned to exact commit (b95502b), reproducible across platforms |
 | **Tokenizer compat** | Patch applied at reconciliation time, fails closed if llama.cpp internals change |
-| **Provenance chain** | Every artifact signed with SHA-256; export refuses if any link is broken |
+| **Provenance chain** | Artifacts are hashed with SHA-256; export checks recorded hashes and lineage links. Hashes detect changes but are not digital signatures. |
 | **Tensor mapping** | Deterministic Llama → HF → GGUF, validated against schema |
-| **Quantization** | Deterministic; same input always produces same GGUF bits |
+| **Quantization** | Reproducibility depends on pinned converter/toolchain versions and execution environment; verify output hashes rather than assuming bit-for-bit identity across hosts. |
 | **Inference test** | Single-token generation; proves model loads and can generate output |
 | **Export cards** | Auditable markdown; not used for verification, but retained as evidence |
 
