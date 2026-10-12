@@ -19,7 +19,7 @@ SECTION_KEYS = {
     "preflight": {"enabled", "warmup_steps", "benchmark_steps", "capability_discovery", "capability_benchmark_steps", "capability_max_model_params", "capability_max_context", "capability_model_probe_rounds", "capability_context_probe_rounds"},
 }
 NESTED_KEYS = {
-    "sources": {"web", "github", "arxiv", "huggingface", "google"},
+    "sources": {"web", "github", "arxiv", "huggingface", "google", "local_files"},
     "web": {"seed_urls_file", "seed_urls", "follow_links", "max_depth", "stay_on_domain", "use_sitemap_discovery", "english_only"},
     "github": {"include_wikis", "include_issues", "max_issues_per_repo", "token_env"},
     "arxiv": {"fetch_full_text", "fetch_abstract_only", "enrich_citations"},
