@@ -141,7 +141,7 @@ Evidence must distinguish passed, failed, blocked, skipped, and not run.
 For each milestone or release, record:
 - Candidate name/version and exact revision.
 - Criteria and requirements covered.
-- A status summary using the controlled statuses `PASS`, `FAIL`, `BLOCKED`, `SKIPPED`, and `NOT RUN`.
+- Pass/fail/blocked/not-tested summary.
 - Defects, deviations, and approved waivers.
 - Evidence locations.
 - Decision, approver, and date.
