@@ -73,3 +73,5 @@ def test_windows_native_bootstrap_fails_fast_and_resolves_visual_studio_cli():
     assert "Microsoft.Component.MSBuild" in source
     assert "$CliProject.FullName" in source
     assert "llama-cli MSBuild failed" in source
+    assert "Refusing to delete or overwrite an existing directory" in source
+    assert "Remove-Item $Target -Recurse -Force" not in source
