@@ -1176,12 +1176,27 @@ def main() -> int:
     parser.add_argument("--ui-probe", action="store_true", help="probe the localhost FastAPI backend")
     parser.add_argument("--clean-clone", action="store_true", help="exercise the documented clone/install/doctor/smoke path in a temporary clone")
     parser.add_argument(
+        "--source-manifest",
+        type=Path,
+        help="source_manifest.json from an independently completed online crawl run",
+    )
+    parser.add_argument(
+        "--source-run-manifest",
+        type=Path,
+        help="run_manifest.json from that same online crawl run",
+    )
+    parser.add_argument(
         "--profile",
         choices=("static", "native-smoke", "rc"),
         default=None,
-        help="verification profile; rc requires --bootstrap-native, --ui-probe, and --clean-clone",
+        help="verification profile; rc requires native, UI, clean-clone, and independent online-crawl evidence",
     )
     args = parser.parse_args()
+    global SOURCE_MANIFEST_PATH, SOURCE_RUN_MANIFEST_PATH
+    SOURCE_MANIFEST_PATH = args.source_manifest
+    SOURCE_RUN_MANIFEST_PATH = args.source_run_manifest
+    if (SOURCE_MANIFEST_PATH is None) != (SOURCE_RUN_MANIFEST_PATH is None):
+        parser.error("--source-manifest and --source-run-manifest must be supplied together")
     profile = args.profile or (
         "native-smoke" if args.bootstrap_native else "static"
     )
@@ -1195,6 +1210,8 @@ def main() -> int:
         parser.error("--profile rc requires --ui-probe")
     if profile == "rc" and not args.clean_clone:
         parser.error("--profile rc requires --clean-clone")
+    if profile == "rc" and SOURCE_MANIFEST_PATH is None:
+        parser.error("--profile rc requires --source-manifest and --source-run-manifest")
     if args.skip_tests: print("RELEASE VERIFICATION FAILED: --skip-tests is not allowed for a production verification."); return 2
     failures: list[str] = []; compile_targets = ["pipeline", "command_center", "scripts", "ui", "run_pipeline.py", "run_command_center.py", "launch.py"]
     if run([sys.executable, "-m", "compileall", "-q", *compile_targets]): failures.append("compileall")
