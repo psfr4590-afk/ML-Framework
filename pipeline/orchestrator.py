@@ -475,6 +475,7 @@ class Pipeline:
             identifier = str(definition.get("identifier") or display_name)
             configured = {
                 "kind": kind,
+                "source_mode": "local" if kind == "local_files" else "online",
                 "display_name": display_name,
                 "identifier": identifier,
                 "revision": definition.get("revision"),
