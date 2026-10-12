@@ -10,7 +10,7 @@ Write-Host "`n=== LLAMA.CPP BOOTSTRAP ===" -ForegroundColor Cyan
 
 if (-not (Test-Path (Join-Path $Target ".git"))) {
     if (Test-Path $Target) {
-        Remove-Item $Target -Recurse -Force
+        throw "Refusing to delete or overwrite an existing directory without a Git checkout: $Target. Inspect it and move or back it up manually before retrying."
     }
 
     New-Item -ItemType Directory -Force -Path (Split-Path $Target) | Out-Null
