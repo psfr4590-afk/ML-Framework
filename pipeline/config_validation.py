@@ -7,7 +7,7 @@ STAGES = {"crawl", "clean", "dedup", "weight", "tokenize", "shard", "train", "ex
 SECTION_KEYS = {
     "pipeline": {"name", "model_name", "output_dir", "scratch_dir", "seed", "resume", "log_level"},
     "stages": STAGES,
-    "crawl": {"max_workers", "request_timeout", "retry_attempts", "retry_backoff", "respect_robots_txt", "politeness_delay", "max_pages_per_domain", "max_content_bytes", "max_redirects", "fail_on_malformed_jsonl", "dataset_groups_file", "dataset_profiles_file", "source_weights_file", "sources", "web", "github", "arxiv", "huggingface", "google"},
+    "crawl": {"max_workers", "request_timeout", "retry_attempts", "retry_backoff", "respect_robots_txt", "politeness_delay", "max_pages_per_domain", "max_content_bytes", "max_redirects", "fail_on_malformed_jsonl", "dataset_groups_file", "dataset_profiles_file", "source_weights_file", "sources", "web", "github", "arxiv", "huggingface", "google", "local_files"},
     "clean": {"config_file"},
     "embed_dedup": {"mode", "model", "model_path", "allow_model_download", "batch_size", "similarity_threshold", "chunk_size", "index_type", "ivf_nlist"},
     "weight": {"config_file", "strategy"},
@@ -19,12 +19,13 @@ SECTION_KEYS = {
     "preflight": {"enabled", "warmup_steps", "benchmark_steps", "capability_discovery", "capability_benchmark_steps", "capability_max_model_params", "capability_max_context", "capability_model_probe_rounds", "capability_context_probe_rounds"},
 }
 NESTED_KEYS = {
-    "sources": {"web", "github", "arxiv", "huggingface", "google"},
+    "sources": {"web", "github", "arxiv", "huggingface", "google", "local_files"},
     "web": {"seed_urls_file", "seed_urls", "follow_links", "max_depth", "stay_on_domain", "use_sitemap_discovery", "english_only"},
     "github": {"include_wikis", "include_issues", "max_issues_per_repo", "token_env"},
     "arxiv": {"fetch_full_text", "fetch_abstract_only", "enrich_citations"},
     "huggingface": {"token_env"},
     "google": {"api_key_env", "cx_env", "results_per_query", "max_pages_per_query", "seed_urls", "max_seed_urls"},
+    "local_files": {"paths", "recursive", "extensions", "max_files", "max_file_bytes"},
 }
 
 
@@ -65,12 +66,28 @@ def validate_config(cfg: dict) -> None:
     invalid_stage_values = [name for name, enabled in stages.items() if not isinstance(enabled, bool)]
     if invalid_stage_values:
         raise ValueError(f"Pipeline stage flags must be boolean: {', '.join(sorted(invalid_stage_values))}")
-    for name in ("sources", "web", "github", "arxiv", "huggingface", "google"):
+    for name in ("sources", "web", "github", "arxiv", "huggingface", "google", "local_files"):
         value = cfg["crawl"].get(name)
         if value is not None:
             if not isinstance(value, dict):
                 raise ValueError(f"crawl.{name} must be an object")
             _strict_nested(name, value)
+    local_files = cfg["crawl"].get("local_files", {})
+    if bool((cfg["crawl"].get("sources", {}) or {}).get("local_files")) and not (local_files.get("paths", []) if isinstance(local_files, dict) else []):
+        raise ValueError("crawl.local_files.paths is required when crawl.sources.local_files is enabled")
+    if local_files:
+        paths = local_files.get("paths", [])
+        if not isinstance(paths, list) or any(not isinstance(path, str) or not path.strip() for path in paths):
+            raise ValueError("crawl.local_files.paths must be a list of non-empty path strings")
+        extensions = local_files.get("extensions", [])
+        if not isinstance(extensions, list) or any(not isinstance(ext, str) or not ext.strip() for ext in extensions):
+            raise ValueError("crawl.local_files.extensions must be a list of extension strings")
+        for key in ("max_files", "max_file_bytes"):
+            value = local_files.get(key, 1000 if key == "max_files" else 5_000_000)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"crawl.local_files.{key} must be a positive integer")
+        if "recursive" in local_files:
+            _bool("crawl.local_files", "recursive", local_files["recursive"])
     tok, shard, train, export = cfg["tokenizer"], cfg["shard"], cfg["train"], cfg["export"]
     if "seed" in cfg["pipeline"] and (not isinstance(cfg["pipeline"]["seed"], int) or isinstance(cfg["pipeline"]["seed"], bool)):
         raise ValueError("pipeline.seed must be an integer")

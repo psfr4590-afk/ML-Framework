@@ -37,7 +37,7 @@ STAGE_IMPLEMENTATIONS = {
     "export": ("scripts.export_gguf", "export_checkpoint"),
 }
 
-SOURCE_KINDS = ("web", "github", "arxiv", "huggingface", "google")
+SOURCE_KINDS = ("web", "github", "arxiv", "huggingface", "google", "local_files")
 REQUIRED_SOURCE_FIELDS = {"kind", "identifier", "revision", "license", "raw_source_sha256", "dataset_group"}
 
 
@@ -169,11 +169,11 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
         global_seeds = [line.strip() for line in seed_path.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")]
     for group in groups:
         group_id = str(group.get("id", "default"))
-        enabled = group.get("sources", crawl.get("sources", {})) or {}
+        enabled = {**(crawl.get("sources", {}) or {}), **(group.get("sources", {}) or {})}
         for kind in SOURCE_KINDS:
-            if not bool(enabled.get(kind, kind != "google")):
+            if not bool(enabled.get(kind, kind not in {"google", "local_files"})):
                 continue
-            section = group.get(kind, {}) or {}
+            section = {**(crawl.get(kind, {}) or {}), **(group.get(kind, {}) or {})}
             if kind == "web":
                 seeds = section.get("seed_urls") or global_web.get("seed_urls") or global_seeds
                 identifiers = [str(url) for url in seeds] or [f"group:{group_id}:web"]
@@ -184,9 +184,12 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
             elif kind == "huggingface":
                 datasets = section.get("datasets", []) or []
                 identifiers = [f"{item.get('repo')}:{item.get('config', '')}:{item.get('split', 'train')}" for item in datasets if isinstance(item, dict) and item.get("repo")] or [f"group:{group_id}:huggingface"]
-            else:
+            elif kind == "google":
                 queries = section.get("queries", []) or []
                 identifiers = [str(query) for query in queries] or [f"group:{group_id}:google"]
+            else:
+                identifiers = [str(path) for path in (section.get("paths", []) or [])]
+                identifiers = identifiers or [f"group:{group_id}:local_files"]
             for identifier in identifiers:
                 key = (kind, identifier, group_id)
                 if key not in seen:
@@ -472,6 +475,7 @@ class Pipeline:
             identifier = str(definition.get("identifier") or display_name)
             configured = {
                 "kind": kind,
+                "source_mode": "local" if kind == "local_files" else "online",
                 "display_name": display_name,
                 "identifier": identifier,
                 "revision": definition.get("revision"),
@@ -490,6 +494,7 @@ class Pipeline:
                 "arxiv": ("pipeline.crawler.arxiv_crawler", "ArxivCrawler"),
                 "huggingface": ("pipeline.crawler.huggingface_crawler", "HuggingFaceCrawler"),
                 "google": ("pipeline.crawler.google_crawler", "GoogleCrawler"),
+                "local_files": ("pipeline.crawler.local_files_crawler", "LocalFilesCrawler"),
             }
             module, klass = module_map[kind]
             crawler = _load_class(module, klass)(crawler_cfg, self._weights, self._signals)
@@ -521,9 +526,9 @@ class Pipeline:
         def stream() -> Iterator[Document]:
             for group in groups:
                 merged = dict(cfg)
-                for key in ("web", "github", "arxiv", "huggingface", "google"):
+                for key in ("web", "github", "arxiv", "huggingface", "google", "local_files"):
                     merged[key] = {**cfg.get(key, {}), **group.get(key, {})}
-                merged["sources"] = group.get("sources", cfg.get("sources", {}))
+                merged["sources"] = {**(cfg.get("sources", {}) or {}), **(group.get("sources", {}) or {})}
                 gid = group.get("id", "default")
 
                 if bool(merged.get("sources", {}).get("web", True)):
@@ -588,6 +593,21 @@ class Pipeline:
                 else:
                     source_records.append(source_record(
                         configured={"kind": "google", "display_name": "Google", "identifier": f"group:{gid}:google", "dataset_group": str(gid), "license": "unknown"},
+                        retrieved=False, status="DISABLED", stats={},
+                    ))
+
+                if bool(merged.get("sources", {}).get("local_files", False)):
+                    local_cfg = dict(merged)
+                    local_cfg["local_files"] = dict(merged.get("local_files", {}))
+                    paths = list(local_cfg["local_files"].get("paths", []) or [])
+                    yield from run_crawler(group, "local_files", {
+                        "identifier": ";".join(str(path) for path in paths) or f"group:{gid}:local_files",
+                        "display_name": "Local filesystem",
+                        "license": "user-provided-local-source",
+                    }, local_cfg)
+                else:
+                    source_records.append(source_record(
+                        configured={"kind": "local_files", "display_name": "Local filesystem", "identifier": f"group:{gid}:local_files", "dataset_group": str(gid), "license": "user-provided-local-source"},
                         retrieved=False, status="DISABLED", stats={},
                     ))
 
