@@ -2,7 +2,7 @@
 
 **Document ID:** MLF-GOV-005  
 **Version:** 1.0.0  
-**Status:** Approved project baseline  
+**Status:** Approved verification baseline  
 **Prepared:** 2026-10-11  
 **Approval:** Approved by product owner on 2026-10-11
 
