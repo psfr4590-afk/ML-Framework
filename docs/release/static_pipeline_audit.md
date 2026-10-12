@@ -39,7 +39,7 @@ Canonical IDs are contiguous, unique, and bound one-to-one to group IDs. Command
 
 ## 4. Source provenance
 
-Source manifests use schema 2 and record:
+Source manifests use schema 3 and record (schema 2 remains readable by the independent lineage validator):
 
 - selected dataset group;
 - retrieval start and completion timestamps;
