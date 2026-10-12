@@ -205,9 +205,7 @@ def test_llama_cpp_tokenizer_overlay_rejects_unmarked_duplicate_block(tmp_path: 
         "    backend_tokenizer = getattr(tokenizer, \\"backend_tokenizer\\", None)\n"
         "    pre_tokenizer = getattr(backend_tokenizer, \\"pre_tokenizer\\", None)\n"
         "    if pre_tokenizer is not None and pre_tokenizer.__class__.__name__ == \\"ByteLevel\\":\n"
-        "        # Model Lab uses tokenizers.ByteLevel(add_prefix_space=False).\n"
-        "        # Map the standard ByteLevel behavior to llama.cpp's GPT-2\n"
-        "        # pre-tokenizer implementation without relying on a vocab hash.\n"
+
         "        res = \\"gpt-2\\"\n"
         "    # Model Lab ByteLevel pre-tokenizer override (authoritative)\n"
         "    backend_tokenizer = getattr(tokenizer, \\"backend_tokenizer\\", None)\n"
