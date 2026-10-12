@@ -41,17 +41,32 @@ def test_pipeline_no_resume_disables_artifact_and_checkpoint_resume(tmp_path):
     assert pipeline.cfg["train"]["resume"] is False
 
 
-def test_pipeline_all_honors_configured_stage_enablement(monkeypatch):
+def test_pipeline_all_honors_configured_stage_enablement(monkeypatch, tmp_path):
     pipeline = Pipeline()
     calls: list[str] = []
+    pipeline.cfg.setdefault("tokenizer", {})["output_path"] = str(tmp_path / "tokenizer")
 
-    monkeypatch.setattr(pipeline, "stage_crawl", lambda group=None: calls.append("crawl") or Path("crawl"))
-    monkeypatch.setattr(pipeline, "stage_clean", lambda path: calls.append("clean") or Path("clean"))
-    monkeypatch.setattr(pipeline, "stage_embed_dedup", lambda path: calls.append("dedup") or Path("dedup"))
-    monkeypatch.setattr(pipeline, "stage_weight", lambda path: calls.append("weight") or Path("weight"))
-    monkeypatch.setattr(pipeline, "stage_tokenize", lambda path: calls.append("tokenize") or object())
-    monkeypatch.setattr(pipeline, "stage_shard", lambda path, tokenizer: calls.append("shard") or Path("shard"))
-    monkeypatch.setattr(pipeline, "stage_train", lambda: calls.append("train") or Path("checkpoint"))
+    def materialize(name: str) -> Path:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name, encoding="utf-8")
+        return path
+
+    def tokenize(path):
+        calls.append("tokenize")
+        tokenizer_path = Path(pipeline.cfg["tokenizer"]["output_path"]) / "tokenizer.json"
+        tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
+        tokenizer_path.write_text("{}", encoding="utf-8")
+        Path(str(tokenizer_path) + ".manifest.json").write_text("{}", encoding="utf-8")
+        return object()
+
+    monkeypatch.setattr(pipeline, "stage_crawl", lambda group=None: calls.append("crawl") or materialize("crawl"))
+    monkeypatch.setattr(pipeline, "stage_clean", lambda path: calls.append("clean") or materialize("clean"))
+    monkeypatch.setattr(pipeline, "stage_embed_dedup", lambda path: calls.append("dedup") or materialize("dedup"))
+    monkeypatch.setattr(pipeline, "stage_weight", lambda path: calls.append("weight") or materialize("weight"))
+    monkeypatch.setattr(pipeline, "stage_tokenize", tokenize)
+    monkeypatch.setattr(pipeline, "stage_shard", lambda path, tokenizer: calls.append("shard") or materialize("shard"))
+    monkeypatch.setattr(pipeline, "stage_train", lambda: calls.append("train") or materialize("checkpoint"))
     monkeypatch.setattr(pipeline, "stage_export", lambda: calls.append("export"))
 
     pipeline.run("all")
