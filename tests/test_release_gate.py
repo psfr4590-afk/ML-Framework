@@ -686,9 +686,6 @@ def test_local_filesystem_retrieval_does_not_claim_online_retrieval(
 
 
 def _write_live_source_evidence_fixture(tmp_path, monkeypatch, *, fault=None):
-    from datetime import datetime, timezone
-    import hashlib
-
     monkeypatch.setattr(verify_release, "ROOT", tmp_path)
     run_id = "online-run-1"
     crawl_path = tmp_path / "output" / "runs" / run_id / "01_crawled.jsonl"
