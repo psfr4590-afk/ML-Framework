@@ -132,6 +132,15 @@ def patch_tokenizer_registry(llamacpp_dir: str | Path) -> bool:
     newline = "\r\n" if b"\r\n" in raw else "\n"
     lines = original.splitlines()
     function = _target_function(lines)
+    function_start = function.lineno - 1
+    function_end = function.end_lineno
+    for index, line in enumerate(lines):
+        if function_start <= index < function_end:
+            continue
+        if any(signature in line for signature in OVERLAY_SIGNATURES):
+            raise RuntimeError(
+                "Unmarked tokenizer overlay-like code found outside target function; refusing to modify source"
+            )
     lines = _remove_existing_overlay(lines, function)
     function = _target_function(lines)
     checks = [node for node in function.body if _is_failure_check(node)]
