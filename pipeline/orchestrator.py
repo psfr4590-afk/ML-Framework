@@ -173,7 +173,7 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
         for kind in SOURCE_KINDS:
             if not bool(enabled.get(kind, kind != "google")):
                 continue
-            section = group.get(kind, {}) or {}
+            section = {**(crawl.get(kind, {}) or {}), **(group.get(kind, {}) or {})}
             if kind == "web":
                 seeds = section.get("seed_urls") or global_web.get("seed_urls") or global_seeds
                 identifiers = [str(url) for url in seeds] or [f"group:{group_id}:web"]
