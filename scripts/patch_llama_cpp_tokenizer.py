@@ -26,10 +26,10 @@ def _target_function(lines: list[str]) -> ast.FunctionDef:
         if isinstance(node, ast.FunctionDef) and node.name == "get_vocab_base_pre"
     ]
     markers = [i for i, line in enumerate(lines) if line.strip() == MARKER]
+    if len(markers) != 1:
+        raise RuntimeError("Unsupported llama.cpp converter source: generated get_vocab_base_pre marker is missing or ambiguous")
     if len(functions) != 1:
         raise RuntimeError("Unsupported llama.cpp converter source: expected exactly one get_vocab_base_pre function")
-    if len(markers) != 1:
-        raise RuntimeError("Unsupported llama.cpp converter source: expected exactly one generated get_vocab_base_pre marker")
     function = functions[0]
     marker_line = markers[0]
     if marker_line >= function.lineno - 1 or function.lineno - 1 - marker_line > 5:
