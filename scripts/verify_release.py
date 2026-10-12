@@ -580,8 +580,10 @@ def _live_source_retrieval_evidence_is_valid(
             stages = run_manifest.get("stages")
         if not isinstance(expected_run_id, str) or not expected_run_id:
             return False
-        if not isinstance(stages, dict) or (stages.get("crawl") or {}).get("status") != "PASS":
-            return None
+        if not isinstance(stages, dict):
+            return False if source_run_manifest_path is not None else None
+        if (stages.get("crawl") or {}).get("status") != "PASS":
+            return False if source_run_manifest_path is not None else None
         data = json.loads(source_manifest_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or int(data.get("schema", 0)) < 3:
             return False
