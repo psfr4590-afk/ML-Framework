@@ -685,13 +685,15 @@ def _harvest_native_evidence(
             )
 
         # The native release smoke deliberately uses a pre-weighted local fixture.
-        # Live source retrieval must be established independently by a real crawl stage
-        # and its durable source manifest, never by the offline integration smoke.
-        evidence["source_retrieval"] = _live_source_retrieval_evidence_is_valid(
-            source_manifest_path=output.parent / "source_manifest.json",
-            expected_run_id=run_id,
-            stages=stages,
-        )
+        # Online retrieval must be supplied as an independent completed crawl run;
+        # never infer it from the offline integration smoke or synthetic smoke manifest.
+        if SOURCE_MANIFEST_PATH is not None and SOURCE_RUN_MANIFEST_PATH is not None:
+            evidence["source_retrieval"] = _live_source_retrieval_evidence_is_valid(
+                source_manifest_path=SOURCE_MANIFEST_PATH,
+                source_run_manifest_path=SOURCE_RUN_MANIFEST_PATH,
+            )
+        else:
+            evidence["source_retrieval"] = None
 
         # Dataset evidence is intentionally bounded to the local native smoke fixture.
         evidence["dataset"] = _dataset_evidence_is_valid(
