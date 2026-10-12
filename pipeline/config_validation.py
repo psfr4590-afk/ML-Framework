@@ -73,6 +73,8 @@ def validate_config(cfg: dict) -> None:
                 raise ValueError(f"crawl.{name} must be an object")
             _strict_nested(name, value)
     local_files = cfg["crawl"].get("local_files", {})
+    if bool((cfg["crawl"].get("sources", {}) or {}).get("local_files")) and not (local_files.get("paths", []) if isinstance(local_files, dict) else []):
+        raise ValueError("crawl.local_files.paths is required when crawl.sources.local_files is enabled")
     if local_files:
         paths = local_files.get("paths", [])
         if not isinstance(paths, list) or any(not isinstance(path, str) or not path.strip() for path in paths):
