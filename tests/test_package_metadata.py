@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tomllib
 
 
@@ -69,3 +70,11 @@ def test_packaging_dependencies_match_runtime_contract():
 def test_torch_has_a_separate_host_specific_requirement():
     torch_requirements = (ROOT / "requirements-torch.txt").read_text(encoding="utf-8")
     assert "torch>=2.5,<3" in torch_requirements
+
+
+def test_build_manifest_version_matches_package_version():
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    build_manifest = json.loads(
+        (ROOT / "docs" / "release" / "BUILD_MANIFEST.json").read_text(encoding="utf-8")
+    )
+    assert build_manifest["version"] == metadata["project"]["version"]
