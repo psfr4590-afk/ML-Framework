@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tomllib
 
 
@@ -73,7 +74,7 @@ def test_torch_has_a_separate_host_specific_requirement():
 
 def test_build_manifest_version_matches_package_version():
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    import json
-
-    build_manifest = json.loads((ROOT / "docs" / "release" / "BUILD_MANIFEST.json").read_text(encoding="utf-8"))
+    build_manifest = json.loads(
+        (ROOT / "docs" / "release" / "BUILD_MANIFEST.json").read_text(encoding="utf-8")
+    )
     assert build_manifest["version"] == metadata["project"]["version"]
