@@ -232,17 +232,17 @@ def test_llama_cpp_tokenizer_overlay_rejects_code_outside_target_function(tmp_pa
     conversion.mkdir(parents=True)
     base = conversion / "base.py"
     source = (
-        "# Marker: Start get_vocab_base_pre\\n"
-        "def get_vocab_base_pre(self, tokenizer):\\n"
-        "    res = None\\n"
-        "    if res is None:\\n"
-        "        raise NotImplementedError(\\"unknown\\")\\n"
-        "    return res\\n"
-        "\\n"
-        "def unrelated(tokenizer):\\n"
-        "    backend_tokenizer = getattr(tokenizer, \\"backend_tokenizer\\", None)\\n"
-        "    pre_tokenizer = getattr(backend_tokenizer, \\"pre_tokenizer\\", None)\\n"
-        "    return pre_tokenizer\\n"
+        "# Marker: Start get_vocab_base_pre\n"
+        "def get_vocab_base_pre(self, tokenizer):\n"
+        "    res = None\n"
+        "    if res is None:\n"
+        "        raise NotImplementedError(\"unknown\")\n"
+        "    return res\n"
+        "\n"
+        "def unrelated(tokenizer):\n"
+        "    backend_tokenizer = getattr(tokenizer, \"backend_tokenizer\", None)\n"
+        "    pre_tokenizer = getattr(backend_tokenizer, \"pre_tokenizer\", None)\n"
+        "    return pre_tokenizer\n"
     )
     base.write_text(source, encoding="utf-8")
 
