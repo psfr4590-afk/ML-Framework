@@ -277,7 +277,7 @@ def _load_or_create_run_id(output_dir: Path, resume: bool) -> str:
                 terminal = manifest.get("final_status") in {"PASS", "WARN", "FAILED", "DEGRADED", "CANCELLED"}
                 if ended is None and not terminal:
                     return persisted
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
                 # Never overwrite an unreadable historical manifest.
                 pass
     run_id = new_run_id()
