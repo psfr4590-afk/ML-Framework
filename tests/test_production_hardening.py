@@ -266,3 +266,84 @@ def test_checkpoint_safe_loader_fails_closed_without_weights_only_support(tmp_pa
 
     assert observed["weights_only"] is True
     assert observed["map_location"] == "cpu"
+
+
+def test_checkpoint_restores_optimizer_and_rng_state(tmp_path):
+    import random
+
+    from pipeline.trainer.train import save_checkpoint, load_checkpoint
+
+    cfg = ModelConfig(
+        vocab_size=32,
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        n_kv_heads=4,
+        d_ffn=32,
+        seq_len=16,
+    )
+    model = LlamaModel(cfg)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    # Populate AdamW state before saving, rather than testing an empty optimizer.
+    for parameter in model.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
+
+    # Make the checkpoint RNG state reproducible.
+    random.seed(1234)
+    np.random.seed(1234)
+    torch.manual_seed(1234)
+
+    checkpoint = save_checkpoint(
+        model, optimizer, scaler, 1, 2.5,
+        {"model_preset": "test"}, tmp_path,
+    )
+
+    # Record the sequence expected immediately after the saved RNG state.
+    expected_python = random.random()
+    expected_numpy = np.random.random()
+    expected_torch = torch.rand(4)
+
+    # Disturb every RNG, then create fresh objects before loading.
+    random.seed(9876)
+    np.random.seed(9876)
+    torch.manual_seed(9876)
+
+    resumed_model = LlamaModel(cfg)
+    resumed_optimizer = torch.optim.AdamW(
+        resumed_model.parameters(), lr=1e-3
+    )
+    resumed_scaler = torch.amp.GradScaler("cuda", enabled=False)
+
+    assert load_checkpoint(
+        checkpoint,
+        resumed_model,
+        resumed_optimizer,
+        resumed_scaler,
+        torch.device("cpu"),
+    ) == 1
+
+    assert random.random() == expected_python
+    assert np.random.random() == expected_numpy
+    assert torch.equal(torch.rand(4), expected_torch)
+
+    # Verify the populated optimizer state survived serialization.
+    for original_parameter, resumed_parameter in zip(
+        model.parameters(), resumed_model.parameters()
+    ):
+        original_state = optimizer.state[original_parameter]
+        resumed_state = resumed_optimizer.state[resumed_parameter]
+
+        assert original_state.keys() == resumed_state.keys()
+        assert original_state, "Expected populated AdamW state"
+
+        for key, original_value in original_state.items():
+            resumed_value = resumed_state[key]
+            if torch.is_tensor(original_value):
+                assert torch.equal(original_value, resumed_value), key
+            else:
+                assert original_value == resumed_value, key
