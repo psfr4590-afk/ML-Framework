@@ -71,7 +71,7 @@ Review regularly for approved requirements without implementation mappings; impl
 
 ## 8. Release traceability rule
 
-Every release report must identify the exact candidate revision and package and summarize mandatory requirements as verified, failed, blocked, deferred, or not tested. Aggregate test counts do not substitute for requirement-level evidence.
+Every release report must identify the exact candidate revision and package and summarize mandatory requirements using `PASS`, `FAIL`, `BLOCKED`, `SKIPPED`, or `NOT RUN`. Aggregate test counts do not substitute for requirement-level evidence.
 
 ## 9. Baseline authority
 
