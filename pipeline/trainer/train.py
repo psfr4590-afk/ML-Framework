@@ -250,6 +250,26 @@ def save_checkpoint(
     return path
 
 
+def _safe_torch_load(path: Path, *, map_location: str | torch.device = "cpu") -> dict:
+    """Load a checkpoint using PyTorch's restricted weights-only deserializer.
+
+    Checkpoint hashes detect accidental or untracked changes, but a neighboring
+    manifest is not a trust boundary: an attacker who can replace both files
+    can otherwise supply a pickle payload. Never fall back to unrestricted
+    pickle loading when safe deserialization is unavailable.
+    """
+    try:
+        payload = torch.load(path, map_location=map_location, weights_only=True)
+    except TypeError as exc:
+        raise RuntimeError(
+            "Safe checkpoint loading requires a PyTorch version that supports "
+            "weights_only=True; upgrade PyTorch before loading this checkpoint."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Checkpoint schema invalid: {path}")
+    return payload
+
+
 def load_checkpoint(path: Path, model: LlamaModel, optimizer: Optional[torch.optim.Optimizer] = None, scaler=None, device: torch.device | None = None, expected_provenance: Optional[dict] = None, train_loader: Optional[ShardDataLoader] = None, val_loader: Optional[ShardDataLoader] = None) -> int:
     if not path.exists() or path.stat().st_size < 1024: raise RuntimeError(f"Checkpoint missing or truncated: {path}")
     mp = path.with_name(path.name + ".manifest.json")
@@ -257,8 +277,7 @@ def load_checkpoint(path: Path, model: LlamaModel, optimizer: Optional[torch.opt
     meta = json.loads(mp.read_text(encoding="utf-8"))
     if meta.get("kind") != "checkpoint" or int(meta.get("size", -1)) != path.stat().st_size or meta.get("sha256") != sha256_file(path): raise RuntimeError(f"Checkpoint integrity verification failed: {path}")
     if expected_provenance is not None and meta.get("provenance") != expected_provenance: raise RuntimeError(f"Checkpoint provenance mismatch: {path}. The checkpoint was produced from a different pipeline configuration, training configuration, model configuration, seed, shard manifest, or source manifest.")
-    try: ckpt = torch.load(path, map_location=device or "cpu", weights_only=False)
-    except TypeError: ckpt = torch.load(path, map_location=device or "cpu")
+    ckpt = _safe_torch_load(path, map_location=device or "cpu")
     if not isinstance(ckpt, dict) or "model" not in ckpt or "step" not in ckpt: raise RuntimeError(f"Checkpoint schema invalid: {path}")
     if int(ckpt.get("schema", 0)) < 4: raise RuntimeError(f"Checkpoint schema too old for deterministic resume: {path}")
     model.load_state_dict(ckpt["model"])
@@ -473,10 +492,7 @@ class Trainer:
                     expected_provenance=provenance,
                     train_loader=train_loader, val_loader=val_loader,
                 )
-                try:
-                    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-                except TypeError:
-                    payload = torch.load(ckpt, map_location="cpu")
+                payload = _safe_torch_load(ckpt, map_location="cpu")
                 best_val = float(payload.get("best_val_loss", payload.get("val_loss", best_val)))
                 best_step = payload.get("best_step")
                 saved_meta = payload.get("training_metadata", {})
