@@ -134,17 +134,7 @@ def test_windows_first_boot_wrapper_uses_canonical_bootstrap_safely() -> None:
         "[switch]$Native",
         "function Find-Python",
         '@{ Command = "py"; Args = @("-3.13") }',
-        "versionText -match '^3\\.(11|12|13|14)
-        '"--install"',
-        '"--doctor"',
-        '"--ensure-llamacpp"',
-        "Project dependency installation failed",
-        "Native llama.cpp setup failed",
-    ]
-    missing = [fragment for fragment in required_fragments if fragment not in source]
-    assert not missing, f"Windows first-boot contract is incomplete: {missing}"
-    assert "Remove-Item" not in source, "First-boot setup must not delete user or project data"
-",
+        "versionText -match '^3\\.(11|12|13|14)$'",
         "Python.Python.3.13",
         '"--install"',
         '"--doctor"',
