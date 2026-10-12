@@ -171,7 +171,7 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
         group_id = str(group.get("id", "default"))
         enabled = {**(crawl.get("sources", {}) or {}), **(group.get("sources", {}) or {})}
         for kind in SOURCE_KINDS:
-            if not bool(enabled.get(kind, kind != "google")):
+            if not bool(enabled.get(kind, kind not in {"google", "local_files"})):
                 continue
             section = {**(crawl.get(kind, {}) or {}), **(group.get(kind, {}) or {})}
             if kind == "web":
