@@ -169,7 +169,7 @@ def _manifest_sources(cfg: dict, source_paths: dict[str, Path], selected_group_i
         global_seeds = [line.strip() for line in seed_path.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")]
     for group in groups:
         group_id = str(group.get("id", "default"))
-        enabled = group.get("sources", crawl.get("sources", {})) or {}
+        enabled = {**(crawl.get("sources", {}) or {}), **(group.get("sources", {}) or {})}
         for kind in SOURCE_KINDS:
             if not bool(enabled.get(kind, kind != "google")):
                 continue
@@ -527,7 +527,7 @@ class Pipeline:
                 merged = dict(cfg)
                 for key in ("web", "github", "arxiv", "huggingface", "google", "local_files"):
                     merged[key] = {**cfg.get(key, {}), **group.get(key, {})}
-                merged["sources"] = group.get("sources", cfg.get("sources", {}))
+                merged["sources"] = {**(cfg.get("sources", {}) or {}), **(group.get("sources", {}) or {})}
                 gid = group.get("id", "default")
 
                 if bool(merged.get("sources", {}).get("web", True)):
