@@ -137,3 +137,36 @@ def test_resume_rotates_completed_or_stale_run_id(tmp_path, monkeypatch):
 
     assert _load_or_create_run_id(output, resume=True) == "fresh-run"
     assert run_id_path.read_text(encoding="utf-8").strip() == "fresh-run"
+
+
+def test_tokenizer_stage_records_the_materialized_artifacts(tmp_path, monkeypatch):
+    from pipeline.orchestrator import Pipeline
+
+    tokenizer_dir = tmp_path / "tokenizer"
+    tokenizer_dir.mkdir()
+    tokenizer = tokenizer_dir / "tokenizer.json"
+    tokenizer.write_text('{"model":{}}', encoding="utf-8")
+    tokenizer_manifest = Path(str(tokenizer) + ".manifest.json")
+    tokenizer_manifest.write_text('{"sha256":"fixture"}', encoding="utf-8")
+
+    class Tracker:
+        def __init__(self):
+            self.manifest = {}
+            self.outputs = None
+        def start_stage(self, name, *, inputs=None):
+            self.name = name
+        def finish_stage(self, name, *, outputs=None, metrics=None):
+            self.outputs = outputs
+        def fail_stage(self, name, exc):
+            raise exc
+
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.cfg = {"tokenizer": {"output_path": str(tokenizer_dir)}}
+    pipeline._out = tmp_path / "output"
+    pipeline._stage_metrics = {}
+    pipeline._source_observability = []
+    pipeline._run_tracker = Tracker()
+    result = object()
+
+    assert pipeline._run_stage("tokenize", lambda: result) is result
+    assert pipeline._run_tracker.outputs == [tokenizer, tokenizer_manifest]
