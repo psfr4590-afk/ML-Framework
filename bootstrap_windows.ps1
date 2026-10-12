@@ -10,6 +10,10 @@ Set-Location $Root
 function Find-Python {
     $candidates = @(
         @{ Command = "py"; Args = @("-3") },
+        @{ Command = "py"; Args = @("-3.14") },
+        @{ Command = "py"; Args = @("-3.13") },
+        @{ Command = "py"; Args = @("-3.12") },
+        @{ Command = "py"; Args = @("-3.11") },
         @{ Command = "python"; Args = @() },
         @{ Command = "python3"; Args = @() }
     )
@@ -17,8 +21,8 @@ function Find-Python {
         $cmd = Get-Command $candidate.Command -ErrorAction SilentlyContinue
         if ($cmd) {
             try {
-                & $cmd.Source @($candidate.Args) -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-                if ($LASTEXITCODE -eq 0) {
+                $versionText = & $cmd.Source @($candidate.Args) -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+                if ($LASTEXITCODE -eq 0 -and $versionText -match '^3\.(11|12|13|14)$') {
                     return @{ Command = $cmd.Source; Args = $candidate.Args }
                 }
             } catch {}
@@ -33,13 +37,13 @@ if (-not $Python) {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if (-not $winget) {
         Write-Error @"
-Python 3.11-3.14 is required, but Python was not found.
+Python 3.11-3.14 is required, but no supported interpreter was found.
 Install Python from https://www.python.org/downloads/ or install a package manager that provides winget, then run this script again.
 "@
         exit 2
     }
 
-    Write-Host "Python was not found. Installing Python 3.13 with winget..."
+    Write-Host "No supported Python was found. Installing Python 3.13 with winget..."
     & $winget.Source install --id Python.Python.3.13 -e --scope user --accept-source-agreements --accept-package-agreements
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Python installation failed. Install Python 3.11-3.14 manually, then run .\bootstrap_windows.ps1 again."

@@ -16,6 +16,7 @@ REQUIRED_PUBLIC_FILES = {
     "requirements.txt",
     "requirements-torch.txt",
     "bootstrap.py",
+    "bootstrap_windows.ps1",
     "run_pipeline.py",
     "launch.py",
     "run_command_center.py",
@@ -125,3 +126,22 @@ def test_no_large_local_vendor_checkout_is_tracked() -> None:
 def test_documented_commands_reference_existing_entrypoints(command: str) -> None:
     entrypoint = command.split()[1]
     assert (ROOT / entrypoint).is_file(), f"Documented entrypoint does not exist: {entrypoint}"
+
+
+def test_windows_first_boot_wrapper_uses_canonical_bootstrap_safely() -> None:
+    source = (ROOT / "bootstrap_windows.ps1").read_text(encoding="utf-8-sig")
+    required_fragments = [
+        "[switch]$Native",
+        "function Find-Python",
+        '@{ Command = "py"; Args = @("-3.13") }',
+        "versionText -match '^3\\.(11|12|13|14)$'",
+        "Python.Python.3.13",
+        '"--install"',
+        '"--doctor"',
+        '"--ensure-llamacpp"',
+        "Project dependency installation failed",
+        "Native llama.cpp setup failed",
+    ]
+    missing = [fragment for fragment in required_fragments if fragment not in source]
+    assert not missing, f"Windows first-boot contract is incomplete: {missing}"
+    assert "Remove-Item" not in source, "First-boot setup must not delete user or project data"
