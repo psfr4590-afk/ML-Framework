@@ -104,7 +104,7 @@ Orphans are reviewed; they are not automatically deleted or accepted.
 
 ## 9. Release traceability rule
 
-A release report must include the exact candidate revision/package and a summary of mandatory requirements that are verified, failed, blocked, deferred, or not tested. The report must not infer compliance from aggregate test counts alone.
+A release report must identify the exact candidate revision and package and summarize mandatory requirement evidence using the controlled outcomes `PASS`, `FAIL`, `BLOCKED`, `SKIPPED`, or `NOT RUN`. Requirement lifecycle statuses such as `DEFERRED` describe planning disposition and must not be used as test-evidence outcomes. Aggregate test counts do not substitute for requirement-level evidence.
 
 ## 10. Maintenance
 
