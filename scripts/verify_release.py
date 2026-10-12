@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 NATIVE_EVIDENCE: dict[str, object] = {}
+SOURCE_MANIFEST_PATH: Path | None = None
+SOURCE_RUN_MANIFEST_PATH: Path | None = None
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
@@ -554,12 +556,32 @@ def _validate_checkpoint_identity_chain(expected: dict, actual: dict) -> None:
 
 
 def _live_source_retrieval_evidence_is_valid(
-    *, source_manifest_path: Path, expected_run_id: str, stages: dict
+    *,
+    source_manifest_path: Path,
+    expected_run_id: str | None = None,
+    stages: dict | None = None,
+    source_run_manifest_path: Path | None = None,
 ) -> bool | None:
-    """Validate durable evidence for a successful non-fixture source crawl."""
-    if (stages.get("crawl") or {}).get("status") != "PASS":
-        return None
+    """Validate a real online crawl against its own durable run and source manifests.
+
+    The independent source run is not required to share the native training smoke's
+    run ID. Fixture-based pipeline tests are not evidence of external retrieval.
+    """
     try:
+        if source_run_manifest_path is not None:
+            run_manifest = json.loads(source_run_manifest_path.read_text(encoding="utf-8"))
+            if not isinstance(run_manifest, dict):
+                return False
+            if run_manifest.get("final_status") != "PASS":
+                return False
+            if run_manifest.get("errors") or run_manifest.get("degraded_stages"):
+                return False
+            expected_run_id = run_manifest.get("run_id")
+            stages = run_manifest.get("stages")
+        if not isinstance(expected_run_id, str) or not expected_run_id:
+            return False
+        if not isinstance(stages, dict) or (stages.get("crawl") or {}).get("status") != "PASS":
+            return None
         data = json.loads(source_manifest_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or int(data.get("schema", 0)) < 3:
             return False
