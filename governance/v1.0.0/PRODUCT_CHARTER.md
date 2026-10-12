@@ -31,7 +31,7 @@ The product is successful when an operator can, within a declared support envelo
 2. Understand available capabilities, prerequisites, hardware constraints, and unsupported combinations before committing substantial resources.
 3. Configure and run supported workflows through one primary browser Command Center.
 4. Follow a run from inputs through stages, outputs, metrics, and logs using stable identifiers and provenance.
-5. Identify failures, recover safely where supported, and preserve useful evidence for diagnosis.
+5. identify failures, recover safely where supported, and preserve useful evidence for diagnosis.
 6. Evaluate results with clearly stated metrics, limitations, and comparability rules.
 7. Export supported artifacts with the metadata and documentation required to understand and use them.
 8. Verify a release from repeatable evidence tied to an exact source revision and package.
