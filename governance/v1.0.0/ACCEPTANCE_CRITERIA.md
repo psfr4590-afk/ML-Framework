@@ -88,7 +88,7 @@ Retain source revision and working-tree state, build/package hash and inputs, en
 
 ## 9. Acceptance decision record
 
-For each milestone/release, record candidate/version and exact revision; covered criteria and requirements; pass/fail/blocked/not-tested summary; defects/deviations/waivers; evidence locations; decision, approver, and date.
+For each milestone/release, record candidate/version and exact revision; covered criteria and requirements; a status summary using `PASS`, `FAIL`, `BLOCKED`, `SKIPPED`, and `NOT RUN`; defects/deviations/waivers; evidence locations; decision, approver, and date.
 
 ## 10. Baseline authority
 
