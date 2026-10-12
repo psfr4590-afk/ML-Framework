@@ -21,6 +21,7 @@ from email.parser import Parser
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 NATIVE_EVIDENCE: dict[str, object] = {}
 SOURCE_MANIFEST_PATH: Path | None = None
@@ -568,22 +569,34 @@ def _live_source_retrieval_evidence_is_valid(
     run ID. Fixture-based pipeline tests are not evidence of external retrieval.
     """
     try:
-        if source_run_manifest_path is not None:
-            run_manifest = json.loads(source_run_manifest_path.read_text(encoding="utf-8"))
-            if not isinstance(run_manifest, dict):
-                return False
-            if run_manifest.get("final_status") != "PASS":
-                return False
-            if run_manifest.get("errors") or run_manifest.get("degraded_stages"):
-                return False
-            expected_run_id = run_manifest.get("run_id")
-            stages = run_manifest.get("stages")
+        # RC certification must be tied to a completed independent run, not just
+        # counters in a source manifest. Without the run manifest, evidence is
+        # unknown rather than a pass.
+        if source_run_manifest_path is None:
+            return None
+        run_manifest = json.loads(source_run_manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(run_manifest, dict):
+            return False
+        if run_manifest.get("final_status") != "PASS":
+            return False
+        if run_manifest.get("errors") or run_manifest.get("degraded_stages"):
+            return False
+        expected_run_id = run_manifest.get("run_id")
+        stages = run_manifest.get("stages")
         if not isinstance(expected_run_id, str) or not expected_run_id:
             return False
         if not isinstance(stages, dict):
-            return False if source_run_manifest_path is not None else None
-        if (stages.get("crawl") or {}).get("status") != "PASS":
-            return False if source_run_manifest_path is not None else None
+            return False
+        crawl_stage = stages.get("crawl")
+        if not isinstance(crawl_stage, dict) or crawl_stage.get("status") != "PASS":
+            return False
+        if crawl_stage.get("errors"):
+            return False
+        stage_start = datetime.fromisoformat(str(crawl_stage.get("start", "")).replace("Z", "+00:00"))
+        stage_end = datetime.fromisoformat(str(crawl_stage.get("end", "")).replace("Z", "+00:00"))
+        if stage_start.tzinfo is None or stage_end.tzinfo is None or stage_end < stage_start:
+            return False
+
         data = json.loads(source_manifest_path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or int(data.get("schema", 0)) < 3:
             return False
@@ -597,6 +610,9 @@ def _live_source_retrieval_evidence_is_valid(
         completed = datetime.fromisoformat(str(data["retrieval_completed_at"]).replace("Z", "+00:00"))
         if started.tzinfo is None or completed.tzinfo is None or completed < started:
             return False
+        if started < stage_start or completed > stage_end:
+            return False
+
         sources = data.get("sources")
         if not isinstance(sources, list) or not sources:
             return False
@@ -609,24 +625,73 @@ def _live_source_retrieval_evidence_is_valid(
         retrieval = data.get("retrieval")
         if not isinstance(retrieval, list) or not retrieval:
             return False
+
+        successful_counts: dict[str, int] = {}
         for record in retrieval:
-            if not isinstance(record, dict):
-                continue
-            if record.get("kind") not in configured_kinds:
+            if not isinstance(record, dict) or record.get("kind") not in configured_kinds:
                 continue
             if str(record.get("status", "")).upper() != "SUCCESS":
                 continue
             stats = record.get("stats")
             if not isinstance(stats, dict):
                 stats = record
-            try:
-                documents = int(stats.get("document_count", 0))
-                requests = int(stats.get("request_count", 0))
-            except (TypeError, ValueError, OverflowError):
-                continue
+            documents = stats.get("document_count", 0)
+            requests = stats.get("request_count", 0)
+            if not _is_nonnegative_int(documents) or not _is_nonnegative_int(requests):
+                return False
             if documents > 0 and requests > 0:
-                return True
-        return False
+                kind = str(record["kind"])
+                successful_counts[kind] = successful_counts.get(kind, 0) + documents
+        if not successful_counts:
+            return False
+
+        # Bind claimed retrieval to the actual crawl artifact. The run manifest
+        # must contain a SHA-256-addressed crawl output that still matches disk;
+        # that JSONL must contain non-empty HTTP(S) documents from the claimed
+        # online source kinds. Positive counters alone are not retrieval proof.
+        outputs = crawl_stage.get("outputs")
+        if not isinstance(outputs, list) or not outputs:
+            return False
+        verified_documents: dict[str, int] = {}
+        for artifact in outputs:
+            if not isinstance(artifact, dict):
+                continue
+            artifact_path = artifact.get("path")
+            artifact_digest = artifact.get("sha256")
+            if not isinstance(artifact_path, str) or not _is_sha256(artifact_digest):
+                continue
+            path = Path(artifact_path)
+            if not path.is_absolute():
+                path = ROOT / path
+            path = path.resolve()
+            try:
+                path.relative_to(ROOT.resolve())
+            except ValueError:
+                return False
+            if not path.is_file() or _sha256(path) != artifact_digest:
+                return False
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        document = json.loads(line)
+                        if not isinstance(document, dict):
+                            return False
+                        kind = document.get("source")
+                        url = document.get("url")
+                        content = document.get("text")
+                        if kind not in successful_counts or not isinstance(url, str):
+                            continue
+                        parsed_url = urlsplit(url)
+                        if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+                            continue
+                        if not isinstance(content, str) or not content.strip():
+                            continue
+                        verified_documents[str(kind)] = verified_documents.get(str(kind), 0) + 1
+            except (OSError, UnicodeError, ValueError, TypeError):
+                return False
+        return any(verified_documents.get(kind, 0) > 0 for kind in successful_counts)
     except (OSError, ValueError, TypeError, KeyError, OverflowError, json.JSONDecodeError):
         return False
 
