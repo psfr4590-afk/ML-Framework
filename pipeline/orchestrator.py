@@ -378,7 +378,8 @@ class Pipeline:
                 self._run_tracker = RunTracker.resume(PROJECT_ROOT, self._out, manifest_path)
             else:
                 self.cfg["_run_id"] = new_run_id()
-                run_id_path.write_text(self.cfg["_run_id"] + "\n", encoding="utf-8")
+                run_id_path = self._out / "provenance" / "run_id.txt"
+                atomic_write_text(run_id_path, self.cfg["_run_id"] + "\n")
                 self._run_tracker = RunTracker(
                     PROJECT_ROOT, self._out, run_id=self.cfg["_run_id"],
                     dataset_id=dataset_identity["dataset_id"], experiment_id=experiment_id,
