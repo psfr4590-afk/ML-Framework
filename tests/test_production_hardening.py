@@ -249,3 +249,20 @@ def test_shard_resume_rejects_same_size_hash_tampering(tmp_path, monkeypatch):
     assert result == shard_dir
     assert called == [input_path]
     assert shard.read_bytes() == original
+
+
+def test_checkpoint_safe_loader_fails_closed_without_weights_only_support(tmp_path, monkeypatch):
+    from pipeline.trainer import train as train_module
+
+    observed = {}
+
+    def unsupported_loader(path, **kwargs):
+        observed.update(kwargs)
+        raise TypeError("unexpected keyword argument 'weights_only'")
+
+    monkeypatch.setattr(train_module.torch, "load", unsupported_loader)
+    with pytest.raises(RuntimeError, match="Safe checkpoint loading requires"):
+        train_module._safe_torch_load(tmp_path / "checkpoint.pt", map_location="cpu")
+
+    assert observed["weights_only"] is True
+    assert observed["map_location"] == "cpu"
