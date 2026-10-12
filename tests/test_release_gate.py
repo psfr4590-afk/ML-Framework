@@ -703,3 +703,33 @@ def test_online_source_evidence_rejects_failed_or_mismatched_run(
         source_manifest_path=source_manifest_path,
         source_run_manifest_path=run_manifest_path,
     ) is False
+
+
+
+def test_local_filesystem_retrieval_does_not_claim_online_retrieval(tmp_path):
+    source_manifest_path = tmp_path / "source_manifest.json"
+    run_manifest_path = tmp_path / "run_manifest.json"
+    source_manifest_path.write_text(json.dumps({
+        "schema": 3,
+        "run_id": "local-crawl-42",
+        "source_definition_sha256": "a" * 64,
+        "retrieval_started_at": "2026-10-11T10:00:00+00:00",
+        "retrieval_completed_at": "2026-10-11T10:01:00+00:00",
+        "sources": [{"kind": "local_files", "identifier": "E:/USB/corpus"}],
+        "retrieval": [{
+            "kind": "local_files", "source_mode": "local", "status": "SUCCESS",
+            "document_count": 12, "request_count": 12,
+        }],
+    }), encoding="utf-8")
+    run_manifest_path.write_text(json.dumps({
+        "run_id": "local-crawl-42",
+        "final_status": "PASS",
+        "errors": [],
+        "degraded_stages": [],
+        "stages": {"crawl": {"status": "PASS"}},
+    }), encoding="utf-8")
+
+    assert verify_release._live_source_retrieval_evidence_is_valid(
+        source_manifest_path=source_manifest_path,
+        source_run_manifest_path=run_manifest_path,
+    ) is False
