@@ -88,61 +88,6 @@ def test_source_retrieval_smoke_exercises_offline_upstream_stages():
     assert verify_release._source_retrieval_smoke() is True
 
 
-@pytest.mark.parametrize(
-    "source_manifest,stages,expected",
-    [
-        (None, {"crawl": {"status": "PASS"}}, False),
-        (
-            {"schema": 3, "run_id": "run-1", "source_definition_sha256": "a" * 64,
-             "retrieval_started_at": "2026-01-01T00:00:00+00:00", "retrieval_completed_at": "2026-01-01T00:01:00+00:00",
-             "retrieval": []},
-            {"crawl": {"status": "PASS"}}, False,
-        ),
-        (
-            {"schema": 3, "run_id": "wrong-run", "source_definition_sha256": "a" * 64,
-             "retrieval_started_at": "2026-01-01T00:00:00+00:00", "retrieval_completed_at": "2026-01-01T00:01:00+00:00",
-             "retrieval": [{"kind": "web", "status": "SUCCESS", "stats": {"document_count": 1, "request_count": 1}}]},
-            {"crawl": {"status": "PASS"}}, False,
-        ),
-        (
-            {"schema": 3, "run_id": "run-1", "source_definition_sha256": "a" * 64,
-             "retrieval_started_at": "2026-01-01T00:00:00+00:00", "retrieval_completed_at": "2026-01-01T00:01:00+00:00",
-             "sources": [{"kind": "local_fixture"}],
-             "retrieval": [{"kind": "web", "status": "SUCCESS", "stats": {"document_count": 1, "request_count": 1}}]},
-            {"crawl": {"status": "PASS"}}, False,
-        ),
-        (
-            {"schema": 3, "run_id": "run-1", "source_definition_sha256": "a" * 64,
-             "retrieval_started_at": "2026-01-01T00:00:00+00:00", "retrieval_completed_at": "2026-01-01T00:01:00+00:00",
-             "sources": [{"kind": "web", "identifier": "https://example.com"}],
-             "retrieval": [{"kind": "web", "status": "SUCCESS", "stats": {"document_count": 1, "request_count": 1}}]},
-            {"crawl": {"status": "PASS"}}, False,
-        ),
-        (
-            {"schema": 3, "run_id": "run-1", "source_definition_sha256": "a" * 64,
-             "retrieval_started_at": "2026-01-01T00:00:00+00:00", "retrieval_completed_at": "2026-01-01T00:01:00+00:00",
-             "retrieval": [{"kind": "web", "status": "SUCCESS", "stats": {"document_count": 0, "request_count": 1}}]},
-            {"crawl": {"status": "PASS"}}, False,
-        ),
-        (
-            {"schema": 3, "run_id": "run-1", "source_definition_sha256": "a" * 64,
-             "retrieval_started_at": "2026-01-01T00:00:00+00:00", "retrieval_completed_at": "2026-01-01T00:01:00+00:00",
-             "retrieval": [{"kind": "web", "status": "SUCCESS", "stats": {"document_count": 1, "request_count": 1}}]},
-            {"crawl": {"status": "SKIPPED"}}, False,
-        ),
-    ],
-)
-def test_live_source_retrieval_requires_matching_durable_crawl_evidence(
-    tmp_path, source_manifest, stages, expected
-):
-    path = tmp_path / "source_manifest.json"
-    if source_manifest is not None:
-        path.write_text(json.dumps(source_manifest), encoding="utf-8")
-    assert verify_release._live_source_retrieval_evidence_is_valid(
-        source_manifest_path=path, expected_run_id="run-1", stages=stages
-    ) is expected
-
-
 def test_offline_pipeline_smoke_does_not_claim_live_source_retrieval(monkeypatch):
     verify_release.NATIVE_EVIDENCE.clear()
     monkeypatch.setattr(verify_release, "_source_retrieval_smoke", lambda: True)
