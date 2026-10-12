@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import mimetypes
+import os
 from pathlib import Path
 from typing import Iterator
 
@@ -55,14 +56,24 @@ class LocalFilesCrawler(BaseCrawler):
                 self.stats["skipped"] += 1
                 continue
             if root.is_file():
-                candidates = [root]
+                candidates = iter((root,))
+            elif root.is_dir() and self.recursive:
+                def walk_files():
+                    for directory, dirnames, filenames in os.walk(root, followlinks=False):
+                        dirnames[:] = sorted(
+                            name for name in dirnames
+                            if not (Path(directory) / name).is_symlink()
+                        )
+                        for filename in sorted(filenames, key=str.casefold):
+                            yield Path(directory) / filename
+                candidates = walk_files()
             elif root.is_dir():
-                candidates = root.rglob("*") if self.recursive else root.iterdir()
+                candidates = iter(sorted(root.iterdir(), key=lambda item: str(item).casefold()))
             else:
                 self.stats["errors"] += 1
                 log.warning("Local source path does not exist: %s", root)
                 continue
-            for candidate in sorted(candidates, key=lambda item: str(item).casefold()):
+            for candidate in candidates:
                 if candidate.is_symlink() or not candidate.is_file():
                     continue
                 if candidate.suffix.lower() not in self.extensions:
