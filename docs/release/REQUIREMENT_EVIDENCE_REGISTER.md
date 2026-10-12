@@ -139,7 +139,7 @@ This section records source review of existing tests on `main` revision `1f8e845
 
 ### Review result
 
-The reviewed tests provide meaningful coverage for selected contracts, but several approved requirements are broader than their current test assertions. The table deliberately records those gaps instead of promoting requirements to `PASS`. Remaining 52 requirement IDs still have only candidate mappings at this point and require the same assertion-scope review.
+The reviewed tests provide meaningful coverage for selected contracts, but several approved requirements are broader than their current test assertions. The table deliberately records those gaps instead of promoting requirements to `PASS`. Across the three audit tables, 38 distinct requirement IDs now have a documented static assertion-scope review. The remaining 26 IDs still have candidate mappings only and require the same review. All 64 requirement outcomes remain `NOT RUN` until requirement-specific execution evidence is attached.
 
 ## Second-pass assertion-scope audit
 
