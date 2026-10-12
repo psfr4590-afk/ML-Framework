@@ -143,3 +143,65 @@ def test_source_manifest_only_advertises_local_mode_when_enabled(tmp_path):
     local_sources = [source for source in enabled if source["kind"] == "local_files"]
     assert local_sources
     assert local_sources[0]["identifier"] == str(tmp_path)
+
+
+
+def test_pipeline_crawl_dispatches_local_files_and_records_mode(tmp_path):
+    import json
+    import yaml
+
+    project_root = Path(__file__).resolve().parents[1]
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    (source_dir / "local.txt").write_text(
+        "A sufficiently descriptive local document covering data pipelines, "
+        "system reliability, provenance tracking, and reproducible engineering.",
+        encoding="utf-8",
+    )
+    groups_path = tmp_path / "dataset_groups.yaml"
+    groups_path.write_text(yaml.safe_dump({
+        "dataset_groups": [{
+            "id": "local-test",
+            "name": "Local filesystem test",
+            "sources": {
+                "web": False, "github": False, "arxiv": False,
+                "huggingface": False, "google": False, "local_files": True,
+            },
+            "local_files": {"paths": [str(source_dir)]},
+        }]
+    }), encoding="utf-8")
+    cfg = yaml.safe_load((project_root / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
+    cfg["pipeline"]["output_dir"] = str(tmp_path / "output")
+    cfg["pipeline"]["scratch_dir"] = str(tmp_path / "scratch")
+    cfg["pipeline"]["resume"] = False
+    cfg["stages"] = {
+        "crawl": True, "clean": False, "dedup": False, "weight": False,
+        "tokenize": False, "shard": False, "train": False, "export": False,
+    }
+    cfg["crawl"]["dataset_groups_file"] = str(groups_path)
+    cfg["crawl"]["sources"] = {
+        "web": False, "github": False, "arxiv": False,
+        "huggingface": False, "google": False, "local_files": False,
+    }
+    cfg["crawl"]["local_files"] = {"paths": [], "recursive": True, "max_files": 10, "max_file_bytes": 4096}
+    config_path = tmp_path / "local-pipeline.yaml"
+    config_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    from pipeline.orchestrator import Pipeline
+
+    pipeline = Pipeline(str(config_path), resume=False)
+    try:
+        crawled = pipeline.stage_crawl()
+        records = [json.loads(line) for line in crawled.read_text(encoding="utf-8").splitlines() if line.strip()]
+        manifest = json.loads(pipeline._source_manifest_path.read_text(encoding="utf-8"))
+    finally:
+        pipeline.close()
+
+    assert len(records) == 1
+    assert records[0]["source"] == "local_files"
+    assert records[0]["meta"]["source_mode"] == "local"
+    local_retrieval = [record for record in manifest["retrieval"] if record["kind"] == "local_files"]
+    assert len(local_retrieval) == 1
+    assert local_retrieval[0]["source_mode"] == "local"
+    assert local_retrieval[0]["status"] == "SUCCESS"
+    assert local_retrieval[0]["document_count"] == 1
