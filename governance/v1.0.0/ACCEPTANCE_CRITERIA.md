@@ -148,4 +148,4 @@ For each milestone or release, record:
 
 ## 10. Effective use
 
-These criteria become the governing acceptance baseline when approved by the project owner. Approval does not imply that any existing feature has passed; each implementation must be evaluated against the criteria independently.
+These criteria are the governing acceptance baseline approved by the project owner on 2026-10-11. Approval does not imply that any existing feature has passed; each implementation must be evaluated against the criteria independently.
