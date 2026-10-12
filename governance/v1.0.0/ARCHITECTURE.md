@@ -1,4 +1,4 @@
-# ML-Framework Architecture Baseline
+# ML-Framework Intended Architecture
 
 **Document ID:** MLF-GOV-004  
 **Version:** 1.0.0  
@@ -8,76 +8,142 @@
 
 ## 1. Purpose
 
-This document defines intended architectural responsibilities and boundaries. It describes the target design, not a claim that every boundary is already implemented. Deviations in the repository must be documented and evaluated against requirements, security, data integrity, and operator workflows.
+This document defines the intended architecture and its governing boundaries before implementation decisions are made. It uses lessons from development to prevent recurring classes of failure; it does not claim that the current code is already organized this way.
 
-## 2. Architectural principles
+## 2. Architectural goals
 
-- Local-first execution by default; disclose external services and network transfers.
-- One browser Command Center is the canonical operator interface.
-- Explicit boundaries between presentation, orchestration, stage execution, persistence, and artifact handling.
-- Durable state must be validated and written atomically or with an equivalent consistency strategy.
-- Capabilities and release claims require evidence tied to exact revisions and environments.
-- Components should be testable independently and through end-to-end vertical slices.
+The architecture should provide:
+- One coherent browser Command Center.
+- Clear separation between presentation, application orchestration, domain workflows, execution adapters, and persistence.
+- Durable and traceable run state.
+- Safe interaction with local files, subprocesses, model artifacts, and optional external tools.
+- Bounded resource use and explicit capability detection.
+- Testable components with replaceable backends.
+- Reproducible packaging and clean-environment operation.
 
-## 3. Logical components
+## 3. Logical layers
 
-### 3.1 Browser Command Center
+### 3.1 Command Center / presentation
+Owns operator-facing views, forms, validation feedback, run status, logs, metrics, artifact inventory, and action results. It should call application services rather than manipulate persistence tables or process objects directly.
 
-Owns operator presentation: health/readiness, supported capability information, configuration, run control, status, logs, metrics, and artifact visibility. It must not invent state independently of the authoritative backend. UI actions should call explicit backend operations and render their actual results.
+### 3.2 Application services
+Coordinates use cases such as preflight, workflow creation, run control, cancellation, comparison, export, diagnostics, and backup/restore. It enforces authorization and lifecycle rules at the application boundary.
 
-### 3.2 Application/API boundary
+### 3.3 Domain model
+Defines workflow/run/stage states, configuration contracts, provenance records, capability descriptions, artifact identity, and validation rules. Domain transitions should be explicit and independently testable.
 
-Provides validated operations between the browser and the application services. It is responsible for input validation, consistent error responses, access to authorized operations, and preventing UI-level assumptions from bypassing backend invariants.
+### 3.4 Workflow orchestration
+Coordinates stages and dependencies, applies timeouts/retry policies, tracks progress, and ensures downstream work receives validated outputs. It should not own UI concerns or bury persistent state transitions inside long-running process code.
 
-### 3.3 Pipeline orchestrator
+### 3.5 Execution adapters
+Wraps training frameworks, tokenizers, data processors, inference runtimes, and native tools behind explicit interfaces. Adapters report capabilities and limitations and translate backend-specific errors into stable application-level failure categories.
 
-Coordinates a run's lifecycle and ordered stages. It assigns or propagates stable run identity, checks prerequisites, records stage transitions, handles cancellation/failure, and ensures a failed or incomplete stage cannot be recorded as a successful run. Stage execution details should remain in their responsible modules.
+### 3.6 Persistence and artifact repository
+Owns durable records, manifests, run metadata, artifact references, and schema migrations. Critical writes use atomic replacement, transactions, or another documented consistency mechanism. Filesystem artifacts and database records must have explicit reconciliation rules.
 
-### 3.4 Stage workers
+### 3.7 Environment and resource services
+Detects supported runtimes, drivers, hardware, disk capacity, optional tools, and resource constraints. Detection results are timestamped and distinguish observed facts from estimates and unverified capabilities.
 
-Implement data intake and preparation, cleaning, deduplication, weighting, tokenization, sharding, training, evaluation, and export only where supported. Each stage declares inputs, outputs, configuration, validation, and failure behavior. Stage naming and semantics must be consistent across configuration, execution, and persisted evidence.
+### 3.8 Diagnostics and release evidence
+Collects structured logs, status snapshots, dependency information, test reports, and package identity. Sensitive fields are redacted. Release evidence is bound to the exact candidate it describes.
 
-### 3.5 Persistence and provenance
+## 4. Key boundaries
 
-Owns durable run records, stage records, manifests, configuration snapshots, metrics, and artifact references. Use stable schemas, explicit migrations where needed, and atomic writes or an equivalent documented consistency mechanism. Provenance should connect source inputs through preparation artifacts and training to exports.
+- Presentation code must not directly mutate workflow persistence.
+- Domain rules must not depend on a specific UI framework.
+- Orchestration must call execution adapters through defined interfaces.
+- Execution adapters must not silently redefine lifecycle or success semantics.
+- Persistence must validate schema and record versions.
+- Artifact references must not be treated as proof that files exist or are valid.
+- Capability detection must not be treated as proof of end-to-end support.
+- Diagnostics must not expose secrets by default.
+- External tools must be invoked with explicit arguments, controlled working directories, bounded timeouts, and captured exit/output state.
 
-### 3.6 Runtime and external tools
+## 5. Run lifecycle and state model
 
-Wraps optional backends and external executables such as native inference runtimes. Detect and report missing or incompatible dependencies before launching expensive work. Never represent a detected binary or configured backend as verified inference capability without a successful test.
+A typical run lifecycle is:
 
-### 3.7 Release verification
+`created → validated → queued (if queueing is supported) → running → finalizing → completed`
 
-Runs static checks, tests, clean-environment setup, UI/backend probes, native bootstrap and inference, export/runtime checks, and provenance validation as required by the release profile. Its report records the exact source revision, environment, package identity, commands, outcomes, and evidence paths.
+Alternative terminal outcomes include `failed` and `cancelled`. A `cancelling` state may be used while cleanup is in progress. State names may differ in implementation, but semantics and legal transitions must be defined.
 
-## 4. Data and state flow
+A run may be marked `completed` only after:
+1. Required stages have completed.
+2. Required outputs exist and pass validation.
+3. Provenance and final status have been persisted successfully.
+4. Required postconditions have passed.
 
-A supported run should be traceable through the following conceptual chain:
+A process exit code is evidence, not the entire success decision.
 
-`source inputs → normalized/cleaned data → deduplicated/weighted data → tokenizer → shards → training run/checkpoint → evaluation → exported artifact`
+## 6. Persistence consistency
 
-Not every workflow uses every stage. Each enabled transition must validate its predecessor's output and record identities/hashes where practical. A later artifact must not be treated as valid merely because a file exists.
+Critical run state, shard manifests, export manifests, and other authoritative metadata must not be exposed while partially written. Suitable approaches include database transactions, write-to-temporary-file plus flush/atomic replacement, or another mechanism with equivalent guarantees on supported filesystems.
 
-## 5. State and failure semantics
+The architecture must specify:
+- Which store is authoritative for each record.
+- How filesystem/database disagreement is detected.
+- How interrupted writes are recovered.
+- How schema migrations are versioned and rolled back or recovered.
+- How finalized run evidence is protected from accidental mutation.
 
-- State transitions must be explicit and validated.
-- Persisted status must reflect authoritative process and stage outcomes.
-- Cancellation, timeout, exceptions, missing outputs, and nonzero subprocess exits must not become success states.
-- Critical manifests must not be left as partially written valid-looking files.
-- Retries must define whether prior outputs are reused, replaced, or preserved.
-- UI/backend disagreement is a defect; the UI should expose unknown or stale state rather than guess.
+## 7. Workflow and process control
 
-## 6. Security boundaries
+Long-running work should be represented as managed jobs or explicit bounded executions. Each process invocation needs:
+- A known executable and argument list.
+- Controlled working directory and environment.
+- Timeout and cancellation policy.
+- Captured exit code and bounded logs.
+- A defined cleanup strategy.
+- A clear mapping from backend outcomes to run states.
 
-Validate filesystem paths at the point of use; constrain destructive operations to declared roots; redact credentials and sensitive paths in logs; avoid unsafe deserialization; pin or verify external artifacts where feasible; and document network use. Model files and data inputs are untrusted until validated. A local-first design is not, by itself, a security guarantee.
+Retries must be stage-specific. Non-idempotent work must not be automatically retried unless it has a safe resume or deduplication mechanism.
 
-## 7. Resource management
+## 8. Data and artifact provenance
 
-The system should estimate CPU, RAM, VRAM, storage, and runtime needs where practical. Estimates must be labeled as estimates. It must expose material constraints and fail safely when required dependencies or resources are unavailable. It must not promise that a workload fits merely because a preflight check passes.
+The architecture should link a run to its inputs, transformations, configurations, software versions, tokenizer, training outputs, evaluations, and exports. Use content hashes or immutable version identifiers where practical. Do not rely solely on mutable filenames.
 
-## 8. Verification strategy
+Each model export is a logical package comprising the model artifact, required model-specific dataset documentation, model documentation where applicable, and a manifest that binds the parts together. Validation must detect missing or mismatched files.
 
-Test components in isolation, contract boundaries, persistence/failure behavior, and complete UI-to-backend workflows. Native runtime and export claims require real runtime evidence, not only mocked tests. Clean-clone acceptance must start from a fresh checkout without relying on developer-specific state.
+## 9. Resource governance
 
-## 9. Architecture changes
+Resource policy should be centralized enough to apply consistently across workflows. It should consider available RAM, VRAM, CPU, storage, and configured concurrency. Estimates must state uncertainty. The system should support preflight warnings and safe refusal where a workload violates hard constraints.
 
-Changes affecting run lifecycle, manifests, serialization, API/UI behavior, security boundaries, external tools, or supported environments require review, updated decision records where appropriate, and mapped verification. This baseline was approved on 2026-10-11; approval does not imply that the current implementation conforms.
+The architecture must not assume that GPU availability guarantees adequate VRAM, that CPU fallback will be performant, or that a developer's cached environment represents a clean installation.
+
+## 10. Security boundaries
+
+- Validate all user-controlled paths and prevent traversal.
+- Prefer safe, documented artifact formats and deserialization paths.
+- Avoid shell-string construction when an argument-list API is available.
+- Redact secrets from structured logs and diagnostic exports.
+- Minimize privileges and external network access.
+- Treat datasets, model files, plugins, and external tool output as potentially untrusted.
+- Review deletion, overwrite, executable-launch, and export operations for unintended side effects.
+
+## 11. Configuration and compatibility
+
+Configuration should have a versioned schema, validation errors that identify the relevant setting, explicit defaults, and migration behavior where needed. Backend compatibility must be represented as declared capability metadata rather than scattered assumptions.
+
+## 12. Observability
+
+Every run and stage should have stable identifiers. Logs, metrics, UI status, artifact manifests, and diagnostic bundles should share those identifiers. Logs should be structured, bounded, and redacted. User-facing status should be derived from authoritative lifecycle state rather than inferred from stale log text.
+
+## 13. Testing strategy implications
+
+Each layer must be testable independently. Interfaces should allow deterministic tests with fake adapters, injected process failures, controlled clocks where applicable, temporary persistence, and fault injection. End-to-end tests must still prove that the integrated product works; unit tests alone are insufficient.
+
+## 14. Architecture decision records
+
+Material decisions must record:
+- Context and problem.
+- Decision and alternatives considered.
+- Consequences and tradeoffs.
+- Security, reliability, resource, and compatibility implications.
+- Migration or rollback approach.
+- Verification needed.
+
+Decisions affecting data integrity, persistent formats, public interfaces, export compatibility, or release packaging require explicit review.
+
+## 15. Implementation mapping
+
+Before treating this architecture as implemented, create a component map linking each logical responsibility to concrete modules, interfaces, persistence stores, and tests. Record deviations and rationale rather than silently weakening the baseline.
