@@ -281,6 +281,7 @@ def _load_or_create_run_id(output_dir: Path, resume: bool) -> str:
                 # Never overwrite an unreadable historical manifest.
                 pass
     run_id = new_run_id()
+    run_id_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(run_id_path, run_id + "\n")
     return run_id
 
