@@ -31,7 +31,15 @@ crawl:
   fail_on_malformed_jsonl: true
   dataset_groups_file: "config/dataset_groups.smoke.yaml"
   source_weights_file: "config/source_weights.yaml"
-  sources: {web: true, github: false, arxiv: false, huggingface: false, google: false}
+  sources: {web: true, github: false, arxiv: false, huggingface: false, google: false, local_files: false}
+  local_files:
+    # Add explicit files or directories here to ingest local documents (including mounted drives).
+    # Example: ["D:/Research", "E:/USB/Corpus"] on Windows, or ["/mnt/data/research"] on Linux.
+    paths: []
+    recursive: true
+    extensions: [".pdf", ".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".xml", ".html", ".htm", ".md", ".markdown", ".txt", ".rst", ".log", ".docx", ".xlsx", ".xlsm", ".pptx"]
+    max_files: 1000
+    max_file_bytes: 5000000
   web:
     seed_urls_file: "config/seed_urls.txt"
     seed_urls: ["https://docs.python.org/3/tutorial/"]
