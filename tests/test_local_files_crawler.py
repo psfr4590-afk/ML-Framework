@@ -6,6 +6,7 @@ import pytest
 
 from pipeline.config_validation import validate_config
 from pipeline.crawler.local_files_crawler import LocalFilesCrawler
+from pipeline.orchestrator import _manifest_sources, _source_definition_paths
 
 
 class _Weights:
@@ -124,3 +125,21 @@ def test_config_validation_requires_paths_when_local_source_is_enabled(tmp_path)
 
     with pytest.raises(ValueError, match="paths is required"):
         validate_config(cfg)
+
+
+
+def test_source_manifest_only_advertises_local_mode_when_enabled(tmp_path):
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "config" / "pipeline_config.yaml").read_text(encoding="utf-8"))
+    paths = _source_definition_paths(cfg, root)
+    disabled = _manifest_sources(cfg, paths)
+    assert all(source["kind"] != "local_files" for source in disabled)
+
+    cfg["crawl"]["sources"]["local_files"] = True
+    cfg["crawl"]["local_files"] = {"paths": [str(tmp_path)]}
+    enabled = _manifest_sources(cfg, paths)
+    local_sources = [source for source in enabled if source["kind"] == "local_files"]
+    assert local_sources
+    assert local_sources[0]["identifier"] == str(tmp_path)
