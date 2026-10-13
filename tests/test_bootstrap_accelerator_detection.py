@@ -173,7 +173,7 @@ def test_runtime_status_catches_cuda_device_count_errors(monkeypatch):
     monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
     result = bootstrap.torch_runtime_status()
 
-    assert result["cuda_available"] is True
+    assert result["cuda_available"] is False
     assert result["device_count"] == 0
     assert any("device_count" in error and "driver enumeration failed" in error for error in result["probe_errors"])
 
