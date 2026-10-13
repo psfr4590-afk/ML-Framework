@@ -97,3 +97,48 @@ def test_every_declared_runtime_distribution_has_an_import_probe():
 
     assert declared - set(bootstrap.DISTRIBUTION_IMPORTS) == set()
     assert "torch" not in declared
+
+def test_auto_install_selects_rocm_for_amd_gpu_on_linux(monkeypatch):
+    profile = bootstrap.HardwareProfile(
+        gpu_name="AMD Radeon Graphics",
+        gpu_vendor="amd",
+    )
+    calls = []
+    monkeypatch.setattr(bootstrap.sys, "platform", "linux")
+    monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {"installed": False, "importable": False, "hip_available": False},
+    )
+    monkeypatch.setattr(bootstrap, "_remove_incompatible_torch", lambda channel: calls.append(("remove", channel)) or 0)
+    monkeypatch.setattr(bootstrap, "_pip_install", lambda requirements, *extra: calls.append((str(requirements), *extra)) or 0)
+    monkeypatch.setattr(bootstrap, "_validate_requested_torch_channel", lambda channel: calls.append(("validate", channel)) or 0)
+
+    assert bootstrap.install("auto") == 0
+    assert ("remove", "rocm") in calls
+    assert (str(bootstrap.TORCH_REQUIREMENTS), "--index-url", bootstrap.ROCM_TORCH_INDEX) in calls
+    assert ("validate", "rocm") in calls
+
+
+def test_auto_install_selects_xpu_for_intel_gpu(monkeypatch):
+    profile = bootstrap.HardwareProfile(
+        gpu_name="Intel Arc Graphics",
+        gpu_vendor="intel",
+    )
+    calls = []
+    monkeypatch.setattr(bootstrap.sys, "platform", "linux")
+    monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {"installed": False, "importable": False, "xpu_available": False},
+    )
+    monkeypatch.setattr(bootstrap, "_remove_incompatible_torch", lambda channel: calls.append(("remove", channel)) or 0)
+    monkeypatch.setattr(bootstrap, "_pip_install", lambda requirements, *extra: calls.append((str(requirements), *extra)) or 0)
+    monkeypatch.setattr(bootstrap, "_validate_requested_torch_channel", lambda channel: calls.append(("validate", channel)) or 0)
+
+    assert bootstrap.install("auto") == 0
+    assert ("remove", "xpu") in calls
+    assert (str(bootstrap.TORCH_REQUIREMENTS), "--index-url", bootstrap.XPU_TORCH_INDEX) in calls
+    assert ("validate", "xpu") in calls
