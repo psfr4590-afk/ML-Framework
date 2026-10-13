@@ -40,7 +40,7 @@ DISTRIBUTION_IMPORTS = {
     "tokenizers": "tokenizers",
     "safetensors": "safetensors",
     "datasets": "datasets",
-    "huggingface_hub": "huggingface_hub",
+    "huggingface-hub": "huggingface_hub",
     "sentencepiece": "sentencepiece",
     "trafilatura": "trafilatura",
     "langdetect": "langdetect",
@@ -419,8 +419,9 @@ def doctor() -> int:
         print(f"distribution {distribution}: {state}")
         if version is None:
             failures.append(f"runtime distribution missing: {distribution}")
+    declared_names = {item.lower().replace("_", "-") for item in distributions}
     for distribution, name in DISTRIBUTION_IMPORTS.items():
-        if distribution not in {item.lower().replace("_", "-") for item in distributions}:
+        if distribution not in declared_names:
             # The distribution check above already reports this missing dependency.
             continue
         try:
