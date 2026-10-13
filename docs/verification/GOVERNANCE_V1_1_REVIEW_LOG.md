@@ -51,3 +51,42 @@ All 64 requirements remain `NOT_VERIFIED`. Preserve that status until requiremen
 ## Next checkpoint
 
 Next: keep the package-declared source SHA distinct from the review baseline and validate the catalog at the declared SHA. Map P0 requirements to the dedicated behavioral tests that actually exercise them; add tests only where the cross-check shows a real gap. The repository review baseline contains useful security and release-gate tests, but they have not been executed as candidate-bound evidence for `f06bbed...`. Keep this work separate from production implementation fixes. Revisit schema migration only when evidence of a schema change or compatibility failure appears.
+
+
+## GOV-09 — Catalog target inventory is not valid for the declared source snapshot
+
+**Priority:** High for governance-package validity  
+**Status:** Confirmed source/target mismatch; requirement status unchanged  
+**Evidence revision:** `f06bbedb55e252cd7033c615733c5d2554a7d0aa`  
+**Review baseline (not substituted):** `79990219e505c4531aa3a61fb9acbeff1cefbc00`
+
+A recursive Git tree query against the exact declared source SHA confirms that:
+- `tests/governance/test_requirement_acceptance.py` is absent.
+- `tests/test_runner_security_regressions.py` is absent.
+- The export implementation path is `scripts/export_gguf.py`; `pipeline/export_gguf.py` is absent.
+- `tests/test_command_center_credentials.py`, `tests/test_release_gate.py`, and `tests/test_release_gate_contract.py` are present at that SHA. Their presence establishes only that the files exist, not that their tests pass or satisfy every mapped requirement.
+
+The earlier structural result (64 requirements, 64 traceability rows, 64 unique test IDs, and all targets found) was run in the separate review worktree at `79990219e505c4531aa3a61fb9acbeff1cefbc00`. It must not be reported as an exact-target-existence pass for `f06bbed...`. The package-declared source SHA remains unchanged; this review does not silently substitute the review baseline or designate either SHA as a release candidate.
+
+### Concrete mapping corrections to propose
+
+| Requirement | Inadequate catalog assertion / mapping | Correct verification target |
+|---|---|---|
+| `REQ-SEC-001` safe subprocess handling | Import/path traversal assertion does not establish safe command construction or executable selection. | Test subprocess invocation with hostile arguments; assert argument-vector use / no unsafe shell interpolation and expected executable selection. |
+| `REQ-SEC-002` path/archive safety | Log-tail bound test is unrelated to traversal and malformed archive handling. | Adversarial tests for traversal paths, malformed manifests/archives, and unsafe model/card paths, with no writes outside the intended root. |
+| `REQ-SEC-003` secret handling | Checking whether a real `.env` file exists does not prove secrets are excluded from logs/errors/artifacts. | Inject canary secrets through supported failure paths; assert absence from captured logs, user-facing errors, cards, and release outputs. Use the dedicated credential/redaction tests where applicable. |
+| `REQ-SEC-005` external effects (if present in the catalog's versioned requirement set) | Dependency metadata does not prove no unapproved network transfer occurs. | Instrument/deny network access and verify local-only workflows make no outbound calls; separately test any explicitly invoked transfer is disclosed. |
+| `REQ-DATA-008` schema evolution (catalog label must be checked against the actual requirement text) | `callable(hashlib.sha256)` proves neither schema compatibility nor evolution behavior. | Test supported prior schema fixtures, explicit version detection, migration/compatibility outcomes, and preservation of data; if the requirement is actually streaming/bounded-memory, replace this with a representative bounded-memory/resource test instead. |
+| `REQ-ART-003` artifact integrity | Grepping source for a dataset-card string does not test missing, partial, inconsistent, or corrupt artifacts. | Remove/truncate/tamper with artifacts and assert verification reports failure without declaring a complete export. |
+| `REQ-REL-005` release gate (catalog row previously described as `REQ-REL-006`; verify the package's exact requirement ID before editing) | Checking that a tests directory exists does not show the release gate rejects missing/unknown evidence or unresolved blockers. | Exercise the actual release gate with required evidence missing, unknown, malformed, and failed; assert non-pass status and no certification claim. |
+| `REQ-REL-006` performance/resource claims in the requirements document retrieved from the library | A generic test-directory check is not a claim-to-measurement audit. | Enumerate advertised claims and require linked measurements, configuration, hardware, and conditions; fail on unsupported claims. |
+
+The IDs in the catalog and the IDs in the requirements document must be reconciled before any row is edited. In particular, do not carry forward an ID based solely on a remembered or similarly named requirement: the requirement text and versioned ID are authoritative.
+
+### Disposition and exit condition
+
+1. Preserve the package-declared SHA as the target until the package owner explicitly approves a different source identity.
+2. Rebuild a target inventory from the tree at that SHA and mark absent targets as **MISSING AT DECLARED REVISION**, not as passing.
+3. For each mapped test, record whether it is present, behaviorally relevant, and executed; these are separate checks.
+4. Propose a corrected mapping table against the exact package requirement IDs. Do not edit the package's normative requirements or change any of the 64 statuses from `NOT_VERIFIED` as part of this review-log update.
+5. Do not claim release certification or product implementation failure from a catalog mapping defect alone.
