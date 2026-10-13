@@ -15,7 +15,7 @@ All 64 requirements remain `NOT_VERIFIED`. Preserve that status until requiremen
 
 | ID | Priority | Status | Finding | Evidence already collected | Next action / exit condition |
 |---|---|---|---|---|---|
-| GOV-01 | High | Investigating | SQLite schema evolution may not migrate existing databases safely. | Historical schema reports version 1; current code reports version 2, uses `CREATE TABLE IF NOT EXISTS`, then writes the current version to metadata. An explicit migration path was not found in the inspected initializer. | Compare historical/current table and column definitions. If they differ, reproduce upgrade behavior using a disposable legacy database and implement/test an explicit migration. If they match, document that result and add a regression test for version handling. |
+| GOV-01 | Low | Reduced risk; no defect demonstrated | Schema-version handling has no explicit migration/version compatibility guard in the inspected initializer. | Historical schema v1 and current schema v2 have identical table and column definitions in an in-memory SQLite comparison. The initializer runs `CREATE TABLE IF NOT EXISTS` then unconditionally writes the current schema version. No existing-database upgrade failure was reproduced. | Do not build a migration framework without evidence of a schema change. Add a focused test for legacy schema metadata/version handling if warranted; revisit if a future schema changes tables or columns. |
 | GOV-02 | Medium | Coverage gap | Export-card negative paths lack direct regression coverage in the inspected tests. | Exporter writes dataset and model cards, hashes them, and writes an aggregate manifest; release verifier checks card existence, non-empty content, and hashes. Existing export-card test covers successful creation/lineage. | Add tests for missing, empty, and tampered cards and for export failure/reuse of an existing output directory. Confirm failed exports cannot be mistaken for a completed export. |
 | GOV-03 | Low | Coverage gap | ETA/duration disclosure is not consistently verified. | CLI labels duration as estimated and reports it unavailable without observed throughput; Command Center surfaces ETA values. No explicit UI/CLI wording regression test was found in the inspected paths. | Decide required wording in the requirement/acceptance criterion, then add a focused test. Do not change estimator behavior unless a defect is demonstrated. |
 | GOV-04 | Medium | Coverage gap | Structured log context is not proven to meet the stated requirement. | Inspected formatters include timestamp, logger/severity, and message; run/stage identifiers exist in tracking/manifest paths, but are not automatically present in every log record. No single test was found proving the required fields together. | Clarify whether structured fields are normative for every event or only relevant events. Add a focused test for required timestamp, severity, run/stage IDs, and event context. |
@@ -29,6 +29,7 @@ All 64 requirements remain `NOT_VERIFIED`. Preserve that status until requiremen
 - Selected existing tests: 88 passed, 1 warning. This was a selected test set, not the full repository suite.
 - Separate governance acceptance suite: 64 passed, 1 warning.
 - Selected-run coverage varied by module; the inspected run reported 44% overall and 6% for `pipeline/orchestrator.py`. These are scoped coverage figures, not full-suite coverage or proof of a product defect.
+- Database schema comparison: historical v1 and current v2 schema SQL produced identical table and column definitions in disposable in-memory SQLite databases. No legacy database upgrade failure was reproduced.
 - No source implementation fix is claimed by this review log.
 - No release GO/CERTIFIED decision is made here.
 
@@ -44,4 +45,4 @@ All 64 requirements remain `NOT_VERIFIED`. Preserve that status until requiremen
 
 ## Next checkpoint
 
-Resolve the schema comparison (GOV-01) using a disposable database if needed, then prioritize the traceability audit by hard-gate/security/data-integrity requirements. Add regression tests in separate, focused PRs once each expected behavior is agreed and the relevant failure mode is understood.
+Prioritize the traceability audit for hard-gate/security/data-integrity requirements. Then select one high-value regression gap (export-card negative paths or doctor non-destructive behavior) and implement it in a focused PR. Revisit schema migration only when evidence of a schema change or compatibility failure appears.
