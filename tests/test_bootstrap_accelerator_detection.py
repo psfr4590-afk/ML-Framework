@@ -244,3 +244,119 @@ def test_security_tool_is_declared_as_optional_dependency():
 
     assert "pip-audit" in optional
     assert bootstrap.DISTRIBUTION_IMPORTS["pip-audit"] == "pip_audit"
+
+
+def test_runtime_recommendation_covers_unavailable_and_cpu_only_states():
+    gpu = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650")
+    no_gpu = bootstrap.HardwareProfile()
+
+    assert bootstrap.recommended_torch_channel(
+        gpu, {"importable": False, "cuda_available": False}
+    ).startswith("manual review required")
+    assert bootstrap.recommended_torch_channel(
+        no_gpu, {"importable": True, "cuda_available": False}
+    ) == "cpu"
+
+
+def test_torch_runtime_status_reports_installed_but_blocked_import(monkeypatch):
+    def blocked_import(name):
+        if name == "torch":
+            raise OSError("application control blocked torch DLL")
+        raise AssertionError(f"Unexpected import: {name}")
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", blocked_import)
+    monkeypatch.setattr(bootstrap.importlib.metadata, "version", lambda name: "2.11.0+cu128")
+
+    status = bootstrap.torch_runtime_status()
+
+    assert status["installed"] is True
+    assert status["importable"] is False
+    assert status["version"] == "2.11.0+cu128"
+    assert "application control blocked torch DLL" in status["error"]
+
+
+def test_torch_runtime_status_preserves_cuda_probe_failure(monkeypatch):
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            raise OSError("CUDA runtime probe blocked")
+
+    class FakeTorch:
+        __version__ = "2.11.0+cu128"
+        cuda = FakeCuda()
+        version = type("Version", (), {"cuda": "12.8", "hip": None})()
+
+    monkeypatch.setattr(bootstrap.importlib.metadata, "version", lambda name: "2.11.0+cu128")
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+
+    status = bootstrap.torch_runtime_status()
+
+    assert status["installed"] is True
+    assert status["importable"] is True
+    assert status["cuda_available"] is False
+    assert "CUDA runtime probe blocked" in status["cuda_error"]
+
+
+def test_cuda_channel_validation_preserves_probe_failure_detail(monkeypatch, capsys):
+    monkeypatch.setattr(bootstrap, "_installed_torch_version", lambda: "2.11.0+cu128")
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {
+            "installed": True,
+            "importable": True,
+            "cuda_available": False,
+            "cuda_error": "OSError: CUDA runtime probe blocked",
+        },
+    )
+
+    assert bootstrap._validate_requested_torch_channel("cuda") == 2
+    assert "CUDA runtime probe blocked" in capsys.readouterr().err
+
+
+def test_cpu_channel_validation_rejects_unimportable_torch(monkeypatch, capsys):
+    monkeypatch.setattr(bootstrap, "_installed_torch_version", lambda: "2.14.1+cpu")
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {
+            "installed": True,
+            "importable": False,
+            "cuda_available": False,
+            "error": "OSError: blocked DLL",
+        },
+    )
+
+    assert bootstrap._validate_requested_torch_channel("cpu") == 2
+    assert "blocked DLL" in capsys.readouterr().err
+
+
+def test_doctor_reports_cuda_probe_error_and_keeps_cpu_fallback(monkeypatch, capsys):
+    profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650", gpu_vram_gib=4.0)
+    monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {
+            "installed": True,
+            "importable": True,
+            "version": "2.11.0+cu128",
+            "cuda_available": False,
+            "cuda_version": "12.8",
+            "hip_available": False,
+            "xpu_available": False,
+            "mps_available": False,
+            "device_count": 0,
+            "cuda_error": "OSError: CUDA runtime probe blocked",
+            "probe_errors": ["cuda: OSError: CUDA runtime probe blocked"],
+        },
+    )
+    monkeypatch.setattr(bootstrap, "_importable", lambda name: True)
+    monkeypatch.setattr(bootstrap.RECONCILER.__class__, "is_file", lambda self: True)
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda exe: "present")
+
+    assert bootstrap.doctor() == 0
+    output = capsys.readouterr().out
+    assert "Accelerator probe error: cuda: OSError: CUDA runtime probe blocked" in output
+    assert "Verified runtime recommendation: cpu (CUDA unavailable)" in output
+    assert "Bootstrap doctor: PASS" in output
