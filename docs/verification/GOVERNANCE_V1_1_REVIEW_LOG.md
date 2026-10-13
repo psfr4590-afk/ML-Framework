@@ -90,3 +90,32 @@ The IDs in the catalog and the IDs in the requirements document must be reconcil
 3. For each mapped test, record whether it is present, behaviorally relevant, and executed; these are separate checks.
 4. Propose a corrected mapping table against the exact package requirement IDs. Do not edit the package's normative requirements or change any of the 64 statuses from `NOT_VERIFIED` as part of this review-log update.
 5. Do not claim release certification or product implementation failure from a catalog mapping defect alone.
+
+
+## GOV-09 clarification — Missing catalog targets are declared test debt, not a false pass
+
+The package's own `README.md` says `check_test_coverage.py` is expected to fail until missing tests are implemented. `TEST_CASE_CATALOG.csv` marks every row `REQUIRED_UNTIL_EXACT_COVERAGE_CONFIRMED`, and every verification status is `NOT_VERIFIED`. `TRACEABILITY.md` explicitly says proposed targets prefixed `ADD REQUIRED:` do not exist. Therefore, the absence of `tests/governance/test_requirement_acceptance.py` at the declared source SHA is a confirmed missing-test condition, but **not evidence that the package falsely claims the tests already pass**.
+
+There is still a clarity defect: the catalog's `required_exact_test_target` field gives each missing test as a concrete `path::function` without an explicit `ADD REQUIRED:` marker, even though the expected-result text says the executable case must be added. This is easy to misread as an existing test reference. A package correction should mark planned targets as `ADD REQUIRED: tests/governance/test_requirement_acceptance.py::test_REQ_...` (or split existing target and required new target into separate fields), while keeping the fail-closed checker able to parse the chosen format.
+
+The checker logic is intentionally simple: it splits every target on `::`, checks the file, and looks for an exact function identifier. Against the declared source tree, the shared target file is absent, so all 64 catalog targets are missing at that revision. This is the expected fail-closed coverage-gap result, not a test run and not proof the product features are absent. Existing test areas listed in the catalog are candidate context only; they do not substitute for the requirement-specific targets until inspected for behavioral adequacy.
+
+### Corrected requirement-ID reconciliation for the examples in GOV-09
+
+The v1.1.0 package's own `REQUIREMENTS.md` is authoritative for the requirement names and IDs. The relevant IDs are:
+- `REQ-SEC-001` — Least privilege.
+- `REQ-SEC-002` — Path safety.
+- `REQ-SEC-003` — Secret handling.
+- `REQ-SEC-005` — Explicit external effects.
+- `REQ-DATA-008` — Schema evolution.
+- `REQ-ART-003` — Dataset documentation.
+- `REQ-REL-005` — Revision/package identity.
+- `REQ-REL-006` — Honest release gate.
+
+**Correction to the earlier GOV-09 table:** `REQ-REL-006` is *Honest release gate*, not a performance/resource-claims requirement. A correct behavioral test should feed the release gate missing, blocked, failed, or not-tested mandatory evidence and assert that certification is refused. `REQ-REL-005` should instead test binding the evidence to the exact source revision, build inputs, package identity, and relevant dependency versions. Performance/resource-claim auditing belongs only under the requirement ID actually governing those claims in the approved v1.1.0 package; it must not be assigned to `REQ-REL-006`.
+
+For `REQ-DATA-008`, the package's requirement is schema evolution, so tests must exercise versioned persistent records and compatibility/migration behavior. A hash-function-presence check is not sufficient. For `REQ-ART-003`, the requirement is dataset documentation; verify the exported model has the required model-specific card and that export validation fails when the card is missing. For the security rows, preserve their package-defined titles and verify the relevant behavior separately: least privilege, path containment, secret non-disclosure, and explicit/bounded external effects. A generic assertion copied across those rows is not adequate evidence.
+
+### Exit condition
+
+Before changing the v1.1.0 package itself, prepare a focused package patch that (1) marks all not-yet-implemented exact test targets unambiguously as required additions, (2) corrects the `REQ-REL-005` / `REQ-REL-006` verification distinction, (3) retains the 64 `NOT_VERIFIED` statuses, and (4) reruns the package structural validator and fail-closed coverage checker. The source SHA remains `f06bbedb55e252cd7033c615733c5d2554a7d0aa` unless the owner explicitly approves a replacement.
