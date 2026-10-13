@@ -203,3 +203,25 @@ def test_source_import_audit_accepts_declared_distribution(tmp_path, monkeypatch
     (tmp_path / "sample.py").write_text("import json\nimport numpy\n", encoding="utf-8")
 
     assert bootstrap._source_import_dependency_issues({"numpy"}) == []
+
+
+def test_runtime_status_preserves_cuda_probe_error_field(monkeypatch):
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            raise OSError("CUDA runtime probe blocked")
+
+    class FakeTorch:
+        __version__ = "test"
+        cuda = FakeCuda()
+        version = type("Version", (), {"cuda": "12.8", "hip": None})()
+        xpu = type("Xpu", (), {"is_available": staticmethod(lambda: False)})()
+        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()})()
+
+    monkeypatch.setattr(bootstrap.importlib.metadata, "version", lambda name: "2.11.0")
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+    result = bootstrap.torch_runtime_status()
+
+    assert result["cuda_available"] is False
+    assert result["device_count"] == 0
+    assert "CUDA runtime probe blocked" in result["cuda_error"]
