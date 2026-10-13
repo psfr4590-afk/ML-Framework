@@ -282,6 +282,7 @@ def torch_runtime_status() -> dict[str, Any]:
             "cuda_available": False,
             "xpu_available": False,
             "mps_available": False,
+            "hip_available": False,
             "error": f"{type(exc).__name__}: {exc}",
         }
 
@@ -311,6 +312,8 @@ def torch_runtime_status() -> dict[str, Any]:
         "version": getattr(torch, "__version__", installed_version),
         "cuda_available": cuda_available,
         "cuda_version": getattr(getattr(torch, "version", None), "cuda", None),
+        "hip_version": getattr(getattr(torch, "version", None), "hip", None),
+        "hip_available": cuda_available and bool(getattr(getattr(torch, "version", None), "hip", None)),
         "xpu_available": xpu_available,
         "mps_available": mps_available,
         "device_count": torch.cuda.device_count() if cuda_available else 0,
@@ -344,6 +347,8 @@ def recommended_torch_channel(profile: HardwareProfile, runtime: dict[str, Any])
     if runtime.get("importable"):
         if profile.nvidia_gpu_detected and runtime.get("cuda_available"):
             return "cuda (usable)"
+        if profile.gpu_vendor == "amd" and runtime.get("hip_available"):
+            return "rocm (usable)"
         if profile.gpu_vendor == "intel" and runtime.get("xpu_available"):
             return "xpu (usable)"
         if profile.gpu_vendor == "apple" and runtime.get("mps_available"):
@@ -422,7 +427,8 @@ def doctor() -> int:
     if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
         print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
     if profile.gpu_detected and not (
-        (profile.nvidia_gpu_detected and runtime.get("cuda_available"))
+        (profile.nvidia_gpu_detected and runtime.get("cuda_available") and not runtime.get("hip_available"))
+        or (profile.gpu_vendor == "amd" and runtime.get("hip_available"))
         or (profile.gpu_vendor == "intel" and runtime.get("xpu_available"))
         or (profile.gpu_vendor == "apple" and runtime.get("mps_available"))
     ):
@@ -528,6 +534,9 @@ def install(torch_channel: str = "auto") -> int:
             torch_channel = "cuda"
         elif not profile.gpu_detected:
             torch_channel = "cpu"
+        elif profile.gpu_vendor == "amd" and runtime.get("importable") and runtime.get("hip_available"):
+            # ROCm uses Torch's CUDA-shaped API; require a positive HIP runtime marker.
+            torch_channel = "existing"
         elif profile.gpu_vendor == "intel" and runtime.get("importable") and runtime.get("xpu_available"):
             # Keep a proven Intel XPU runtime in place; do not replace it with CPU Torch.
             torch_channel = "existing"
