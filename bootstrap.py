@@ -28,17 +28,38 @@ REQUIREMENTS = ROOT / "requirements.txt"
 TORCH_REQUIREMENTS = ROOT / "requirements-torch.txt"
 MIN_PYTHON = (3, 11)
 MAX_PYTHON_EXCLUSIVE = (3, 15)
-REQUIRED = (
-    "yaml",
-    "requests",
-    "bs4",
-    "lxml",
-    "numpy",
-    "tokenizers",
-    "torch",
-    "sentence_transformers",
-    "faiss",
-)
+# Distribution names are the install authority; import names are not always identical.
+DISTRIBUTION_IMPORTS = {
+    "pyyaml": "yaml",
+    "defusedxml": "defusedxml",
+    "requests": "requests",
+    "beautifulsoup4": "bs4",
+    "lxml": "lxml",
+    "numpy": "numpy",
+    "packaging": "packaging",
+    "tokenizers": "tokenizers",
+    "safetensors": "safetensors",
+    "datasets": "datasets",
+    "huggingface_hub": "huggingface_hub",
+    "sentencepiece": "sentencepiece",
+    "trafilatura": "trafilatura",
+    "langdetect": "langdetect",
+    "pypdf": "pypdf",
+    "openpyxl": "openpyxl",
+    "python-docx": "docx",
+    "python-pptx": "pptx",
+    "fastapi": "fastapi",
+    "starlette": "starlette",
+    "uvicorn": "uvicorn",
+    "jinja2": "jinja2",
+    "pydantic": "pydantic",
+    "httpx": "httpx",
+    "cryptography": "cryptography",
+    "pyopenssl": "OpenSSL",
+    "sentence-transformers": "sentence_transformers",
+    "faiss-cpu": "faiss",
+}
+REQUIRED = ("torch",)
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
@@ -398,6 +419,17 @@ def doctor() -> int:
         print(f"distribution {distribution}: {state}")
         if version is None:
             failures.append(f"runtime distribution missing: {distribution}")
+    for distribution, name in DISTRIBUTION_IMPORTS.items():
+        if distribution not in {item.lower().replace("_", "-") for item in distributions}:
+            # The distribution check above already reports this missing dependency.
+            continue
+        try:
+            importlib.import_module(name)
+            state = "OK"
+        except Exception as exc:
+            state = f"IMPORT FAILED ({type(exc).__name__}: {exc})"
+            failures.append(f"runtime import {name} ({distribution}) failed: {type(exc).__name__}: {exc}")
+        print(f"import {name} [{distribution}]: {state}")
     for name in REQUIRED:
         try:
             importlib.import_module(name)
