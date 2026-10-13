@@ -60,6 +60,7 @@ DISTRIBUTION_IMPORTS = {
     "sentence-transformers": "sentence_transformers",
     "faiss-cpu": "faiss",
     "psutil": "psutil",
+    "pip-audit": "pip_audit",
 }
 REQUIRED = (
     "yaml",
@@ -419,7 +420,11 @@ def _declared_optional_runtime_distributions() -> list[str]:
 
 def _source_import_dependency_issues(declared_names: set[str]) -> list[str]:
     """Audit static source imports against stdlib, local modules, and declared distributions."""
-    ignored_parts = {".git", ".venv", "venv", ".runtime", "__pycache__", "build", "dist", "tests", "output", "scratch", "datasets", "node_modules", ".pytest_cache", ".ruff_cache"}
+    ignored_parts = {
+        ".git", ".venv", ".ci-venv", "venv", ".runtime", ".tox", ".nox",
+        "__pycache__", "build", "dist", "tests", "output", "scratch",
+        "datasets", "node_modules", ".pytest_cache", ".ruff_cache",
+    }
     local_roots = {path.stem for path in ROOT.glob("*.py")}
     project_packages = {"pipeline", "command_center", "scripts", "config", "ui"}
     local_roots.update(
