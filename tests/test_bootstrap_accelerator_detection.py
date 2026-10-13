@@ -30,9 +30,8 @@ def test_runtime_recommendation_uses_verified_cuda_not_gpu_presence_alone():
     profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650")
     runtime = {"installed": True, "importable": True, "cuda_available": False}
 
-    assert bootstrap.recommended_torch_channel(profile, runtime).startswith(
-        "manual review required"
-    )
+    # Doctor may recommend CPU as a diagnosed fallback; auto-install still refuses silent fallback.
+    assert bootstrap.recommended_torch_channel(profile, runtime) == "cpu (CUDA unavailable)"
 
 
 def test_runtime_recommendation_allows_verified_cuda():
@@ -151,3 +150,29 @@ def test_explicit_gpu_runtime_is_rejected_without_matching_hardware(monkeypatch,
     assert bootstrap.install("cuda") == 2
     assert install_calls == []
     assert "no compatible GPU/platform was detected" in capsys.readouterr().err
+
+
+def test_runtime_status_catches_cuda_device_count_errors(monkeypatch):
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            raise RuntimeError("driver enumeration failed")
+
+    class FakeTorch:
+        __version__ = "test"
+        cuda = FakeCuda()
+        version = type("Version", (), {"cuda": "12.8", "hip": None})()
+        xpu = type("Xpu", (), {"is_available": staticmethod(lambda: False)})()
+        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False})()})()
+
+    monkeypatch.setattr(bootstrap.importlib.metadata, "version", lambda name: "2.11.0")
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+    result = bootstrap.torch_runtime_status()
+
+    assert result["cuda_available"] is True
+    assert result["device_count"] == 0
+    assert any("device_count" in error and "driver enumeration failed" in error for error in result["probe_errors"])
