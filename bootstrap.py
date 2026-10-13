@@ -367,12 +367,33 @@ def _torch_cuda_device_count(torch: Any, cuda_available: bool, probe_errors: lis
         probe_errors.append(f"cuda device_count: {type(exc).__name__}: {exc}")
         return 0
 
+def _declared_runtime_requirements() -> list[str]:
+    """Return full PEP 508 requirements so installed versions can be validated."""
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = metadata.get("project", {}).get("dependencies", [])
+    if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
+        raise ValueError("project.dependencies must be a list of requirement strings")
+    return dependencies
+
+
+def _requirement_satisfied(requirement_text: str, installed_version: str) -> bool:
+    """Return whether an installed version satisfies a PEP 508 requirement."""
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+
+    requirement = Requirement(requirement_text)
+    if requirement.marker is not None and not requirement.marker.evaluate():
+        return True
+    return not requirement.specifier or requirement.specifier.contains(
+        Version(installed_version), prereleases=True
+    )
+
+
 def _declared_runtime_distributions() -> list[str]:
     """Read the runtime dependency authority instead of maintaining a second list."""
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = metadata.get("project", {}).get("dependencies", [])
     names = []
-    for requirement in dependencies:
+    for requirement in _declared_runtime_requirements():
         name = re.match(r"([A-Za-z0-9_.-]+)", requirement)
         if name:
             names.append(name.group(1))
@@ -435,17 +456,35 @@ def doctor() -> int:
         distributions: list[str] = []
     else:
         try:
+            requirements = _declared_runtime_requirements()
             distributions = _declared_runtime_distributions()
         except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
             print(f"Runtime dependency metadata: INVALID ({type(exc).__name__}: {exc})")
             failures.append("pyproject.toml runtime dependency metadata invalid")
+            requirements = []
             distributions = []
-    for distribution in distributions:
+    for requirement in requirements:
+        match = re.match(r"([A-Za-z0-9_.-]+)", requirement)
+        if not match:
+            failures.append(f"invalid runtime requirement: {requirement}")
+            print(f"distribution requirement {requirement}: INVALID")
+            continue
+        distribution = match.group(1)
         version = _distribution_version(distribution)
-        state = f"OK ({version})" if version else "MISSING"
-        print(f"distribution {distribution}: {state}")
         if version is None:
+            state = "MISSING"
             failures.append(f"runtime distribution missing: {distribution}")
+        else:
+            try:
+                compatible = _requirement_satisfied(requirement, version)
+            except Exception as exc:
+                compatible = False
+                state = f"INVALID REQUIREMENT ({type(exc).__name__}: {exc})"
+            else:
+                state = f"OK ({version})" if compatible else f"INCOMPATIBLE ({version}; requires {requirement})"
+            if not compatible:
+                failures.append(f"runtime distribution version incompatible: {requirement} (installed {version})")
+        print(f"distribution {distribution}: {state}")
     declared_names = {item.lower().replace("_", "-") for item in distributions}
     for distribution, name in DISTRIBUTION_IMPORTS.items():
         if distribution not in declared_names:
