@@ -83,8 +83,8 @@ def test_write_export_cards_refuses_missing_source_manifest(tmp_path):
 def test_release_verifier_rejects_missing_empty_and_modified_cards(tmp_path):
     dataset_card = tmp_path / "DATASET_CARD.md"
     model_card = tmp_path / "MODEL_CARD.md"
-    dataset_card.write_text("# Dataset Card\\n", encoding="utf-8")
-    model_card.write_text("# Model Card\\n", encoding="utf-8")
+    dataset_card.write_text("# Dataset Card\n", encoding="utf-8")
+    model_card.write_text("# Model Card\n", encoding="utf-8")
     manifest = {
         "dataset_card": str(dataset_card),
         "model_card": str(model_card),
@@ -103,7 +103,7 @@ def test_release_verifier_rejects_missing_empty_and_modified_cards(tmp_path):
     with pytest.raises(RuntimeError, match="Missing or empty export card"):
         verify_release._validate_export_cards(manifest)
 
-    dataset_card.write_text("# Dataset Card modified\\n", encoding="utf-8")
+    dataset_card.write_text("# Dataset Card modified\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="hash missing or mismatched"):
         verify_release._validate_export_cards(manifest)
 
@@ -111,8 +111,8 @@ def test_release_verifier_rejects_missing_empty_and_modified_cards(tmp_path):
 def test_release_verifier_rejects_card_without_recorded_hash(tmp_path):
     dataset_card = tmp_path / "DATASET_CARD.md"
     model_card = tmp_path / "MODEL_CARD.md"
-    dataset_card.write_text("# Dataset Card\\n", encoding="utf-8")
-    model_card.write_text("# Model Card\\n", encoding="utf-8")
+    dataset_card.write_text("# Dataset Card\n", encoding="utf-8")
+    model_card.write_text("# Model Card\n", encoding="utf-8")
     manifest = {
         "dataset_card": str(dataset_card),
         "model_card": str(model_card),
