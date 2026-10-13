@@ -43,4 +43,5 @@ def test_missing_identity_evidence_preserves_live_pid(monkeypatch):
     monkeypatch.setattr(runner, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(runner, "psutil", None)
 
+    assert runner._same_process_identity({"pid": 123, "process_identity": None}) is True
     assert runner._same_process_identity({"pid": 123}) is True
