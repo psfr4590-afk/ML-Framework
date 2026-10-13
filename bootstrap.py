@@ -714,9 +714,11 @@ def _validate_requested_torch_channel(channel: str) -> int:
             return 2
         runtime = torch_runtime_status()
         if not runtime["installed"] or not runtime["cuda_available"]:
+            probe_error = runtime.get("cuda_error")
+            detail = f" Runtime probe error: {probe_error}" if probe_error else ""
             print(
                 "Torch installation validation failed: CUDA Torch is installed but "
-                "torch.cuda.is_available() is false.",
+                "torch.cuda.is_available() is false." + detail,
                 file=sys.stderr,
             )
             return 2
