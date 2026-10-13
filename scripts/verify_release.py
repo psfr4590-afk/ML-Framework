@@ -90,8 +90,6 @@ def _validate_source_manifest(path: Path) -> None:
         if digest is not None and (not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest.lower())): raise RuntimeError("Source manifest raw_source_sha256 is invalid")
 
 
-
-
 def _validate_export_cards(manifest: dict[str, object]) -> None:
     """Require both export cards to exist, contain data, and match their recorded hashes."""
     for key in ("dataset_card", "model_card"):
@@ -104,6 +102,7 @@ def _validate_export_cards(manifest: dict[str, object]) -> None:
         expected_hash = manifest.get(f"{key}_sha256")
         if not isinstance(expected_hash, str) or expected_hash != _sha256(card):
             raise RuntimeError(f"Export card hash missing or mismatched: {key}: {card}")
+
 
 def _source_retrieval_smoke() -> bool:
     """Exercise crawl -> clean -> dedup -> weight using a deterministic offline crawler."""
