@@ -483,7 +483,8 @@ def _validate_existing_accelerator_runtime() -> int:
         print(f"Torch runtime cannot be imported: {runtime.get('error', 'unknown error')}", file=sys.stderr)
         return 2
     usable = (
-        (profile.nvidia_gpu_detected and runtime.get("cuda_available"))
+        (profile.nvidia_gpu_detected and runtime.get("cuda_available") and not runtime.get("hip_available"))
+        or (profile.gpu_vendor == "amd" and runtime.get("hip_available"))
         or (profile.gpu_vendor == "intel" and runtime.get("xpu_available"))
         or (profile.gpu_vendor == "apple" and runtime.get("mps_available"))
     )
