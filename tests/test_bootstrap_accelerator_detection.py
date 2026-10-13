@@ -88,3 +88,12 @@ def test_runtime_recommendation_keeps_verified_amd_rocm():
     runtime = {"installed": True, "importable": True, "cuda_available": True, "hip_available": True}
 
     assert bootstrap.recommended_torch_channel(profile, runtime) == "rocm (usable)"
+
+def test_every_declared_runtime_distribution_has_an_import_probe():
+    declared = {
+        name.lower().replace("_", "-")
+        for name in bootstrap._declared_runtime_distributions()
+    }
+
+    assert declared - set(bootstrap.DISTRIBUTION_IMPORTS) == set()
+    assert "torch" not in declared
