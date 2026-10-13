@@ -127,3 +127,49 @@ def test_doctor_allows_cpu_fallback_when_cuda_is_unavailable(monkeypatch, capsys
     output = capsys.readouterr().out
     assert "Verified runtime recommendation: cpu (CUDA unavailable)" in output
     assert "Bootstrap doctor: PASS" in output
+
+
+def test_doctor_fails_when_tensor_operation_fails(monkeypatch, capsys) -> None:
+    from types import SimpleNamespace
+
+    profile = bootstrap.HardwareProfile(gpu_name="Generic CPU test host")
+    runtime = {
+        "installed": True,
+        "importable": True,
+        "version": "2.14.1+cpu",
+        "cuda_available": False,
+        "cuda_version": None,
+        "hip_available": False,
+        "xpu_available": False,
+        "mps_available": False,
+        "probe_errors": [],
+        "device_count": 0,
+    }
+
+    def fail_tensor(*args, **kwargs):
+        raise RuntimeError("deliberate tensor smoke failure")
+
+    fake_torch = SimpleNamespace(
+        device=lambda name: name,
+        float32="float32",
+        tensor=fail_tensor,
+    )
+    original_import_module = bootstrap.importlib.import_module
+
+    def import_module(name, package=None):
+        if name == "torch":
+            return fake_torch
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
+    monkeypatch.setattr(bootstrap, "torch_runtime_status", lambda: runtime)
+    monkeypatch.setattr(bootstrap.importlib, "import_module", import_module)
+    monkeypatch.setattr(bootstrap, "_importable", lambda name: True)
+    monkeypatch.setattr(bootstrap.RECONCILER.__class__, "is_file", lambda self: True)
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda exe: "present")
+
+    assert bootstrap.doctor() == 2
+    output = capsys.readouterr().out
+    assert "Torch tensor smoke: FAIL" in output
+    assert "deliberate tensor smoke failure" in output
+    assert "Bootstrap doctor: FAIL" in output
