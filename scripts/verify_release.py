@@ -92,7 +92,7 @@ def _validate_source_manifest(path: Path) -> None:
 
 
 
-def _validate_export_cards(manifest: dict[str, Any]) -> None:
+def _validate_export_cards(manifest: dict[str, object]) -> None:
     """Require both export cards to exist, contain data, and match their recorded hashes."""
     for key in ("dataset_card", "model_card"):
         value = manifest.get(key)
