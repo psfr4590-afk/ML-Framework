@@ -555,6 +555,14 @@ def _validate_requested_torch_channel(channel: str) -> int:
     if version is None:
         print("Torch installation validation failed: package metadata is missing.", file=sys.stderr)
         return 2
+    runtime = torch_runtime_status()
+    if not runtime.get("importable"):
+        print(
+            "Torch installation validation failed: package exists but cannot be imported. "
+            f"Error: {runtime.get('error', 'unknown import error')}",
+            file=sys.stderr,
+        )
+        return 2
     if channel == "cuda":
         if "+cpu" in version.lower():
             print(
