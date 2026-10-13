@@ -617,6 +617,22 @@ def install(torch_channel: str = "auto") -> int:
     if not _python_supported():
         print(f"Bootstrap install aborted: {_python_requirement_message()}", file=sys.stderr)
         return 2
+    if torch_channel != "auto":
+        profile = detect_hardware()
+        compatible = {
+            "cuda": profile.nvidia_gpu_detected and (sys.platform.startswith("linux") or os.name == "nt"),
+            "rocm": profile.gpu_vendor == "amd" and sys.platform.startswith("linux"),
+            "xpu": profile.gpu_vendor == "intel" and (sys.platform.startswith("linux") or os.name == "nt"),
+            "mps": profile.gpu_vendor == "apple" and sys.platform == "darwin",
+        }
+        if torch_channel in compatible and not compatible[torch_channel]:
+            print(
+                f"Refusing to install the {torch_channel} Torch runtime: no compatible "
+                f"GPU/platform was detected (GPU vendor: {profile.gpu_vendor or 'none'}, "
+                f"platform: {platform.system()}).",
+                file=sys.stderr,
+            )
+            return 2
     if torch_channel == "auto":
         profile = detect_hardware()
         runtime = torch_runtime_status()
