@@ -99,7 +99,9 @@ class HardwareProfile:
         return bool(self.gpu_name)
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["gpu_vendor"] = self.gpu_vendor or _gpu_vendor(self.gpu_name)
+        return data
 
 
 def project_root() -> Path:
