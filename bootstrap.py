@@ -520,6 +520,29 @@ def _print_hardware(profile: HardwareProfile) -> None:
     print(f"  nvidia-smi: {'OK' if profile.nvidia_smi_available else 'MISSING / NOT APPLICABLE'}")
 
 
+def _torch_tensor_smoke(runtime: dict[str, Any]) -> tuple[bool, str]:
+    """Run a tiny arithmetic operation on the best available Torch device."""
+    try:
+        torch = importlib.import_module("torch")
+        if runtime.get("cuda_available"):
+            device_name = "cuda"  # PyTorch uses this device API for ROCm too.
+        elif runtime.get("xpu_available"):
+            device_name = "xpu"
+        elif runtime.get("mps_available"):
+            device_name = "mps"
+        else:
+            device_name = "cpu"
+
+        device = torch.device(device_name)
+        values = torch.tensor([1.0, 2.0], dtype=torch.float32, device=device)
+        actual = (values * 2).sum().item()
+        if actual != 6.0:
+            return False, f"unexpected arithmetic result {actual!r} on {device}"
+        return True, f"{device} tensor arithmetic PASS"
+    except Exception as exc:
+        return False, f"tensor operation failed: {type(exc).__name__}: {exc}"
+
+
 def doctor() -> int:
     failures: list[str] = []
     print(f"Project root: {ROOT}")
@@ -615,6 +638,13 @@ def doctor() -> int:
         print(f"  Accelerator probe error: {error}")
     recommendation = recommended_torch_channel(profile, runtime)
     print(f"Verified runtime recommendation: {recommendation}")
+    if runtime.get("importable"):
+        smoke_ok, smoke_detail = _torch_tensor_smoke(runtime)
+        print(f"Torch tensor smoke: {'PASS' if smoke_ok else 'FAIL'} ({smoke_detail})")
+        if not smoke_ok:
+            failures.append(f"Torch tensor smoke failed: {smoke_detail}")
+    else:
+        print("Torch tensor smoke: SKIPPED (Torch import unavailable; see import diagnostics)")
     if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
         print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
     if profile.gpu_detected and not (
