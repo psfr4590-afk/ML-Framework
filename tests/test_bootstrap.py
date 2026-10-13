@@ -100,7 +100,7 @@ def test_validate_cpu_torch_rejects_cuda_variant(monkeypatch) -> None:
     assert bootstrap._validate_requested_torch_channel("cpu") == 2
 
 
-def test_doctor_fails_when_nvidia_gpu_has_no_cuda_runtime(monkeypatch, capsys) -> None:
+def test_doctor_accepts_working_cpu_torch_when_nvidia_gpu_is_present(monkeypatch, capsys) -> None:
     profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650", gpu_vram_gib=4.0)
     monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
     monkeypatch.setattr(
@@ -108,6 +108,7 @@ def test_doctor_fails_when_nvidia_gpu_has_no_cuda_runtime(monkeypatch, capsys) -
         "torch_runtime_status",
         lambda: {
             "installed": True,
+            "importable": True,
             "version": "2.14.1+cpu",
             "cuda_available": False,
             "cuda_version": None,
@@ -117,7 +118,133 @@ def test_doctor_fails_when_nvidia_gpu_has_no_cuda_runtime(monkeypatch, capsys) -
     monkeypatch.setattr(bootstrap, "_importable", lambda name: True)
     monkeypatch.setattr(bootstrap.RECONCILER.__class__, "is_file", lambda self: True)
     monkeypatch.setattr(bootstrap.shutil, "which", lambda exe: "present")
-    assert bootstrap.doctor() == 2
+
+    assert bootstrap.doctor() == 0
     output = capsys.readouterr().out
-    assert "NVIDIA GPU detected but Torch CUDA runtime is unavailable" not in output
-    assert "Bootstrap doctor: FAIL" in output
+    assert "CUDA unavailable; CPU execution remains available." in output
+    assert "Bootstrap doctor: PASS" in output
+
+
+
+def test_doctor_reports_cuda_probe_error_and_keeps_cpu_fallback(
+    monkeypatch, capsys
+) -> None:
+    profile = bootstrap.HardwareProfile(
+        gpu_name="NVIDIA GeForce GTX 1650",
+        gpu_vram_gib=4.0,
+    )
+    monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {
+            "installed": True,
+            "importable": True,
+            "version": "2.11.0+cu128",
+            "cuda_available": False,
+            "cuda_version": "12.8",
+            "device_count": 0,
+            "cuda_error": "OSError: CUDA runtime probe blocked",
+        },
+    )
+    monkeypatch.setattr(bootstrap, "_importable", lambda name: True)
+    monkeypatch.setattr(bootstrap.RECONCILER.__class__, "is_file", lambda self: True)
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda exe: "present")
+
+    assert bootstrap.doctor() == 0
+    output = capsys.readouterr().out
+    assert "CUDA unavailable; CPU execution remains available." in output
+    assert "CUDA probe error: OSError: CUDA runtime probe blocked" in output
+    assert "Bootstrap doctor: PASS" in output
+
+def test_torch_runtime_status_reports_installed_but_blocked_import(monkeypatch) -> None:
+    def blocked_import(name):
+        if name == "torch":
+            raise OSError("application control blocked torch DLL")
+        raise AssertionError(f"Unexpected import: {name}")
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", blocked_import)
+    monkeypatch.setattr(bootstrap.importlib.metadata, "version", lambda name: "2.11.0+cu128")
+
+    status = bootstrap.torch_runtime_status()
+    assert status["installed"] is True
+    assert status["importable"] is False
+    assert status["version"] == "2.11.0+cu128"
+    assert "application control blocked torch DLL" in status["error"]
+
+
+def test_torch_runtime_status_reports_cuda_probe_failure(monkeypatch) -> None:
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            raise OSError("CUDA runtime probe blocked")
+
+    class FakeTorch:
+        __version__ = "2.11.0+cu128"
+        cuda = FakeCuda()
+        version = type("Version", (), {"cuda": "12.8"})()
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+
+    status = bootstrap.torch_runtime_status()
+    assert status["installed"] is True
+    assert status["importable"] is True
+    assert status["cuda_available"] is False
+    assert "CUDA runtime probe blocked" in status["cuda_error"]
+
+
+def test_torch_runtime_status_reports_device_count_failure(monkeypatch) -> None:
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            raise RuntimeError("device enumeration failed")
+
+    class FakeTorch:
+        __version__ = "2.11.0+cu128"
+        cuda = FakeCuda()
+        version = type("Version", (), {"cuda": "12.8"})()
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+
+    status = bootstrap.torch_runtime_status()
+    assert status["importable"] is True
+    assert status["cuda_available"] is False
+    assert status["device_count"] == 0
+    assert "device enumeration failed" in status["cuda_error"]
+
+
+def test_cuda_channel_validation_rejects_cuda_probe_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(bootstrap, "_installed_torch_version", lambda: "2.11.0+cu128")
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {
+            "installed": True,
+            "importable": True,
+            "cuda_available": False,
+            "cuda_error": "OSError: CUDA runtime probe blocked",
+        },
+    )
+
+    assert bootstrap._validate_requested_torch_channel("cuda") == 2
+    assert "CUDA runtime probe blocked" in capsys.readouterr().err
+
+
+def test_cpu_channel_validation_rejects_unimportable_torch(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(bootstrap, "_installed_torch_version", lambda: "2.14.1+cpu")
+    monkeypatch.setattr(
+        bootstrap,
+        "torch_runtime_status",
+        lambda: {
+            "installed": True,
+            "importable": False,
+            "cuda_available": False,
+            "error": "OSError: blocked DLL",
+        },
+    )
+    assert bootstrap._validate_requested_torch_channel("cpu") == 2
+    assert "blocked DLL" in capsys.readouterr().err

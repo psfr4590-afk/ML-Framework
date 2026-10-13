@@ -217,20 +217,51 @@ def torch_channel_summary(channel: str, profile: HardwareProfile) -> dict[str, A
 
 
 def torch_runtime_status() -> dict[str, Any]:
-    """Report actual Torch/CUDA runtime state, never infer it from host hardware."""
+    """Report Torch importability separately from CUDA runtime health."""
     try:
         torch = importlib.import_module("torch")
     except Exception as exc:
-        return {"installed": False, "cuda_available": False, "error": type(exc).__name__}
-    cuda_available = bool(torch.cuda.is_available())
+        try:
+            version = importlib.metadata.version("torch")
+        except importlib.metadata.PackageNotFoundError:
+            installed = False
+            version = None
+        else:
+            installed = True
+        return {
+            "installed": installed,
+            "importable": False,
+            "version": version,
+            "cuda_available": False,
+            "cuda_version": None,
+            "device_count": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    version = getattr(torch, "__version__", None)
+    cuda_version = getattr(getattr(torch, "version", None), "cuda", None)
+    try:
+        cuda_available = bool(torch.cuda.is_available())
+        device_count = torch.cuda.device_count() if cuda_available else 0
+    except Exception as exc:
+        return {
+            "installed": True,
+            "importable": True,
+            "version": version,
+            "cuda_available": False,
+            "cuda_version": cuda_version,
+            "device_count": 0,
+            "cuda_error": f"{type(exc).__name__}: {exc}",
+        }
+
     return {
         "installed": True,
-        "version": getattr(torch, "__version__", None),
+        "importable": True,
+        "version": version,
         "cuda_available": cuda_available,
-        "cuda_version": getattr(getattr(torch, "version", None), "cuda", None),
-        "device_count": torch.cuda.device_count() if cuda_available else 0,
+        "cuda_version": cuda_version,
+        "device_count": device_count,
     }
-
 
 def _print_hardware(profile: HardwareProfile) -> None:
     print("Hardware:")
@@ -252,27 +283,49 @@ def doctor() -> int:
     print(f"Platform: {platform.platform()}")
     if not _python_supported():
         failures.append(_python_requirement_message())
+
+    runtime = torch_runtime_status()
     for name in REQUIRED:
+        if name == "torch":
+            if runtime["importable"]:
+                print("torch: OK")
+            elif runtime["installed"]:
+                print(f"torch: IMPORT FAILED ({runtime.get('version') or 'version unknown'})")
+                print(f"  Torch import error: {runtime.get('error') or 'unknown error'}")
+                failures.append(f"torch import failed: {runtime.get('error') or 'unknown error'}")
+            else:
+                print("torch: MISSING")
+                failures.append("torch")
+            continue
+
         state = "OK" if _importable(name) else "MISSING"
         print(f"{name}: {state}")
         if state != "OK":
             failures.append(name)
+
     for exe in ("git", "cmake"):
         print(f"{exe}: {'OK' if shutil.which(exe) else 'MISSING'}")
+
     profile = detect_hardware()
     _print_hardware(profile)
     print(f"Torch channel recommendation: {'cuda' if profile.nvidia_gpu_detected else 'cpu'}")
-    runtime = torch_runtime_status()
-    print(f"Torch runtime: {'OK' if runtime['installed'] else 'MISSING'}")
-    if runtime["installed"]:
+    if runtime["importable"]:
+        print("Torch runtime: OK")
         print(f"  Torch version: {runtime.get('version') or 'UNKNOWN'}")
         print(f"  CUDA available: {runtime['cuda_available']}")
         print(f"  CUDA runtime: {runtime.get('cuda_version') or 'NONE'}")
         if profile.nvidia_gpu_detected and not runtime["cuda_available"]:
-            failures.append("NVIDIA GPU detected but Torch CUDA runtime is unavailable")
+            print("  CUDA unavailable; CPU execution remains available.")
+            if runtime.get("cuda_error"):
+                print(f"  CUDA probe error: {runtime['cuda_error']}")
+    elif runtime["installed"]:
+        print(f"Torch runtime: IMPORT FAILED ({runtime.get('version') or 'version unknown'})")
+        print(f"  Torch import error: {runtime.get('error') or 'unknown error'}")
+    else:
+        print("Torch runtime: MISSING")
+
     print("Bootstrap doctor: PASS" if not failures else "Bootstrap doctor: FAIL")
     return 0 if not failures else 2
-
 
 def _pip_install(requirements: Path, *extra: str) -> int:
     if not requirements.is_file():
@@ -317,30 +370,40 @@ def _validate_requested_torch_channel(channel: str) -> int:
     if version is None:
         print("Torch installation validation failed: package metadata is missing.", file=sys.stderr)
         return 2
-    if channel == "cuda":
-        if "+cpu" in version.lower():
-            print(
-                f"Torch installation validation failed: CUDA host has CPU-only Torch {version}.",
-                file=sys.stderr,
-            )
-            return 2
-        runtime = torch_runtime_status()
-        if not runtime["installed"] or not runtime["cuda_available"]:
-            print(
-                "Torch installation validation failed: CUDA Torch is installed but "
-                "torch.cuda.is_available() is false.",
-                file=sys.stderr,
-            )
-            return 2
-    elif channel == "cpu" and "+cpu" not in version.lower():
+
+    if channel == "cuda" and "+cpu" in version.lower():
+        print(
+            f"Torch installation validation failed: CUDA host has CPU-only Torch {version}.",
+            file=sys.stderr,
+        )
+        return 2
+    if channel == "cpu" and "+cpu" not in version.lower():
         print(
             f"Torch installation validation failed: CPU channel produced Torch {version}, "
             "which is not a CPU wheel.",
             file=sys.stderr,
         )
         return 2
-    return 0
 
+    if channel in {"cpu", "cuda"}:
+        runtime = torch_runtime_status()
+        if not runtime.get("importable", False):
+            detail = runtime.get("error") or "unknown import error"
+            print(
+                f"Torch installation validation failed: installed Torch {version} "
+                f"cannot be imported: {detail}",
+                file=sys.stderr,
+            )
+            return 2
+        if channel == "cuda" and not runtime["cuda_available"]:
+            print(
+                "Torch installation validation failed: CUDA Torch is installed but "
+                f"torch.cuda.is_available() is false. Runtime error: "
+                f"{runtime.get('cuda_error') or runtime.get('error') or 'none'}",
+                file=sys.stderr,
+            )
+            return 2
+    return 0
 
 def install(torch_channel: str = "auto") -> int:
     if not _python_supported():
