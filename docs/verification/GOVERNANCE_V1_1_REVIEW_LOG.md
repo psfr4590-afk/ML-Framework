@@ -119,3 +119,24 @@ For `REQ-DATA-008`, the package's requirement is schema evolution, so tests must
 ### Exit condition
 
 Before changing the v1.1.0 package itself, prepare a focused package patch that (1) marks all not-yet-implemented exact test targets unambiguously as required additions, (2) corrects the `REQ-REL-005` / `REQ-REL-006` verification distinction, (3) retains the 64 `NOT_VERIFIED` statuses, and (4) reruns the package structural validator and fail-closed coverage checker. The source SHA remains `f06bbedb55e252cd7033c615733c5d2554a7d0aa` unless the owner explicitly approves a replacement.
+
+
+## GOV-11 — Focused package wording patch prepared and locally validated
+
+A review-patch archive was prepared from the exact supplied package. It changes only:
+1. `TEST_CASE_CATALOG.csv`: prefixes all 64 planned exact targets with `ADD REQUIRED:`, making clear they are required additions rather than existing test functions.
+2. `check_test_coverage.py`: strips that prefix before performing the existing exact file/function check; missing targets still fail closed.
+3. `README.md`: explains the prefix and that package structure validation does not mean application tests or release readiness passed.
+4. `SHA256SUMS.txt`: recomputed for changed package files. `SHA256SUMS-HISTORY.txt` and historical file bytes remain unchanged.
+
+**Validation performed on the patched archive:**
+- ZIP integrity: passed.
+- Main checksum manifest: 26 entries validated.
+- Historical checksum manifest: 8 entries validated.
+- Structural governance validator: passed (64 unique requirements, 64 traceability rows, 64 unique test IDs, required files and checksums).
+- Fail-closed checker behavior: a synthetic repository fixture without the required test module returned exit code 1 and reported 64/64 missing, as intended. This was a checker-behavior fixture, not an application test run.
+- Declared-source tree: GitHub tree inspection confirms `tests/governance/test_requirement_acceptance.py` is absent at `f06bbedb55e252cd7033c615733c5d2554a7d0aa`; all 64 catalog rows target that file. Therefore the exact-source target inventory is expected to report 64/64 missing at that snapshot.
+
+**Patched archive SHA-256:** `3e1899b29e7eb86bfb0d1df43900b41c76f981c8cf3da32c638143f49f58e381`.
+
+This is a prepared review artifact, not yet imported into `governance/v11/` or committed as the normative package. The repository's `IMPORT_BLOCKER.md` records that the available GitHub connector does not support binary ZIP upload or bulk import. The project owner/local workflow must copy the patched archive's complete `v11/` tree into the repository, then run the repository CI against the imported bytes. The 64 requirements remain `NOT_VERIFIED`; this correction only clarifies planned test targets and preserves fail-closed behavior.
