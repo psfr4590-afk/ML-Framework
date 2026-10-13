@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+from scripts import verify_release
 from scripts.export_cards import write_export_cards
 
 
@@ -64,3 +68,56 @@ def test_write_export_cards_creates_both_cards_and_lineage(tmp_path, monkeypatch
     assert "Pipeline configuration SHA-256 (legacy compatibility evidence): `config-sha`" in dataset_card.read_text(encoding="utf-8")
     assert "Final GGUF SHA-256: `gguf-sha`" in model_card.read_text(encoding="utf-8")
     assert "Dataset card: `DATASET_CARD.md`" in model_card.read_text(encoding="utf-8")
+
+
+def test_write_export_cards_refuses_missing_source_manifest(tmp_path):
+    output = tmp_path / "output"
+
+    with pytest.raises(RuntimeError, match="Source manifest is mandatory"):
+        write_export_cards(output, {}, {})
+
+    assert not (output / "gguf" / "DATASET_CARD.md").exists()
+    assert not (output / "gguf" / "MODEL_CARD.md").exists()
+
+
+def test_release_verifier_rejects_missing_empty_and_modified_cards(tmp_path):
+    dataset_card = tmp_path / "DATASET_CARD.md"
+    model_card = tmp_path / "MODEL_CARD.md"
+    dataset_card.write_text("# Dataset Card\n", encoding="utf-8")
+    model_card.write_text("# Model Card\n", encoding="utf-8")
+    manifest = {
+        "dataset_card": str(dataset_card),
+        "model_card": str(model_card),
+        "dataset_card_sha256": hashlib.sha256(dataset_card.read_bytes()).hexdigest(),
+        "model_card_sha256": hashlib.sha256(model_card.read_bytes()).hexdigest(),
+    }
+
+    verify_release._validate_export_cards(manifest)
+
+    missing = dict(manifest)
+    missing["dataset_card"] = str(tmp_path / "missing.md")
+    with pytest.raises(RuntimeError, match="Missing or empty export card"):
+        verify_release._validate_export_cards(missing)
+
+    dataset_card.write_text("", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Missing or empty export card"):
+        verify_release._validate_export_cards(manifest)
+
+    dataset_card.write_text("# Dataset Card modified\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="hash missing or mismatched"):
+        verify_release._validate_export_cards(manifest)
+
+
+def test_release_verifier_rejects_card_without_recorded_hash(tmp_path):
+    dataset_card = tmp_path / "DATASET_CARD.md"
+    model_card = tmp_path / "MODEL_CARD.md"
+    dataset_card.write_text("# Dataset Card\n", encoding="utf-8")
+    model_card.write_text("# Model Card\n", encoding="utf-8")
+    manifest = {
+        "dataset_card": str(dataset_card),
+        "model_card": str(model_card),
+        "dataset_card_sha256": hashlib.sha256(dataset_card.read_bytes()).hexdigest(),
+    }
+
+    with pytest.raises(RuntimeError, match="hash missing or mismatched"):
+        verify_release._validate_export_cards(manifest)
