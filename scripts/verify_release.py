@@ -91,6 +91,20 @@ def _validate_source_manifest(path: Path) -> None:
 
 
 
+
+def _validate_export_cards(manifest: dict[str, Any]) -> None:
+    """Require both export cards to exist, contain data, and match their recorded hashes."""
+    for key in ("dataset_card", "model_card"):
+        value = manifest.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise RuntimeError(f"Export manifest is missing card path: {key}")
+        card = Path(value)
+        if not card.is_file() or card.stat().st_size <= 0:
+            raise RuntimeError(f"Missing or empty export card: {key}: {card}")
+        expected_hash = manifest.get(f"{key}_sha256")
+        if not isinstance(expected_hash, str) or expected_hash != _sha256(card):
+            raise RuntimeError(f"Export card hash missing or mismatched: {key}: {card}")
+
 def _source_retrieval_smoke() -> bool:
     """Exercise crawl -> clean -> dedup -> weight using a deterministic offline crawler."""
     import yaml
@@ -303,15 +317,8 @@ def _native_smoke(verify_ollama: bool = False) -> int:
                 if per_export["artifact"].get("sha256") != _sha256(final_gguf):
                     print(f"Per-export artifact hash mismatch for {quant}")
                     return 2
-                for key in ("dataset_card", "model_card"):
-                    card = Path(manifest[key])
-                    if not card.is_file() or card.stat().st_size <= 0:
-                        print(f"Missing export card: {key}: {card}")
-                        return 2
-                    if manifest.get(f"{key}_sha256") != _sha256(card):
-                        print(f"Export card hash mismatch: {key}: {card}")
-                        return 2
-        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                _validate_export_cards(manifest)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
             print(f"Invalid export manifest: {exc}")
             return 2
         for quant, record in artifacts.items():
