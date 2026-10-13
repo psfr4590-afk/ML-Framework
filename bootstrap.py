@@ -341,6 +341,11 @@ def torch_runtime_status() -> dict[str, Any]:
             xpu_available = available
         else:
             mps_available = available
+    device_count = _torch_cuda_device_count(torch, cuda_available, probe_errors)
+    if any(error.startswith("cuda device_count:") for error in probe_errors):
+        # A positive is_available probe is not enough if device enumeration fails.
+        cuda_available = False
+
     return {
         "installed": True,
         "importable": True,
@@ -351,7 +356,7 @@ def torch_runtime_status() -> dict[str, Any]:
         "hip_available": cuda_available and bool(getattr(getattr(torch, "version", None), "hip", None)),
         "xpu_available": xpu_available,
         "mps_available": mps_available,
-        "device_count": _torch_cuda_device_count(torch, cuda_available, probe_errors),
+        "device_count": device_count,
         "probe_errors": probe_errors,
     }
 
@@ -391,7 +396,6 @@ def _requirement_satisfied(requirement_text: str, installed_version: str) -> boo
 
 def _declared_runtime_distributions() -> list[str]:
     """Read the runtime dependency authority instead of maintaining a second list."""
-    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     names = []
     for requirement in _declared_runtime_requirements():
         name = re.match(r"([A-Za-z0-9_.-]+)", requirement)
