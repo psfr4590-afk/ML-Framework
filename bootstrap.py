@@ -275,6 +275,7 @@ def recommended_torch_channel(
         return "cpu (CUDA unavailable)"
     return "cpu"
 
+
 def _print_hardware(profile: HardwareProfile) -> None:
     print("Hardware:")
     print(f"  RAM GiB: {profile.ram_gib if profile.ram_gib is not None else 'UNKNOWN'}")
