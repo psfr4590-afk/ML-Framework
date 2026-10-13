@@ -59,7 +59,17 @@ DISTRIBUTION_IMPORTS = {
     "sentence-transformers": "sentence_transformers",
     "faiss-cpu": "faiss",
 }
-REQUIRED = ("torch",)
+REQUIRED = (
+    "yaml",
+    "requests",
+    "bs4",
+    "lxml",
+    "numpy",
+    "tokenizers",
+    "torch",
+    "sentence_transformers",
+    "faiss",
+)
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
