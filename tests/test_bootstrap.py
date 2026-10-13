@@ -126,6 +126,23 @@ def test_doctor_accepts_working_cpu_torch_when_nvidia_gpu_is_present(monkeypatch
 
 
 
+def test_recommended_torch_channel_uses_runtime_state() -> None:
+    gpu = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650")
+    no_gpu = bootstrap.HardwareProfile()
+
+    assert bootstrap.recommended_torch_channel(
+        gpu, {"importable": True, "cuda_available": False}
+    ) == "cpu (CUDA unavailable)"
+    assert bootstrap.recommended_torch_channel(
+        gpu, {"importable": True, "cuda_available": True}
+    ) == "cuda"
+    assert bootstrap.recommended_torch_channel(
+        gpu, {"importable": False, "cuda_available": False}
+    ) == "undetermined (Torch runtime unavailable)"
+    assert bootstrap.recommended_torch_channel(
+        no_gpu, {"importable": True, "cuda_available": False}
+    ) == "cpu"
+
 def test_doctor_reports_cuda_probe_error_and_keeps_cpu_fallback(
     monkeypatch, capsys
 ) -> None:
