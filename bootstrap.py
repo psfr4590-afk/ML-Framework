@@ -72,6 +72,8 @@ REQUIRED = (
 )
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+ROCM_TORCH_INDEX = "https://download.pytorch.org/whl/rocm7.2"
+XPU_TORCH_INDEX = "https://download.pytorch.org/whl/xpu"
 PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
 
 
@@ -508,6 +510,13 @@ def _torch_variant_matches(channel: str) -> bool:
         return "+cpu" not in normalized and ("+cu" in normalized or "+cuda" in normalized)
     if channel == "cpu":
         return "+cpu" in normalized
+    if channel in {"rocm", "xpu", "mps"}:
+        runtime = torch_runtime_status()
+        if channel == "rocm":
+            return bool(runtime.get("hip_available"))
+        if channel == "xpu":
+            return bool(runtime.get("xpu_available"))
+        return bool(runtime.get("mps_available"))
     return True
 
 
@@ -566,6 +575,31 @@ def _validate_requested_torch_channel(channel: str) -> int:
             file=sys.stderr,
         )
         return 2
+    elif channel in {"rocm", "xpu", "mps"}:
+        runtime = torch_runtime_status()
+        backend_available = {
+            "rocm": runtime.get("hip_available"),
+            "xpu": runtime.get("xpu_available"),
+            "mps": runtime.get("mps_available"),
+        }[channel]
+        if not runtime.get("importable") or not backend_available:
+            print(
+                f"Torch installation validation failed: {channel.upper()} runtime is not usable "
+                f"after installation. Import error: {runtime.get('error') or 'none'}",
+                file=sys.stderr,
+            )
+            return 2
+    elif channel == "default":
+        profile = detect_hardware()
+        runtime = torch_runtime_status()
+        if profile.gpu_detected and not (
+            (profile.nvidia_gpu_detected and runtime.get("cuda_available"))
+            or (profile.gpu_vendor == "amd" and runtime.get("hip_available"))
+            or (profile.gpu_vendor == "intel" and runtime.get("xpu_available"))
+            or (profile.gpu_vendor == "apple" and runtime.get("mps_available"))
+        ):
+            print("Torch installation validation failed: default wheel did not expose a usable detected GPU.", file=sys.stderr)
+            return 2
     return 0
 
 
@@ -580,21 +614,18 @@ def install(torch_channel: str = "auto") -> int:
             torch_channel = "cuda"
         elif not profile.gpu_detected:
             torch_channel = "cpu"
-        elif profile.gpu_vendor == "amd" and runtime.get("importable") and runtime.get("hip_available"):
-            # ROCm uses Torch's CUDA-shaped API; require a positive HIP runtime marker.
-            torch_channel = "existing"
-        elif profile.gpu_vendor == "intel" and runtime.get("importable") and runtime.get("xpu_available"):
-            # Keep a proven Intel XPU runtime in place; do not replace it with CPU Torch.
-            torch_channel = "existing"
-        elif profile.gpu_vendor == "apple" and runtime.get("importable") and runtime.get("mps_available"):
-            # Keep a proven Apple MPS runtime in place; do not replace it with CPU Torch.
-            torch_channel = "existing"
+        elif profile.gpu_vendor == "amd" and sys.platform.startswith("linux"):
+            torch_channel = "existing" if runtime.get("importable") and runtime.get("hip_available") else "rocm"
+        elif profile.gpu_vendor == "intel" and (sys.platform.startswith("linux") or os.name == "nt"):
+            torch_channel = "existing" if runtime.get("importable") and runtime.get("xpu_available") else "xpu"
+        elif profile.gpu_vendor == "apple" and sys.platform == "darwin":
+            torch_channel = "existing" if runtime.get("importable") and runtime.get("mps_available") else "mps"
         else:
             print(
                 f"Automatic Torch installation stopped: {profile.gpu_vendor or 'unknown'} GPU "
-                "detected, but no compatible accelerator runtime was verified. Refusing to "
-                "install CPU-only Torch silently. Install a supported vendor runtime, then rerun "
-                "'python bootstrap.py --doctor'.",
+                f"detected on unsupported platform {platform.system()}. Refusing to install "
+                "CPU-only Torch silently. Check the official PyTorch hardware compatibility "
+                "matrix before choosing a manual channel.",
                 file=sys.stderr,
             )
             return 2
@@ -605,7 +636,7 @@ def install(torch_channel: str = "auto") -> int:
             return result
         return _validate_existing_accelerator_runtime()
 
-    if torch_channel in {"cpu", "cuda"}:
+    if torch_channel in {"cpu", "cuda", "rocm", "xpu", "mps"}:
         result = _remove_incompatible_torch(torch_channel)
         if result != 0:
             return result
@@ -614,7 +645,15 @@ def install(torch_channel: str = "auto") -> int:
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
     elif torch_channel == "cuda":
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CUDA_TORCH_INDEX)
+    elif torch_channel == "rocm":
+        if not sys.platform.startswith("linux"):
+            print("ROCm PyTorch wheels are supported here only on Linux.", file=sys.stderr)
+            return 2
+        result = _pip_install(TORCH_REQUIREMENTS, "--index-url", ROCM_TORCH_INDEX)
+    elif torch_channel == "xpu":
+        result = _pip_install(TORCH_REQUIREMENTS, "--index-url", XPU_TORCH_INDEX)
     else:
+        # Apple MPS uses the standard macOS PyTorch wheel; 'default' remains an explicit override.
         result = _pip_install(TORCH_REQUIREMENTS)
     if result != 0:
         return result
@@ -644,9 +683,9 @@ def main() -> int:
     parser.add_argument("--install", action="store_true")
     parser.add_argument(
         "--torch-channel",
-        choices=("auto", "cpu", "cuda", "default"),
+        choices=("auto", "cpu", "cuda", "rocm", "xpu", "mps", "default"),
         default="auto",
-        help="PyTorch wheel source for --install (auto detects NVIDIA; uses CPU only when no GPU is detected; cpu/cuda/default override the policy)",
+        help="PyTorch backend for --install (auto selects a supported detected GPU backend, otherwise CPU; explicit channels: cpu/cuda/rocm/xpu/mps/default)",
     )
     parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()
