@@ -240,7 +240,7 @@ class SemanticDeduplicator:
             else:
                 sims, idxs = _cosine_brute(matrix, q[0], k + 1)
 
-            for sim, j in zip(sims, idxs):
+            for sim, j in zip(sims, idxs, strict=True):
                 j = int(j)
                 if j <= i or j >= len(docs):
                     continue
@@ -253,7 +253,7 @@ class SemanticDeduplicator:
                         log.debug("DUP drop [%d] %s sim=%.3f vs [%d] %s", i, docs[i].url[:60], sim, j, docs[j].url[:60])
                     break
 
-        kept = [d for d, dup in zip(docs, is_dup) if not dup]
+        kept = [d for d, dup in zip(docs, is_dup, strict=True) if not dup]
         dropped = len(docs) - len(kept)
         self.stats["kept"] += len(kept)
         self.stats["dropped"] += dropped
@@ -287,17 +287,17 @@ class SemanticDeduplicator:
                 return
             total += len(batch)
             matrix = self._embed([d.text for d in batch])
-            for doc, vec in zip(batch, matrix):
+            for doc, vec in zip(batch, matrix, strict=True):
                 match = None
                 if rep_vecs:
                     mat = np.asarray(rep_vecs, dtype=np.float32)
                     if FAISS_AVAILABLE:
                         idx = self._build_index(mat)
                         sims, ids = idx.search(vec.reshape(1, -1), min(5, len(rep_vecs)))
-                        pairs = zip(sims[0], ids[0])
+                        pairs = zip(sims[0], ids[0], strict=True)
                     else:
                         sims, ids = _cosine_brute(mat, vec, min(5, len(rep_vecs)))
-                        pairs = zip(sims, ids)
+                        pairs = zip(sims, ids, strict=True)
                     for sim, rid in pairs:
                         rid = int(rid)
                         if rid >= 0 and float(sim) >= self._threshold:
