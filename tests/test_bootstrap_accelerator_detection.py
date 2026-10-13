@@ -142,3 +142,12 @@ def test_auto_install_selects_xpu_for_intel_gpu(monkeypatch):
     assert ("remove", "xpu") in calls
     assert (str(bootstrap.TORCH_REQUIREMENTS), "--index-url", bootstrap.XPU_TORCH_INDEX) in calls
     assert ("validate", "xpu") in calls
+
+def test_explicit_gpu_runtime_is_rejected_without_matching_hardware(monkeypatch, capsys):
+    monkeypatch.setattr(bootstrap, "detect_hardware", lambda: bootstrap.HardwareProfile())
+    install_calls = []
+    monkeypatch.setattr(bootstrap, "_pip_install", lambda *args: install_calls.append(args) or 0)
+
+    assert bootstrap.install("cuda") == 2
+    assert install_calls == []
+    assert "no compatible GPU/platform was detected" in capsys.readouterr().err
