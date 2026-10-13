@@ -225,3 +225,22 @@ def test_runtime_status_preserves_cuda_probe_error_field(monkeypatch):
     assert result["cuda_available"] is False
     assert result["device_count"] == 0
     assert "CUDA runtime probe blocked" in result["cuda_error"]
+
+
+def test_source_import_audit_ignores_isolated_ci_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "ROOT", tmp_path)
+    (tmp_path / "sample.py").write_text("import json\nimport numpy\n", encoding="utf-8")
+    generated_package = tmp_path / ".ci-venv" / "lib" / "site-packages" / "unrelated_vendor_pkg"
+    generated_package.mkdir(parents=True)
+    (generated_package / "__init__.py").write_text(
+        "import dependency_that_is_not_part_of_this_project\n", encoding="utf-8"
+    )
+
+    assert bootstrap._source_import_dependency_issues({"numpy"}) == []
+
+
+def test_security_tool_is_declared_as_optional_dependency():
+    optional = {name.lower().replace("_", "-") for name in bootstrap._declared_optional_runtime_distributions()}
+
+    assert "pip-audit" in optional
+    assert bootstrap.DISTRIBUTION_IMPORTS["pip-audit"] == "pip_audit"
