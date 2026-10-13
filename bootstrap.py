@@ -554,8 +554,9 @@ def doctor() -> int:
         print(f"distribution {distribution}: {state}")
     declared_names = {item.lower().replace("_", "-") for item in distributions}
     try:
-        declared_names.update(item.lower().replace("_", "-") for item in _declared_optional_runtime_distributions())
-        source_issues = _source_import_dependency_issues(declared_names)
+        source_declared_names = set(declared_names)
+        source_declared_names.update(item.lower().replace("_", "-") for item in _declared_optional_runtime_distributions())
+        source_issues = _source_import_dependency_issues(source_declared_names)
     except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
         source_issues = [f"source dependency audit failed: {type(exc).__name__}: {exc}"]
     for issue in source_issues:
