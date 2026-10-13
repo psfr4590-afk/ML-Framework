@@ -59,7 +59,7 @@ class HardwareProfile:
 
     @property
     def nvidia_gpu_detected(self) -> bool:
-        return self.gpu_vendor == "nvidia"
+        return (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
 
     @property
     def gpu_detected(self) -> bool:
