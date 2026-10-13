@@ -8,6 +8,7 @@ local llama.cpp toolchain. It never depends on the caller's cwd.
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import importlib.metadata
 import json
@@ -17,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,39 @@ REQUIREMENTS = ROOT / "requirements.txt"
 TORCH_REQUIREMENTS = ROOT / "requirements-torch.txt"
 MIN_PYTHON = (3, 11)
 MAX_PYTHON_EXCLUSIVE = (3, 15)
+# Distribution names are the install authority; import names are not always identical.
+DISTRIBUTION_IMPORTS = {
+    "pyyaml": "yaml",
+    "defusedxml": "defusedxml",
+    "requests": "requests",
+    "beautifulsoup4": "bs4",
+    "lxml": "lxml",
+    "numpy": "numpy",
+    "packaging": "packaging",
+    "tokenizers": "tokenizers",
+    "safetensors": "safetensors",
+    "datasets": "datasets",
+    "huggingface-hub": "huggingface_hub",
+    "sentencepiece": "sentencepiece",
+    "trafilatura": "trafilatura",
+    "langdetect": "langdetect",
+    "pypdf": "pypdf",
+    "openpyxl": "openpyxl",
+    "python-docx": "docx",
+    "python-pptx": "pptx",
+    "fastapi": "fastapi",
+    "starlette": "starlette",
+    "uvicorn": "uvicorn",
+    "jinja2": "jinja2",
+    "pydantic": "pydantic",
+    "httpx": "httpx",
+    "cryptography": "cryptography",
+    "pyopenssl": "OpenSSL",
+    "sentence-transformers": "sentence_transformers",
+    "faiss-cpu": "faiss",
+    "psutil": "psutil",
+    "pip-audit": "pip_audit",
+}
 REQUIRED = (
     "yaml",
     "requests",
@@ -40,6 +75,8 @@ REQUIRED = (
 )
 CPU_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+ROCM_TORCH_INDEX = "https://download.pytorch.org/whl/rocm7.2"
+XPU_TORCH_INDEX = "https://download.pytorch.org/whl/xpu"
 PIP_NETWORK_OPTIONS = ("--timeout", "120", "--retries", "5")
 
 
@@ -53,14 +90,21 @@ class HardwareProfile:
     cpu_threads: int | None = None
     gpu_name: str | None = None
     gpu_vram_gib: float | None = None
+    gpu_vendor: str | None = None
     nvidia_smi_available: bool = False
 
     @property
     def nvidia_gpu_detected(self) -> bool:
-        return bool(self.gpu_name and "nvidia" in self.gpu_name.lower())
+        return (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
+
+    @property
+    def gpu_detected(self) -> bool:
+        return bool(self.gpu_name)
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["gpu_vendor"] = self.gpu_vendor or _gpu_vendor(self.gpu_name)
+        return data
 
 
 def project_root() -> Path:
@@ -179,10 +223,53 @@ def _nvidia_gpu() -> tuple[str | None, float | None, bool]:
     return parts[0], vram, True
 
 
+def _generic_gpu() -> str | None:
+    """Detect display adapters when NVIDIA's vendor-specific tool is absent."""
+    commands: list[list[str]] = []
+    if os.name == "nt":
+        commands.append([
+            "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+            "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+        ])
+    elif sys.platform == "darwin":
+        commands.append(["system_profiler", "SPDisplaysDataType"])
+    else:
+        commands.extend([["lspci"], ["sh", "-c", "for p in /sys/class/drm/card*/device; do v=$(cat \"$p/vendor\" 2>/dev/null); case \"$v\" in 0x10de) echo NVIDIA GPU;; 0x1002) echo AMD GPU;; 0x8086) echo Intel GPU;; esac; done"]])
+    for command in commands:
+        output = _run_command(command, timeout=10.0)
+        if not output:
+            continue
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        candidates = [
+            line for line in lines
+            if any(token in line.lower() for token in ("nvidia", "geforce", "quadro", "radeon", "amd", "advanced micro devices", "intel", "arc", "apple"))
+        ]
+        if candidates:
+            return candidates[0]
+    return None
+
+
+def _gpu_vendor(name: str | None) -> str | None:
+    if not name:
+        return None
+    lowered = name.lower()
+    if any(token in lowered for token in ("nvidia", "geforce", "quadro")):
+        return "nvidia"
+    if any(token in lowered for token in ("radeon", "advanced micro devices", "amd")):
+        return "amd"
+    if any(token in lowered for token in ("intel", "arc")):
+        return "intel"
+    if "apple" in lowered:
+        return "apple"
+    return "unknown"
+
+
 def detect_hardware() -> HardwareProfile:
     """Collect host facts without importing optional ML dependencies."""
     cpu_name, cpu_cores, cpu_threads = _windows_cpu()
     gpu_name, gpu_vram_gib, nvidia_smi_available = _nvidia_gpu()
+    if not gpu_name:
+        gpu_name = _generic_gpu()
     return HardwareProfile(
         ram_gib=_ram_gib(),
         cpu_name=cpu_name,
@@ -190,6 +277,7 @@ def detect_hardware() -> HardwareProfile:
         cpu_threads=cpu_threads,
         gpu_name=gpu_name,
         gpu_vram_gib=gpu_vram_gib,
+        gpu_vendor=_gpu_vendor(gpu_name),
         nvidia_smi_available=nvidia_smi_available,
     )
 
@@ -217,19 +305,208 @@ def torch_channel_summary(channel: str, profile: HardwareProfile) -> dict[str, A
 
 
 def torch_runtime_status() -> dict[str, Any]:
-    """Report actual Torch/CUDA runtime state, never infer it from host hardware."""
+    """Report installed-package and import/runtime state separately."""
+    try:
+        installed_version = importlib.metadata.version("torch")
+    except importlib.metadata.PackageNotFoundError:
+        installed_version = None
     try:
         torch = importlib.import_module("torch")
     except Exception as exc:
-        return {"installed": False, "cuda_available": False, "error": type(exc).__name__}
-    cuda_available = bool(torch.cuda.is_available())
+        return {
+            "installed": installed_version is not None,
+            "importable": False,
+            "version": installed_version,
+            "cuda_available": False,
+            "xpu_available": False,
+            "mps_available": False,
+            "hip_available": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    cuda_available = False
+    xpu_available = False
+    mps_available = False
+    probe_errors: list[str] = []
+    for backend, probe in (
+        ("cuda", lambda: torch.cuda.is_available()),
+        ("xpu", lambda: bool(getattr(getattr(torch, "xpu", None), "is_available", lambda: False)())),
+        ("mps", lambda: bool(getattr(getattr(torch, "backends", None), "mps", None) and torch.backends.mps.is_available())),
+    ):
+        try:
+            available = bool(probe())
+        except Exception as exc:
+            available = False
+            probe_errors.append(f"{backend}: {type(exc).__name__}: {exc}")
+        if backend == "cuda":
+            cuda_available = available
+        elif backend == "xpu":
+            xpu_available = available
+        else:
+            mps_available = available
+    device_count = _torch_cuda_device_count(torch, cuda_available, probe_errors)
+    if any(error.startswith("cuda device_count:") for error in probe_errors):
+        # A positive is_available probe is not enough if device enumeration fails.
+        cuda_available = False
+
     return {
         "installed": True,
-        "version": getattr(torch, "__version__", None),
+        "importable": True,
+        "version": getattr(torch, "__version__", installed_version),
         "cuda_available": cuda_available,
         "cuda_version": getattr(getattr(torch, "version", None), "cuda", None),
-        "device_count": torch.cuda.device_count() if cuda_available else 0,
+        "hip_version": getattr(getattr(torch, "version", None), "hip", None),
+        "hip_available": cuda_available and bool(getattr(getattr(torch, "version", None), "hip", None)),
+        "xpu_available": xpu_available,
+        "mps_available": mps_available,
+        "device_count": device_count,
+        "cuda_error": "; ".join(
+            error for error in probe_errors
+            if error.startswith("cuda:") or error.startswith("cuda device_count:")
+        ) or None,
+        "probe_errors": probe_errors,
     }
+
+
+
+def _torch_cuda_device_count(torch: Any, cuda_available: bool, probe_errors: list[str]) -> int:
+    """Count CUDA devices without allowing a broken driver probe to crash doctor."""
+    if not cuda_available:
+        return 0
+    try:
+        return int(torch.cuda.device_count())
+    except Exception as exc:
+        probe_errors.append(f"cuda device_count: {type(exc).__name__}: {exc}")
+        return 0
+
+def _declared_runtime_requirements() -> list[str]:
+    """Return full PEP 508 requirements so installed versions can be validated."""
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = metadata.get("project", {}).get("dependencies", [])
+    if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
+        raise ValueError("project.dependencies must be a list of requirement strings")
+    return dependencies
+
+
+def _requirement_satisfied(requirement_text: str, installed_version: str) -> bool:
+    """Return whether an installed version satisfies a PEP 508 requirement."""
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+
+    requirement = Requirement(requirement_text)
+    if requirement.marker is not None and not requirement.marker.evaluate():
+        return True
+    return not requirement.specifier or requirement.specifier.contains(
+        Version(installed_version), prereleases=True
+    )
+
+
+def _declared_optional_runtime_distributions() -> list[str]:
+    """Read optional dependency groups, which may satisfy optional source imports."""
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    groups = metadata.get("project", {}).get("optional-dependencies", {})
+    if not isinstance(groups, dict):
+        raise ValueError("project.optional-dependencies must be a table")
+    names: list[str] = []
+    for group, requirements in groups.items():
+        if not isinstance(requirements, list) or not all(isinstance(item, str) for item in requirements):
+            raise ValueError(f"optional dependency group {group!r} must be a list of requirement strings")
+        for requirement in requirements:
+            match = re.match(r"([A-Za-z0-9_.-]+)", requirement)
+            if match:
+                names.append(match.group(1))
+    return names
+
+
+def _source_import_dependency_issues(declared_names: set[str]) -> list[str]:
+    """Audit static source imports against stdlib, local modules, and declared distributions."""
+    ignored_parts = {
+        ".git", ".venv", ".ci-venv", "venv", ".runtime", ".tox", ".nox",
+        "__pycache__", "build", "dist", "tests", "output", "scratch",
+        "datasets", "node_modules", ".pytest_cache", ".ruff_cache",
+    }
+    local_roots = {path.stem for path in ROOT.glob("*.py")}
+    project_packages = {"pipeline", "command_center", "scripts", "config", "ui"}
+    local_roots.update(
+        path.name for path in ROOT.iterdir()
+        if path.is_dir() and ((path / "__init__.py").is_file() or path.name in project_packages)
+    )
+    imports: set[str] = set()
+    issues: list[str] = []
+    for path in ROOT.rglob("*.py"):
+        relative = path.relative_to(ROOT)
+        if any(part in ignored_parts for part in relative.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(relative))
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            issues.append(f"source import audit could not parse {relative}: {type(exc).__name__}: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imports.add(node.module.split(".")[0])
+
+    normalize = lambda value: re.sub(r"[-_.]+", "-", value).lower()
+    declared = {normalize(name) for name in declared_names}
+    reverse = {import_name.split(".")[0]: normalize(distribution) for distribution, import_name in DISTRIBUTION_IMPORTS.items()}
+    reverse["torch"] = "torch"  # Torch is intentionally installed from requirements-torch.txt.
+    try:
+        installed_mapping = importlib.metadata.packages_distributions()
+    except Exception:
+        installed_mapping = {}
+    for module in sorted(imports):
+        if module in sys.stdlib_module_names or module in local_roots or module == "__future__":
+            continue
+        distribution = reverse.get(module)
+        if distribution is None:
+            candidates = installed_mapping.get(module, [])
+            distribution = normalize(candidates[0]) if candidates else None
+        if distribution is None:
+            issues.append(f"unmapped third-party source import: {module}")
+        elif distribution != "torch" and distribution not in declared:
+            issues.append(f"source import {module} maps to undeclared distribution {distribution}")
+    return issues
+
+
+def _declared_runtime_distributions() -> list[str]:
+    """Read the runtime dependency authority instead of maintaining a second list."""
+    names = []
+    for requirement in _declared_runtime_requirements():
+        name = re.match(r"([A-Za-z0-9_.-]+)", requirement)
+        if name:
+            names.append(name.group(1))
+    return names
+
+
+def _distribution_version(name: str) -> str | None:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def recommended_torch_channel(profile: HardwareProfile, runtime: dict[str, Any]) -> str:
+    """Recommend only a runtime verified by actual probes and supported detection."""
+    if runtime.get("importable"):
+        if profile.nvidia_gpu_detected and runtime.get("cuda_available"):
+            return "cuda (usable)"
+        if profile.nvidia_gpu_detected:
+            return "cpu (CUDA unavailable)"
+        if profile.gpu_vendor == "amd" and runtime.get("hip_available"):
+            return "rocm (usable)"
+        if profile.gpu_vendor == "intel" and runtime.get("xpu_available"):
+            return "xpu (usable)"
+        if profile.gpu_vendor == "apple" and runtime.get("mps_available"):
+            return "mps (usable)"
+        if not profile.gpu_detected:
+            return "cpu"
+    if not profile.gpu_detected:
+        return "cpu"
+    return f"manual review required ({profile.gpu_vendor or 'unknown'} GPU detected; no compatible accelerator verified)"
 
 
 def _print_hardware(profile: HardwareProfile) -> None:
@@ -237,9 +514,10 @@ def _print_hardware(profile: HardwareProfile) -> None:
     print(f"  RAM GiB: {profile.ram_gib if profile.ram_gib is not None else 'UNKNOWN'}")
     print(f"  CPU: {profile.cpu_name or 'UNKNOWN'}")
     print(f"  CPU cores/threads: {profile.cpu_cores or 'UNKNOWN'}/{profile.cpu_threads or 'UNKNOWN'}")
-    print(f"  NVIDIA GPU: {profile.gpu_name or 'NONE DETECTED'}")
-    print(f"  NVIDIA VRAM GiB: {profile.gpu_vram_gib if profile.gpu_vram_gib is not None else 'UNKNOWN'}")
-    print(f"  nvidia-smi: {'OK' if profile.nvidia_smi_available else 'MISSING'}")
+    print(f"  GPU: {profile.gpu_name or 'NONE DETECTED'}")
+    print(f"  GPU vendor: {profile.gpu_vendor or 'UNKNOWN'}")
+    print(f"  GPU VRAM GiB: {profile.gpu_vram_gib if profile.gpu_vram_gib is not None else 'UNKNOWN'}")
+    print(f"  nvidia-smi: {'OK' if profile.nvidia_smi_available else 'MISSING / NOT APPLICABLE'}")
 
 
 def doctor() -> int:
@@ -252,24 +530,101 @@ def doctor() -> int:
     print(f"Platform: {platform.platform()}")
     if not _python_supported():
         failures.append(_python_requirement_message())
+    metadata_path = ROOT / "pyproject.toml"
+    if not metadata_path.is_file():
+        failures.append("pyproject.toml missing; runtime dependency authority unavailable")
+        requirements: list[str] = []
+        distributions: list[str] = []
+    else:
+        try:
+            requirements = _declared_runtime_requirements()
+            distributions = _declared_runtime_distributions()
+        except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
+            print(f"Runtime dependency metadata: INVALID ({type(exc).__name__}: {exc})")
+            failures.append("pyproject.toml runtime dependency metadata invalid")
+            requirements = []
+            distributions = []
+    for requirement in requirements:
+        match = re.match(r"([A-Za-z0-9_.-]+)", requirement)
+        if not match:
+            failures.append(f"invalid runtime requirement: {requirement}")
+            print(f"distribution requirement {requirement}: INVALID")
+            continue
+        distribution = match.group(1)
+        version = _distribution_version(distribution)
+        if version is None:
+            state = "MISSING"
+            failures.append(f"runtime distribution missing: {distribution}")
+        else:
+            try:
+                compatible = _requirement_satisfied(requirement, version)
+            except Exception as exc:
+                compatible = False
+                state = f"INVALID REQUIREMENT ({type(exc).__name__}: {exc})"
+            else:
+                state = f"OK ({version})" if compatible else f"INCOMPATIBLE ({version}; requires {requirement})"
+            if not compatible:
+                failures.append(f"runtime distribution version incompatible: {requirement} (installed {version})")
+        print(f"distribution {distribution}: {state}")
+    declared_names = {item.lower().replace("_", "-") for item in distributions}
+    try:
+        source_declared_names = set(declared_names)
+        source_declared_names.update(item.lower().replace("_", "-") for item in _declared_optional_runtime_distributions())
+        source_issues = _source_import_dependency_issues(source_declared_names)
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
+        source_issues = [f"source dependency audit failed: {type(exc).__name__}: {exc}"]
+    for issue in source_issues:
+        print(f"source dependency audit: FAIL ({issue})")
+        failures.append(issue)
+    if not source_issues:
+        print("source dependency audit: OK (all static third-party imports are mapped to declared dependencies)")
+    for distribution, name in DISTRIBUTION_IMPORTS.items():
+        if distribution not in declared_names:
+            # The distribution check above already reports this missing dependency.
+            continue
+        try:
+            importlib.import_module(name)
+            state = "OK"
+        except Exception as exc:
+            state = f"IMPORT FAILED ({type(exc).__name__}: {exc})"
+            failures.append(f"runtime import {name} ({distribution}) failed: {type(exc).__name__}: {exc}")
+        print(f"import {name} [{distribution}]: {state}")
     for name in REQUIRED:
-        state = "OK" if _importable(name) else "MISSING"
-        print(f"{name}: {state}")
-        if state != "OK":
-            failures.append(name)
+        try:
+            importlib.import_module(name)
+            state = "OK"
+        except Exception as exc:
+            state = f"IMPORT FAILED ({type(exc).__name__}: {exc})"
+            failures.append(f"required import {name} failed: {type(exc).__name__}: {exc}")
+        print(f"import {name}: {state}")
     for exe in ("git", "cmake"):
-        print(f"{exe}: {'OK' if shutil.which(exe) else 'MISSING'}")
+        print(f"{exe}: {'OK' if shutil.which(exe) else 'MISSING (some workflows may require it)'}")
     profile = detect_hardware()
     _print_hardware(profile)
-    print(f"Torch channel recommendation: {'cuda' if profile.nvidia_gpu_detected else 'cpu'}")
     runtime = torch_runtime_status()
-    print(f"Torch runtime: {'OK' if runtime['installed'] else 'MISSING'}")
-    if runtime["installed"]:
-        print(f"  Torch version: {runtime.get('version') or 'UNKNOWN'}")
-        print(f"  CUDA available: {runtime['cuda_available']}")
-        print(f"  CUDA runtime: {runtime.get('cuda_version') or 'NONE'}")
-        if profile.nvidia_gpu_detected and not runtime["cuda_available"]:
-            failures.append("NVIDIA GPU detected but Torch CUDA runtime is unavailable")
+    print(f"Torch package: {'INSTALLED' if runtime['installed'] else 'MISSING'}")
+    print(f"Torch import: {'OK' if runtime.get('importable') else 'FAILED'}")
+    if runtime["version"]:
+        print(f"  Torch version: {runtime['version']}")
+    print(f"  CUDA available: {runtime['cuda_available']}")
+    print(f"  XPU available: {runtime.get('xpu_available', False)}")
+    print(f"  MPS available: {runtime.get('mps_available', False)}")
+    if runtime.get("error"):
+        print(f"  Torch import error: {runtime['error']}")
+    for error in runtime.get("probe_errors", []):
+        print(f"  Accelerator probe error: {error}")
+    recommendation = recommended_torch_channel(profile, runtime)
+    print(f"Verified runtime recommendation: {recommendation}")
+    if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
+        print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
+    if profile.gpu_detected and not (
+        (profile.nvidia_gpu_detected and runtime.get("cuda_available") and not runtime.get("hip_available"))
+        or (profile.gpu_vendor == "amd" and runtime.get("hip_available"))
+        or (profile.gpu_vendor == "intel" and runtime.get("xpu_available"))
+        or (profile.gpu_vendor == "apple" and runtime.get("mps_available"))
+    ):
+        print("WARNING: GPU hardware was detected, but no compatible accelerator runtime was verified.")
+        print("Automatic installation will not silently select CPU-only Torch for this host.")
     print("Bootstrap doctor: PASS" if not failures else "Bootstrap doctor: FAIL")
     return 0 if not failures else 2
 
@@ -299,6 +654,13 @@ def _torch_variant_matches(channel: str) -> bool:
         return "+cpu" not in normalized and ("+cu" in normalized or "+cuda" in normalized)
     if channel == "cpu":
         return "+cpu" in normalized
+    if channel in {"rocm", "xpu", "mps"}:
+        runtime = torch_runtime_status()
+        if channel == "rocm":
+            return bool(runtime.get("hip_available"))
+        if channel == "xpu":
+            return bool(runtime.get("xpu_available"))
+        return bool(runtime.get("mps_available"))
     return True
 
 
@@ -312,10 +674,36 @@ def _remove_incompatible_torch(channel: str) -> int:
     return subprocess.run(command, cwd=ROOT, check=False).returncode
 
 
+def _validate_existing_accelerator_runtime() -> int:
+    profile = detect_hardware()
+    runtime = torch_runtime_status()
+    if not runtime.get("importable"):
+        print(f"Torch runtime cannot be imported: {runtime.get('error', 'unknown error')}", file=sys.stderr)
+        return 2
+    usable = (
+        (profile.nvidia_gpu_detected and runtime.get("cuda_available") and not runtime.get("hip_available"))
+        or (profile.gpu_vendor == "amd" and runtime.get("hip_available"))
+        or (profile.gpu_vendor == "intel" and runtime.get("xpu_available"))
+        or (profile.gpu_vendor == "apple" and runtime.get("mps_available"))
+    )
+    if not usable:
+        print("Existing Torch runtime does not expose a usable accelerator for the detected GPU.", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _validate_requested_torch_channel(channel: str) -> int:
     version = _installed_torch_version()
     if version is None:
         print("Torch installation validation failed: package metadata is missing.", file=sys.stderr)
+        return 2
+    runtime = torch_runtime_status()
+    if not runtime.get("importable"):
+        print(
+            "Torch installation validation failed: package exists but cannot be imported. "
+            f"Error: {runtime.get('error', 'unknown import error')}",
+            file=sys.stderr,
+        )
         return 2
     if channel == "cuda":
         if "+cpu" in version.lower():
@@ -326,9 +714,11 @@ def _validate_requested_torch_channel(channel: str) -> int:
             return 2
         runtime = torch_runtime_status()
         if not runtime["installed"] or not runtime["cuda_available"]:
+            probe_error = runtime.get("cuda_error")
+            detail = f" Runtime probe error: {probe_error}" if probe_error else ""
             print(
                 "Torch installation validation failed: CUDA Torch is installed but "
-                "torch.cuda.is_available() is false.",
+                "torch.cuda.is_available() is false." + detail,
                 file=sys.stderr,
             )
             return 2
@@ -339,6 +729,31 @@ def _validate_requested_torch_channel(channel: str) -> int:
             file=sys.stderr,
         )
         return 2
+    elif channel in {"rocm", "xpu", "mps"}:
+        runtime = torch_runtime_status()
+        backend_available = {
+            "rocm": runtime.get("hip_available"),
+            "xpu": runtime.get("xpu_available"),
+            "mps": runtime.get("mps_available"),
+        }[channel]
+        if not runtime.get("importable") or not backend_available:
+            print(
+                f"Torch installation validation failed: {channel.upper()} runtime is not usable "
+                f"after installation. Import error: {runtime.get('error') or 'none'}",
+                file=sys.stderr,
+            )
+            return 2
+    elif channel == "default":
+        profile = detect_hardware()
+        runtime = torch_runtime_status()
+        if profile.gpu_detected and not (
+            (profile.nvidia_gpu_detected and runtime.get("cuda_available"))
+            or (profile.gpu_vendor == "amd" and runtime.get("hip_available"))
+            or (profile.gpu_vendor == "intel" and runtime.get("xpu_available"))
+            or (profile.gpu_vendor == "apple" and runtime.get("mps_available"))
+        ):
+            print("Torch installation validation failed: default wheel did not expose a usable detected GPU.", file=sys.stderr)
+            return 2
     return 0
 
 
@@ -346,10 +761,52 @@ def install(torch_channel: str = "auto") -> int:
     if not _python_supported():
         print(f"Bootstrap install aborted: {_python_requirement_message()}", file=sys.stderr)
         return 2
+    if torch_channel != "auto":
+        profile = detect_hardware()
+        compatible = {
+            "cuda": profile.nvidia_gpu_detected and (sys.platform.startswith("linux") or os.name == "nt"),
+            "rocm": profile.gpu_vendor == "amd" and sys.platform.startswith("linux"),
+            "xpu": profile.gpu_vendor == "intel" and (sys.platform.startswith("linux") or os.name == "nt"),
+            "mps": profile.gpu_vendor == "apple" and sys.platform == "darwin",
+        }
+        if torch_channel in compatible and not compatible[torch_channel]:
+            print(
+                f"Refusing to install the {torch_channel} Torch runtime: no compatible "
+                f"GPU/platform was detected (GPU vendor: {profile.gpu_vendor or 'none'}, "
+                f"platform: {platform.system()}).",
+                file=sys.stderr,
+            )
+            return 2
     if torch_channel == "auto":
-        torch_channel = "cuda" if detect_hardware().nvidia_gpu_detected else "cpu"
+        profile = detect_hardware()
+        runtime = torch_runtime_status()
+        if profile.nvidia_gpu_detected:
+            torch_channel = "cuda"
+        elif not profile.gpu_detected:
+            torch_channel = "cpu"
+        elif profile.gpu_vendor == "amd" and sys.platform.startswith("linux"):
+            torch_channel = "existing" if runtime.get("importable") and runtime.get("hip_available") else "rocm"
+        elif profile.gpu_vendor == "intel" and (sys.platform.startswith("linux") or os.name == "nt"):
+            torch_channel = "existing" if runtime.get("importable") and runtime.get("xpu_available") else "xpu"
+        elif profile.gpu_vendor == "apple" and sys.platform == "darwin":
+            torch_channel = "existing" if runtime.get("importable") and runtime.get("mps_available") else "mps"
+        else:
+            print(
+                f"Automatic Torch installation stopped: {profile.gpu_vendor or 'unknown'} GPU "
+                f"detected on unsupported platform {platform.system()}. Refusing to install "
+                "CPU-only Torch silently. Check the official PyTorch hardware compatibility "
+                "matrix before choosing a manual channel.",
+                file=sys.stderr,
+            )
+            return 2
 
-    if torch_channel in {"cpu", "cuda"}:
+    if torch_channel == "existing":
+        result = _pip_install(REQUIREMENTS)
+        if result != 0:
+            return result
+        return _validate_existing_accelerator_runtime()
+
+    if torch_channel in {"cpu", "cuda", "rocm", "xpu", "mps"}:
         result = _remove_incompatible_torch(torch_channel)
         if result != 0:
             return result
@@ -358,7 +815,15 @@ def install(torch_channel: str = "auto") -> int:
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CPU_TORCH_INDEX)
     elif torch_channel == "cuda":
         result = _pip_install(TORCH_REQUIREMENTS, "--index-url", CUDA_TORCH_INDEX)
+    elif torch_channel == "rocm":
+        if not sys.platform.startswith("linux"):
+            print("ROCm PyTorch wheels are supported here only on Linux.", file=sys.stderr)
+            return 2
+        result = _pip_install(TORCH_REQUIREMENTS, "--index-url", ROCM_TORCH_INDEX)
+    elif torch_channel == "xpu":
+        result = _pip_install(TORCH_REQUIREMENTS, "--index-url", XPU_TORCH_INDEX)
     else:
+        # Apple MPS uses the standard macOS PyTorch wheel; 'default' remains an explicit override.
         result = _pip_install(TORCH_REQUIREMENTS)
     if result != 0:
         return result
@@ -388,9 +853,9 @@ def main() -> int:
     parser.add_argument("--install", action="store_true")
     parser.add_argument(
         "--torch-channel",
-        choices=("auto", "cpu", "cuda", "default"),
+        choices=("auto", "cpu", "cuda", "rocm", "xpu", "mps", "default"),
         default="auto",
-        help="PyTorch wheel source for --install (default: auto-detect NVIDIA GPU; use cpu/cuda/default to override)",
+        help="PyTorch backend for --install (auto selects a supported detected GPU backend, otherwise CPU; explicit channels: cpu/cuda/rocm/xpu/mps/default)",
     )
     parser.add_argument("--ensure-llamacpp", action="store_true")
     args = parser.parse_args()

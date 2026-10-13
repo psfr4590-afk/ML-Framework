@@ -66,6 +66,7 @@ def test_hardware_profile_json_is_stable() -> None:
         "cpu_threads": 12,
         "gpu_name": "NVIDIA GeForce GTX 1650",
         "gpu_vram_gib": 4.0,
+        "gpu_vendor": "nvidia",
         "nvidia_smi_available": True,
     }
 
@@ -100,7 +101,7 @@ def test_validate_cpu_torch_rejects_cuda_variant(monkeypatch) -> None:
     assert bootstrap._validate_requested_torch_channel("cpu") == 2
 
 
-def test_doctor_fails_when_nvidia_gpu_has_no_cuda_runtime(monkeypatch, capsys) -> None:
+def test_doctor_allows_cpu_fallback_when_cuda_is_unavailable(monkeypatch, capsys) -> None:
     profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650", gpu_vram_gib=4.0)
     monkeypatch.setattr(bootstrap, "detect_hardware", lambda: profile)
     monkeypatch.setattr(
@@ -108,16 +109,21 @@ def test_doctor_fails_when_nvidia_gpu_has_no_cuda_runtime(monkeypatch, capsys) -
         "torch_runtime_status",
         lambda: {
             "installed": True,
+            "importable": True,
             "version": "2.14.1+cpu",
             "cuda_available": False,
             "cuda_version": None,
+            "hip_available": False,
+            "xpu_available": False,
+            "mps_available": False,
+            "probe_errors": [],
             "device_count": 0,
         },
     )
     monkeypatch.setattr(bootstrap, "_importable", lambda name: True)
     monkeypatch.setattr(bootstrap.RECONCILER.__class__, "is_file", lambda self: True)
     monkeypatch.setattr(bootstrap.shutil, "which", lambda exe: "present")
-    assert bootstrap.doctor() == 2
+    assert bootstrap.doctor() == 0
     output = capsys.readouterr().out
-    assert "NVIDIA GPU detected but Torch CUDA runtime is unavailable" not in output
-    assert "Bootstrap doctor: FAIL" in output
+    assert "Verified runtime recommendation: cpu (CUDA unavailable)" in output
+    assert "Bootstrap doctor: PASS" in output
