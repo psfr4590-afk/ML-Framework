@@ -167,7 +167,7 @@ def test_runtime_status_catches_cuda_device_count_errors(monkeypatch):
         cuda = FakeCuda()
         version = type("Version", (), {"cuda": "12.8", "hip": None})()
         xpu = type("Xpu", (), {"is_available": staticmethod(lambda: False)})()
-        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False})()})()
+        backends = type("Backends", (), {"mps": type("Mps", (), {"is_available": staticmethod(lambda: False)})()})()
 
     monkeypatch.setattr(bootstrap.importlib.metadata, "version", lambda name: "2.11.0")
     monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
@@ -176,3 +176,9 @@ def test_runtime_status_catches_cuda_device_count_errors(monkeypatch):
     assert result["cuda_available"] is True
     assert result["device_count"] == 0
     assert any("device_count" in error and "driver enumeration failed" in error for error in result["probe_errors"])
+
+
+def test_requirement_validation_checks_version_constraints():
+    assert bootstrap._requirement_satisfied("numpy>=1.26,<3", "2.0.0")
+    assert not bootstrap._requirement_satisfied("numpy>=1.26,<3", "3.0.0")
+    assert not bootstrap._requirement_satisfied("fastapi>=0.141.1,<1", "0.100.0")
