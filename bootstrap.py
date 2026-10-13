@@ -524,6 +524,7 @@ def doctor() -> int:
     metadata_path = ROOT / "pyproject.toml"
     if not metadata_path.is_file():
         failures.append("pyproject.toml missing; runtime dependency authority unavailable")
+        requirements: list[str] = []
         distributions: list[str] = []
     else:
         try:
