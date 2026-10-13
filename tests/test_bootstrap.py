@@ -109,9 +109,14 @@ def test_doctor_allows_cpu_fallback_when_cuda_is_unavailable(monkeypatch, capsys
         "torch_runtime_status",
         lambda: {
             "installed": True,
+            "importable": True,
             "version": "2.14.1+cpu",
             "cuda_available": False,
             "cuda_version": None,
+            "hip_available": False,
+            "xpu_available": False,
+            "mps_available": False,
+            "probe_errors": [],
             "device_count": 0,
         },
     )
