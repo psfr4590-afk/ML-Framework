@@ -182,3 +182,24 @@ def test_requirement_validation_checks_version_constraints():
     assert bootstrap._requirement_satisfied("numpy>=1.26,<3", "2.0.0")
     assert not bootstrap._requirement_satisfied("numpy>=1.26,<3", "3.0.0")
     assert not bootstrap._requirement_satisfied("fastapi>=0.141.1,<1", "0.100.0")
+
+
+def test_source_import_audit_flags_unmapped_third_party_import(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "ROOT", tmp_path)
+    (tmp_path / "sample.py").write_text(
+        "import json\nimport torch\nimport unlisted_external_package\n",
+        encoding="utf-8",
+    )
+
+    issues = bootstrap._source_import_dependency_issues({"torch"})
+
+    assert "unmapped third-party source import: unlisted_external_package" in issues
+    assert not any("json" in issue for issue in issues)
+    assert not any("torch" in issue for issue in issues)
+
+
+def test_source_import_audit_accepts_declared_distribution(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, "ROOT", tmp_path)
+    (tmp_path / "sample.py").write_text("import json\nimport numpy\n", encoding="utf-8")
+
+    assert bootstrap._source_import_dependency_issues({"numpy"}) == []
