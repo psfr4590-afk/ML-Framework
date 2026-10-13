@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 process-recovery = ["psutil>=5.9,<8"]
-security = ["pip-audit>=2.7,<3"]
+security = ["pip-audit>=2.10.1,<3"]
 
 [project.scripts]
 mlab = "run_pipeline:main"
