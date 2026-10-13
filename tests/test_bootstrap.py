@@ -122,6 +122,7 @@ def test_doctor_accepts_working_cpu_torch_when_nvidia_gpu_is_present(monkeypatch
     assert bootstrap.doctor() == 0
     output = capsys.readouterr().out
     assert "CUDA unavailable; CPU execution remains available." in output
+    assert "Torch channel recommendation: cpu (CUDA unavailable)" in output
     assert "Bootstrap doctor: PASS" in output
 
 
@@ -142,6 +143,7 @@ def test_recommended_torch_channel_uses_runtime_state() -> None:
     assert bootstrap.recommended_torch_channel(
         no_gpu, {"importable": True, "cuda_available": False}
     ) == "cpu"
+
 
 def test_doctor_reports_cuda_probe_error_and_keeps_cpu_fallback(
     monkeypatch, capsys
