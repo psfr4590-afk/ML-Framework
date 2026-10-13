@@ -378,6 +378,8 @@ def recommended_torch_channel(profile: HardwareProfile, runtime: dict[str, Any])
     if runtime.get("importable"):
         if profile.nvidia_gpu_detected and runtime.get("cuda_available"):
             return "cuda (usable)"
+        if profile.nvidia_gpu_detected:
+            return "cpu (CUDA unavailable)"
         if profile.gpu_vendor == "amd" and runtime.get("hip_available"):
             return "rocm (usable)"
         if profile.gpu_vendor == "intel" and runtime.get("xpu_available"):
