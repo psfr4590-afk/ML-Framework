@@ -351,10 +351,21 @@ def torch_runtime_status() -> dict[str, Any]:
         "hip_available": cuda_available and bool(getattr(getattr(torch, "version", None), "hip", None)),
         "xpu_available": xpu_available,
         "mps_available": mps_available,
-        "device_count": torch.cuda.device_count() if cuda_available else 0,
+        "device_count": _torch_cuda_device_count(torch, cuda_available, probe_errors),
         "probe_errors": probe_errors,
     }
 
+
+
+def _torch_cuda_device_count(torch: Any, cuda_available: bool, probe_errors: list[str]) -> int:
+    """Count CUDA devices without allowing a broken driver probe to crash doctor."""
+    if not cuda_available:
+        return 0
+    try:
+        return int(torch.cuda.device_count())
+    except Exception as exc:
+        probe_errors.append(f"cuda device_count: {type(exc).__name__}: {exc}")
+        return 0
 
 def _declared_runtime_distributions() -> list[str]:
     """Read the runtime dependency authority instead of maintaining a second list."""
