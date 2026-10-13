@@ -415,9 +415,13 @@ def _declared_optional_runtime_distributions() -> list[str]:
 
 def _source_import_dependency_issues(declared_names: set[str]) -> list[str]:
     """Audit static source imports against stdlib, local modules, and declared distributions."""
-    ignored_parts = {".git", ".venv", "venv", ".runtime", "__pycache__", "build", "dist", "tests"}
+    ignored_parts = {".git", ".venv", "venv", ".runtime", "__pycache__", "build", "dist", "tests", "output", "scratch", "datasets", "node_modules", ".pytest_cache", ".ruff_cache"}
     local_roots = {path.stem for path in ROOT.glob("*.py")}
-    local_roots.update(path.name for path in ROOT.iterdir() if path.is_dir())
+    project_packages = {"pipeline", "command_center", "scripts", "config", "ui"}
+    local_roots.update(
+        path.name for path in ROOT.iterdir()
+        if path.is_dir() and ((path / "__init__.py").is_file() or path.name in project_packages)
+    )
     imports: set[str] = set()
     issues: list[str] = []
     for path in ROOT.rglob("*.py"):
