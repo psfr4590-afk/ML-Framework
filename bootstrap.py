@@ -196,7 +196,7 @@ def _generic_gpu() -> str | None:
     elif sys.platform == "darwin":
         commands.append(["system_profiler", "SPDisplaysDataType"])
     else:
-        commands.extend([["lspci"], ["sh", "-c", "for p in /sys/class/drm/card*/device; do cat \"$p/vendor\" 2>/dev/null; done"]])
+        commands.extend([["lspci"], ["sh", "-c", "for p in /sys/class/drm/card*/device; do v=$(cat \"$p/vendor\" 2>/dev/null); case \"$v\" in 0x10de) echo NVIDIA GPU;; 0x1002) echo AMD GPU;; 0x8086) echo Intel GPU;; esac; done"]])
     for command in commands:
         output = _run_command(command, timeout=10.0)
         if not output:
