@@ -359,6 +359,10 @@ def torch_runtime_status() -> dict[str, Any]:
         "xpu_available": xpu_available,
         "mps_available": mps_available,
         "device_count": device_count,
+        "cuda_error": "; ".join(
+            error for error in probe_errors
+            if error.startswith("cuda:") or error.startswith("cuda device_count:")
+        ) or None,
         "probe_errors": probe_errors,
     }
 
