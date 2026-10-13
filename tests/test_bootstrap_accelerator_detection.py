@@ -79,3 +79,12 @@ def test_runtime_dependency_inventory_comes_from_pyproject_metadata():
     assert "fastapi" in names
     assert "faiss-cpu" in names
     assert "torch" not in names
+
+def test_runtime_recommendation_keeps_verified_amd_rocm():
+    profile = bootstrap.HardwareProfile(
+        gpu_name="AMD Radeon Graphics",
+        gpu_vendor="amd",
+    )
+    runtime = {"installed": True, "importable": True, "cuda_available": True, "hip_available": True}
+
+    assert bootstrap.recommended_torch_channel(profile, runtime) == "rocm (usable)"
