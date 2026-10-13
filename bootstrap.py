@@ -8,6 +8,7 @@ local llama.cpp toolchain. It never depends on the caller's cwd.
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import importlib.metadata
 import json
@@ -58,6 +59,7 @@ DISTRIBUTION_IMPORTS = {
     "pyopenssl": "OpenSSL",
     "sentence-transformers": "sentence_transformers",
     "faiss-cpu": "faiss",
+    "psutil": "psutil",
 }
 REQUIRED = (
     "yaml",
@@ -394,6 +396,67 @@ def _requirement_satisfied(requirement_text: str, installed_version: str) -> boo
     )
 
 
+def _declared_optional_runtime_distributions() -> list[str]:
+    """Read optional dependency groups, which may satisfy optional source imports."""
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    groups = metadata.get("project", {}).get("optional-dependencies", {})
+    if not isinstance(groups, dict):
+        raise ValueError("project.optional-dependencies must be a table")
+    names: list[str] = []
+    for group, requirements in groups.items():
+        if not isinstance(requirements, list) or not all(isinstance(item, str) for item in requirements):
+            raise ValueError(f"optional dependency group {group!r} must be a list of requirement strings")
+        for requirement in requirements:
+            match = re.match(r"([A-Za-z0-9_.-]+)", requirement)
+            if match:
+                names.append(match.group(1))
+    return names
+
+
+def _source_import_dependency_issues(declared_names: set[str]) -> list[str]:
+    """Audit static source imports against stdlib, local modules, and declared distributions."""
+    ignored_parts = {".git", ".venv", "venv", ".runtime", "__pycache__", "build", "dist", "tests"}
+    local_roots = {path.stem for path in ROOT.glob("*.py")}
+    local_roots.update(path.name for path in ROOT.iterdir() if path.is_dir())
+    imports: set[str] = set()
+    issues: list[str] = []
+    for path in ROOT.rglob("*.py"):
+        relative = path.relative_to(ROOT)
+        if any(part in ignored_parts for part in relative.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(relative))
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            issues.append(f"source import audit could not parse {relative}: {type(exc).__name__}: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imports.add(node.module.split(".")[0])
+
+    normalize = lambda value: re.sub(r"[-_.]+", "-", value).lower()
+    declared = {normalize(name) for name in declared_names}
+    reverse = {import_name.split(".")[0]: normalize(distribution) for distribution, import_name in DISTRIBUTION_IMPORTS.items()}
+    reverse["torch"] = "torch"  # Torch is intentionally installed from requirements-torch.txt.
+    try:
+        installed_mapping = importlib.metadata.packages_distributions()
+    except Exception:
+        installed_mapping = {}
+    for module in sorted(imports):
+        if module in sys.stdlib_module_names or module in local_roots or module == "__future__":
+            continue
+        distribution = reverse.get(module)
+        if distribution is None:
+            candidates = installed_mapping.get(module, [])
+            distribution = normalize(candidates[0]) if candidates else None
+        if distribution is None:
+            issues.append(f"unmapped third-party source import: {module}")
+        elif distribution != "torch" and distribution not in declared:
+            issues.append(f"source import {module} maps to undeclared distribution {distribution}")
+    return issues
+
+
 def _declared_runtime_distributions() -> list[str]:
     """Read the runtime dependency authority instead of maintaining a second list."""
     names = []
@@ -490,6 +553,16 @@ def doctor() -> int:
                 failures.append(f"runtime distribution version incompatible: {requirement} (installed {version})")
         print(f"distribution {distribution}: {state}")
     declared_names = {item.lower().replace("_", "-") for item in distributions}
+    try:
+        declared_names.update(item.lower().replace("_", "-") for item in _declared_optional_runtime_distributions())
+        source_issues = _source_import_dependency_issues(declared_names)
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
+        source_issues = [f"source dependency audit failed: {type(exc).__name__}: {exc}"]
+    for issue in source_issues:
+        print(f"source dependency audit: FAIL ({issue})")
+        failures.append(issue)
+    if not source_issues:
+        print("source dependency audit: OK (all static third-party imports are mapped to declared dependencies)")
     for distribution, name in DISTRIBUTION_IMPORTS.items():
         if distribution not in declared_names:
             # The distribution check above already reports this missing dependency.
