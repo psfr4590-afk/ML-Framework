@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import bootstrap
+
+
+def test_hardware_profile_recognizes_nvidia_from_adapter_name():
+    profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650")
+
+    assert profile.nvidia_gpu_detected
+    assert profile.gpu_detected
+
+
+def test_hardware_profile_recognizes_amd_and_intel_adapters():
+    amd = bootstrap.HardwareProfile(
+        gpu_name="AMD Radeon Graphics",
+        gpu_vendor=bootstrap._gpu_vendor("AMD Radeon Graphics"),
+    )
+    intel = bootstrap.HardwareProfile(
+        gpu_name="Intel Arc Graphics",
+        gpu_vendor=bootstrap._gpu_vendor("Intel Arc Graphics"),
+    )
+
+    assert amd.gpu_vendor == "amd"
+    assert intel.gpu_vendor == "intel"
+    assert not amd.nvidia_gpu_detected
+    assert not intel.nvidia_gpu_detected
+
+
+def test_runtime_recommendation_uses_verified_cuda_not_gpu_presence_alone():
+    profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650")
+    runtime = {"installed": True, "importable": True, "cuda_available": False}
+
+    assert bootstrap.recommended_torch_channel(profile, runtime).startswith(
+        "manual review required"
+    )
+
+
+def test_runtime_recommendation_allows_verified_cuda():
+    profile = bootstrap.HardwareProfile(gpu_name="NVIDIA GeForce GTX 1650")
+    runtime = {"installed": True, "importable": True, "cuda_available": True}
+
+    assert bootstrap.recommended_torch_channel(profile, runtime) == "cuda (usable)"
+
+
+def test_runtime_recommendation_keeps_verified_intel_xpu():
+    profile = bootstrap.HardwareProfile(
+        gpu_name="Intel Arc Graphics",
+        gpu_vendor="intel",
+    )
+    runtime = {"installed": True, "importable": True, "xpu_available": True}
+
+    assert bootstrap.recommended_torch_channel(profile, runtime) == "xpu (usable)"
+
+
+def test_runtime_recommendation_does_not_silently_fall_back_for_amd_gpu():
+    profile = bootstrap.HardwareProfile(
+        gpu_name="AMD Radeon Graphics",
+        gpu_vendor="amd",
+    )
+    runtime = {"installed": False, "importable": False}
+
+    assert bootstrap.recommended_torch_channel(profile, runtime).startswith(
+        "manual review required"
+    )
+
+
+def test_runtime_recommendation_uses_cpu_when_no_gpu_is_detected():
+    profile = bootstrap.HardwareProfile()
+    runtime = {"installed": False, "importable": False}
+
+    assert bootstrap.recommended_torch_channel(profile, runtime) == "cpu"
+
+
+def test_runtime_dependency_inventory_comes_from_pyproject_metadata():
+    names = {name.lower() for name in bootstrap._declared_runtime_distributions()}
+
+    assert "pyyaml" in names
+    assert "requests" in names
+    assert "fastapi" in names
+    assert "faiss-cpu" in names
+    assert "torch" not in names
