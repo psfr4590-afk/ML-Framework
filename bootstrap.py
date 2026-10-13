@@ -263,6 +263,18 @@ def torch_runtime_status() -> dict[str, Any]:
         "device_count": device_count,
     }
 
+def recommended_torch_channel(
+    profile: HardwareProfile, runtime: dict[str, Any]
+) -> str:
+    """Recommend a channel using detected hardware and actual Torch runtime state."""
+    if not runtime.get("importable", False):
+        return "undetermined (Torch runtime unavailable)"
+    if profile.nvidia_gpu_detected and runtime.get("cuda_available", False):
+        return "cuda"
+    if profile.nvidia_gpu_detected:
+        return "cpu (CUDA unavailable)"
+    return "cpu"
+
 def _print_hardware(profile: HardwareProfile) -> None:
     print("Hardware:")
     print(f"  RAM GiB: {profile.ram_gib if profile.ram_gib is not None else 'UNKNOWN'}")
@@ -308,7 +320,7 @@ def doctor() -> int:
 
     profile = detect_hardware()
     _print_hardware(profile)
-    print(f"Torch channel recommendation: {'cuda' if profile.nvidia_gpu_detected else 'cpu'}")
+    print(f"Torch channel recommendation: {recommended_torch_channel(profile, runtime)}")
     if runtime["importable"]:
         print("Torch runtime: OK")
         print(f"  Torch version: {runtime.get('version') or 'UNKNOWN'}")
