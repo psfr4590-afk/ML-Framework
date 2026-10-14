@@ -68,6 +68,7 @@ def test_hardware_profile_json_is_stable() -> None:
         "gpu_vram_gib": 4.0,
         "gpu_vendor": "nvidia",
         "nvidia_smi_available": True,
+        "nvidia_smi_query_succeeded": False,
     }
 
 
