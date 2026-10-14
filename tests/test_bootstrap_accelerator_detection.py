@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import bootstrap
 
 
@@ -13,7 +15,7 @@ def test_hardware_profile_recognizes_nvidia_from_adapter_name():
 def test_hardware_profile_recognizes_nvidia_from_nvidia_smi_when_name_omits_vendor():
     profile = bootstrap.HardwareProfile(
         gpu_name="Tesla T4",
-        nvidia_smi_available=True,
+        nvidia_smi_query_succeeded=True,
     )
 
     assert profile.nvidia_gpu_detected
@@ -370,3 +372,143 @@ def test_doctor_reports_cuda_probe_error_and_keeps_cpu_fallback(monkeypatch, cap
     assert "Accelerator probe error: cuda: OSError: CUDA runtime probe blocked" in output
     assert "Verified runtime recommendation: cpu (CUDA unavailable)" in output
     assert "Bootstrap doctor: PASS" in output
+
+
+def test_nvidia_smi_executable_without_successful_query_does_not_prove_nvidia_gpu():
+    profile = bootstrap.HardwareProfile(
+        gpu_name="AMD Radeon Graphics",
+        gpu_vendor="amd",
+        nvidia_smi_available=True,
+        nvidia_smi_query_succeeded=False,
+    )
+
+    assert profile.nvidia_smi_available
+    assert not profile.nvidia_gpu_detected
+    assert profile.gpu_vendor == "amd"
+
+
+def test_nvidia_smi_query_success_identifies_tesla_t4_without_vendor_token(monkeypatch):
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(bootstrap, "_run_command", lambda *args, **kwargs: "Tesla T4, 16384")
+
+    name, vram, executable_available, query_succeeded = bootstrap._nvidia_gpu()
+    profile = bootstrap.HardwareProfile(
+        gpu_name=name,
+        gpu_vram_gib=vram,
+        nvidia_smi_available=executable_available,
+        nvidia_smi_query_succeeded=query_succeeded,
+    )
+
+    assert profile.gpu_name == "Tesla T4"
+    assert profile.gpu_vram_gib == 16.0
+    assert profile.nvidia_smi_available
+    assert profile.nvidia_smi_query_succeeded
+    assert profile.nvidia_gpu_detected
+
+
+@pytest.mark.parametrize(
+    ("name", "vendor", "runtime", "expected"),
+    [
+        ("NVIDIA Tesla T4", "nvidia", {"importable": True, "cuda_available": True}, "cuda (usable)"),
+        ("AMD Radeon RX", "amd", {"importable": True, "cuda_available": True, "hip_available": True}, "rocm (usable)"),
+        ("Intel Arc", "intel", {"importable": True, "xpu_available": True}, "xpu (usable)"),
+        ("Apple M2", "apple", {"importable": True, "mps_available": True}, "mps (usable)"),
+    ],
+)
+def test_runtime_recommendation_supports_each_declared_accelerator_backend(name, vendor, runtime, expected):
+    profile = bootstrap.HardwareProfile(gpu_name=name, gpu_vendor=vendor)
+
+    assert bootstrap.recommended_torch_channel(profile, runtime) == expected
+
+
+def test_accelerator_tensor_failure_is_reported_and_cpu_fallback_is_verified(monkeypatch):
+    class FakeTensor:
+        def __init__(self, device):
+            self.device = device
+
+        def __mul__(self, value):
+            if self.device == "cuda":
+                raise RuntimeError("simulated driver execution failure")
+            return self
+
+        def sum(self):
+            return self
+
+        def item(self):
+            return 6.0
+
+    class FakeCuda:
+        @staticmethod
+        def synchronize():
+            raise RuntimeError("simulated driver synchronization failure")
+
+    class FakeTorch:
+        float32 = "float32"
+        cuda = FakeCuda()
+
+        @staticmethod
+        def device(name):
+            return name
+
+        @staticmethod
+        def tensor(values, dtype, device):
+            return FakeTensor(device)
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+
+    passed, detail = bootstrap._torch_tensor_smoke(
+        {"cuda_available": True, "xpu_available": False, "mps_available": False}
+    )
+
+    assert passed
+    assert "cuda tensor operation failed" in detail
+    assert "verified CPU fallback PASS" in detail
+    assert "cpu tensor arithmetic PASS" in detail
+
+
+@pytest.mark.parametrize(
+    ("device_name", "runtime"),
+    [
+        ("cuda", {"cuda_available": True}),
+        ("xpu", {"xpu_available": True}),
+        ("mps", {"mps_available": True}),
+        ("cpu", {}),
+    ],
+)
+def test_tensor_smoke_runs_on_selected_backend(device_name, runtime, monkeypatch):
+    class FakeTensor:
+        def __mul__(self, value):
+            return self
+
+        def sum(self):
+            return self
+
+        def item(self):
+            return 6.0
+
+    class FakeBackend:
+        @staticmethod
+        def synchronize():
+            return None
+
+    class FakeTorch:
+        float32 = "float32"
+        cuda = FakeBackend()
+        xpu = FakeBackend()
+        mps = FakeBackend()
+
+        @staticmethod
+        def device(name):
+            return name
+
+        @staticmethod
+        def tensor(values, dtype, device):
+            assert device == device_name
+            return FakeTensor()
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+
+    passed, detail = bootstrap._torch_tensor_smoke(runtime)
+
+    assert passed
+    assert f"{device_name} tensor arithmetic PASS" in detail
