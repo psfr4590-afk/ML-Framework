@@ -92,10 +92,17 @@ class HardwareProfile:
     gpu_vram_gib: float | None = None
     gpu_vendor: str | None = None
     nvidia_smi_available: bool = False
+    nvidia_smi_query_succeeded: bool = False
 
     @property
     def nvidia_gpu_detected(self) -> bool:
-        return (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
+        # Executable presence is not proof of a GPU. A successful query is, even when
+        # NVIDIA's marketing name (for example, Tesla T4) omits the vendor token.
+        return (
+            self.nvidia_smi_query_succeeded
+            or self.gpu_vendor == "nvidia"
+            or _gpu_vendor(self.gpu_name) == "nvidia"
+        )
 
     @property
     def gpu_detected(self) -> bool:
@@ -103,7 +110,14 @@ class HardwareProfile:
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["gpu_vendor"] = self.gpu_vendor or _gpu_vendor(self.gpu_name)
+        inferred_vendor = _gpu_vendor(self.gpu_name)
+        data["gpu_vendor"] = (
+            "nvidia"
+            if self.nvidia_smi_query_succeeded
+            else inferred_vendor
+            if inferred_vendor not in (None, "unknown")
+            else self.gpu_vendor or inferred_vendor
+        )
         return data
 
 
@@ -198,10 +212,10 @@ def _windows_cpu() -> tuple[str | None, int | None, int | None]:
         return platform.processor() or None, None, os.cpu_count()
 
 
-def _nvidia_gpu() -> tuple[str | None, float | None, bool]:
+def _nvidia_gpu() -> tuple[str | None, float | None, bool, bool]:
     executable = shutil.which("nvidia-smi")
     if not executable:
-        return None, None, False
+        return None, None, False, False
     output = _run_command(
         [
             executable,
@@ -210,17 +224,17 @@ def _nvidia_gpu() -> tuple[str | None, float | None, bool]:
         ]
     )
     if not output:
-        return None, None, True
+        return None, None, True, False
     first = output.splitlines()[0].strip()
     parts = [part.strip() for part in first.split(",", 1)]
     if not parts or not parts[0]:
-        return None, None, True
+        return None, None, True, False
     vram = None
     if len(parts) == 2:
         match = re.search(r"([0-9]+(?:\.[0-9]+)?)", parts[1])
         if match:
             vram = round(float(match.group(1)) / 1024, 2)
-    return parts[0], vram, True
+    return parts[0], vram, True, True
 
 
 def _generic_gpu() -> str | None:
@@ -267,7 +281,7 @@ def _gpu_vendor(name: str | None) -> str | None:
 def detect_hardware() -> HardwareProfile:
     """Collect host facts without importing optional ML dependencies."""
     cpu_name, cpu_cores, cpu_threads = _windows_cpu()
-    gpu_name, gpu_vram_gib, nvidia_smi_available = _nvidia_gpu()
+    gpu_name, gpu_vram_gib, nvidia_smi_available, nvidia_smi_query_succeeded = _nvidia_gpu()
     if not gpu_name:
         gpu_name = _generic_gpu()
     return HardwareProfile(
@@ -277,8 +291,9 @@ def detect_hardware() -> HardwareProfile:
         cpu_threads=cpu_threads,
         gpu_name=gpu_name,
         gpu_vram_gib=gpu_vram_gib,
-        gpu_vendor=_gpu_vendor(gpu_name),
+        gpu_vendor="nvidia" if nvidia_smi_query_succeeded else _gpu_vendor(gpu_name),
         nvidia_smi_available=nvidia_smi_available,
+        nvidia_smi_query_succeeded=nvidia_smi_query_succeeded,
     )
 
 
@@ -517,30 +532,69 @@ def _print_hardware(profile: HardwareProfile) -> None:
     print(f"  GPU: {profile.gpu_name or 'NONE DETECTED'}")
     print(f"  GPU vendor: {profile.gpu_vendor or 'UNKNOWN'}")
     print(f"  GPU VRAM GiB: {profile.gpu_vram_gib if profile.gpu_vram_gib is not None else 'UNKNOWN'}")
-    print(f"  nvidia-smi: {'OK' if profile.nvidia_smi_available else 'MISSING / NOT APPLICABLE'}")
+    if not profile.nvidia_smi_available:
+        nvidia_smi_state = "MISSING / NOT APPLICABLE"
+    elif profile.nvidia_smi_query_succeeded:
+        nvidia_smi_state = "QUERY OK"
+    else:
+        nvidia_smi_state = "PRESENT, QUERY FAILED"
+    print(f"  nvidia-smi: {nvidia_smi_state}")
 
 
 def _torch_tensor_smoke(runtime: dict[str, Any]) -> tuple[bool, str]:
-    """Run a tiny arithmetic operation on the best available Torch device."""
+    """Probe the selected Torch accelerator and verify CPU fallback if it fails."""
     try:
         torch = importlib.import_module("torch")
-        if runtime.get("cuda_available"):
-            device_name = "cuda"  # PyTorch uses this device API for ROCm too.
-        elif runtime.get("xpu_available"):
-            device_name = "xpu"
-        elif runtime.get("mps_available"):
-            device_name = "mps"
-        else:
-            device_name = "cpu"
-
-        device = torch.device(device_name)
-        values = torch.tensor([1.0, 2.0], dtype=torch.float32, device=device)
-        actual = (values * 2).sum().item()
-        if actual != 6.0:
-            return False, f"unexpected arithmetic result {actual!r} on {device}"
-        return True, f"{device} tensor arithmetic PASS"
     except Exception as exc:
-        return False, f"tensor operation failed: {type(exc).__name__}: {exc}"
+        return False, f"Torch import failed: {type(exc).__name__}: {exc}"
+
+    accelerator_candidates = [
+        name
+        for name, available in (
+            ("cuda", runtime.get("cuda_available")),
+            ("xpu", runtime.get("xpu_available")),
+            ("mps", runtime.get("mps_available")),
+        )
+        if available
+    ]
+
+    def run_smoke(name: str) -> tuple[bool, str]:
+        try:
+            device = torch.device(name)
+            values = torch.tensor([1.0, 2.0], dtype=torch.float32, device=device)
+            actual = (values * 2).sum().item()
+            if actual != 6.0:
+                return False, f"unexpected arithmetic result {actual!r} on {device}"
+            # Force asynchronous accelerator errors to surface before declaring success.
+            if name == "cuda":
+                torch.cuda.synchronize()
+            elif name == "xpu":
+                torch.xpu.synchronize()
+            elif name == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+                torch.mps.synchronize()
+            return True, f"{device} tensor arithmetic PASS"
+        except Exception as exc:
+            return False, f"{name} tensor operation failed: {type(exc).__name__}: {exc}"
+
+    failed_probes: list[str] = []
+    for device_name in accelerator_candidates:
+        passed, detail = run_smoke(device_name)
+        if passed:
+            if failed_probes:
+                return True, (
+                    f"{'; '.join(failed_probes)}; verified {device_name} fallback PASS "
+                    f"({detail})"
+                )
+            return True, detail
+        failed_probes.append(detail)
+
+    if not failed_probes:
+        return run_smoke("cpu")
+
+    cpu_passed, cpu_detail = run_smoke("cpu")
+    if cpu_passed:
+        return True, f"{'; '.join(failed_probes)}; verified CPU fallback PASS ({cpu_detail})"
+    return False, f"{'; '.join(failed_probes)}; CPU fallback also failed ({cpu_detail})"
 
 
 def doctor() -> int:
@@ -636,8 +690,8 @@ def doctor() -> int:
         print(f"  Torch import error: {runtime['error']}")
     for error in runtime.get("probe_errors", []):
         print(f"  Accelerator probe error: {error}")
-    recommendation = recommended_torch_channel(profile, runtime)
-    print(f"Verified runtime recommendation: {recommendation}")
+    smoke_ok = False
+    smoke_detail = "skipped because Torch is not importable"
     if runtime.get("importable"):
         smoke_ok, smoke_detail = _torch_tensor_smoke(runtime)
         print(f"Torch tensor smoke: {'PASS' if smoke_ok else 'FAIL'} ({smoke_detail})")
@@ -645,6 +699,18 @@ def doctor() -> int:
             failures.append(f"Torch tensor smoke failed: {smoke_detail}")
     else:
         print("Torch tensor smoke: SKIPPED (Torch import unavailable; see import diagnostics)")
+    recommendation = recommended_torch_channel(profile, runtime)
+    smoke_device_match = re.search(r"\b(cuda|xpu|mps|cpu) tensor arithmetic PASS", smoke_detail)
+    if smoke_ok and smoke_device_match:
+        smoke_device = smoke_device_match.group(1)
+        if smoke_device == "cpu" and recommendation == "cpu (CUDA unavailable)":
+            # Preserve the reason for CPU fallback when CUDA was never available.
+            pass
+        elif smoke_device == "cuda" and runtime.get("hip_available"):
+            recommendation = "rocm (tensor smoke verified)"
+        else:
+            recommendation = f"{smoke_device} (tensor smoke verified)"
+    print(f"Verified runtime recommendation: {recommendation}")
     if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
         print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
     if profile.gpu_detected and not (
