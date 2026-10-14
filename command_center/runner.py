@@ -129,6 +129,53 @@ def reconcile_orphaned_runs() -> None:
 
 
 def _run(did, stage):
+    """Run a stage and recover cleanly from otherwise-unhandled worker errors."""
+    try:
+        _run_inner(did, stage)
+    except Exception as exc:
+        # Cleanup must still happen if setup fails before _run_inner reaches
+        # its subprocess try/finally. Never log exception text here.
+        with LOCK:
+            RUNS.pop(did, None)
+            CANCEL_REQUESTED.discard(did)
+            try:
+                _clear_state(did)
+            except Exception:
+                pass
+
+        # State persistence is best-effort: the store itself may be failing.
+        # Never overwrite a terminal stage result if a later refresh/cleanup
+        # operation raised after the stage had already finished.
+        try:
+            current = store.get(did)
+            if current:
+                stages = dict(current.get("stages") or {})
+                existing_stage = stages.get(stage)
+                already_terminal = existing_stage in {"complete", "cancelled", "failed"}
+
+                if not already_terminal and stage in VALID_STAGES:
+                    stages[stage] = "failed"
+
+                if not already_terminal:
+                    status = (
+                        "CANCELLED"
+                        if existing_stage == "cancelled"
+                        else "ERROR"
+                    )
+                    store.update(did, stages=stages, status=status)
+                elif stages != dict(current.get("stages") or {}):
+                    store.update(did, stages=stages)
+                store.event(
+                    did,
+                    "stage.worker_error" if already_terminal else "stage.setup_failed",
+                    {"stage": stage, "error_type": type(exc).__name__},
+                )
+        except Exception:
+            # Preserve the original worker failure and never leak its message.
+            pass
+
+
+def _run_inner(did, stage):
     d = store.get(did)
     stages = dict(d["stages"])
     stages[stage] = "running"
