@@ -703,7 +703,10 @@ def doctor() -> int:
     smoke_device_match = re.search(r"\\b(cuda|xpu|mps|cpu) tensor arithmetic PASS", smoke_detail)
     if smoke_ok and smoke_device_match:
         smoke_device = smoke_device_match.group(1)
-        if smoke_device == "cuda" and runtime.get("hip_available"):
+        if smoke_device == "cpu" and recommendation == "cpu (CUDA unavailable)":
+            # Preserve the reason for CPU fallback when CUDA was never available.
+            pass
+        elif smoke_device == "cuda" and runtime.get("hip_available"):
             recommendation = "rocm (tensor smoke verified)"
         else:
             recommendation = f"{smoke_device} (tensor smoke verified)"
