@@ -700,13 +700,13 @@ def doctor() -> int:
     else:
         print("Torch tensor smoke: SKIPPED (Torch import unavailable; see import diagnostics)")
     recommendation = recommended_torch_channel(profile, runtime)
-    fallback_match = re.search(r"verified (cuda|xpu|mps|CPU) fallback PASS", smoke_detail)
-    if fallback_match:
-        fallback_device = fallback_match.group(1).lower()
-        if fallback_device == "cpu":
-            recommendation = "cpu (accelerator tensor smoke failed; CPU fallback verified)"
+    smoke_device_match = re.search(r"\\b(cuda|xpu|mps|cpu) tensor arithmetic PASS", smoke_detail)
+    if smoke_ok and smoke_device_match:
+        smoke_device = smoke_device_match.group(1)
+        if smoke_device == "cuda" and runtime.get("hip_available"):
+            recommendation = "rocm (tensor smoke verified)"
         else:
-            recommendation = f"{fallback_device} (fallback backend tensor smoke verified)"
+            recommendation = f"{smoke_device} (tensor smoke verified)"
     print(f"Verified runtime recommendation: {recommendation}")
     if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
         print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
