@@ -374,15 +374,17 @@ def test_doctor_reports_cuda_probe_error_and_keeps_cpu_fallback(monkeypatch, cap
     assert "Bootstrap doctor: PASS" in output
 
 
-def test_nvidia_smi_executable_without_successful_query_does_not_prove_nvidia_gpu():
-    profile = bootstrap.HardwareProfile(
-        gpu_name="AMD Radeon Graphics",
-        gpu_vendor="amd",
-        nvidia_smi_available=True,
-        nvidia_smi_query_succeeded=False,
-    )
+def test_nvidia_smi_executable_without_successful_query_does_not_prove_nvidia_gpu(monkeypatch):
+    monkeypatch.setattr(bootstrap, "_windows_cpu", lambda: ("test CPU", 4, 8))
+    monkeypatch.setattr(bootstrap, "_ram_gib", lambda: 8.0)
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(bootstrap, "_run_command", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bootstrap, "_generic_gpu", lambda: "AMD Radeon Graphics")
+
+    profile = bootstrap.detect_hardware()
 
     assert profile.nvidia_smi_available
+    assert not profile.nvidia_smi_query_succeeded
     assert not profile.nvidia_gpu_detected
     assert profile.gpu_vendor == "amd"
 
