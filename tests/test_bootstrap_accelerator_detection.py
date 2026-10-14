@@ -430,6 +430,53 @@ def test_runtime_recommendation_supports_each_declared_accelerator_backend(name,
     assert bootstrap.recommended_torch_channel(profile, runtime) == expected
 
 
+def test_smoke_tries_an_alternate_accelerator_before_cpu(monkeypatch):
+    class FakeTensor:
+        def __init__(self, device):
+            self.device = device
+
+        def __mul__(self, value):
+            if self.device == "cuda":
+                raise RuntimeError("CUDA execution failed")
+            return self
+
+        def sum(self):
+            return self
+
+        def item(self):
+            return 6.0
+
+    class FakeBackend:
+        @staticmethod
+        def synchronize():
+            return None
+
+    class FakeTorch:
+        float32 = "float32"
+        cuda = FakeBackend()
+        xpu = FakeBackend()
+        mps = FakeBackend()
+
+        @staticmethod
+        def device(name):
+            return name
+
+        @staticmethod
+        def tensor(values, dtype, device):
+            return FakeTensor(device)
+
+    monkeypatch.setattr(bootstrap.importlib, "import_module", lambda name: FakeTorch())
+
+    passed, detail = bootstrap._torch_tensor_smoke(
+        {"cuda_available": True, "xpu_available": True, "mps_available": False}
+    )
+
+    assert passed
+    assert "cuda tensor operation failed" in detail
+    assert "verified xpu fallback PASS" in detail
+    assert "CPU fallback" not in detail
+
+
 def test_accelerator_tensor_failure_is_reported_and_cpu_fallback_is_verified(monkeypatch):
     class FakeTensor:
         def __init__(self, device):
