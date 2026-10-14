@@ -187,3 +187,93 @@ def test_embedding_stream_with_faiss(monkeypatch):
     result = list(deduper.stream(docs, buffer_size=1))
 
     assert [item.doc_id for item in result] == ["2", "3"]
+
+
+def test_run_rejects_mismatched_similarity_pairs(monkeypatch):
+    monkeypatch.setattr(mod, "ST_AVAILABLE", True)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
+
+    deduper = SemanticDeduplicator(
+        {"mode": "embedding", "similarity_threshold": 0.8}
+    )
+    monkeypatch.setattr(deduper, "_load_model", lambda: None)
+    monkeypatch.setattr(
+        deduper,
+        "_embed",
+        lambda texts: np.ones((len(texts), 2), dtype=np.float32),
+    )
+
+    class MismatchedSearchResult:
+        def search(self, query, k):
+            return (
+                np.asarray([[0.9]], dtype=np.float32),
+                np.asarray([[0, 1]], dtype=np.int64),
+            )
+
+    monkeypatch.setattr(
+        deduper,
+        "_build_index",
+        lambda matrix: MismatchedSearchResult(),
+    )
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument \d+ is (?:shorter|longer) than argument \d+"):
+        deduper.run([doc(1, "alpha"), doc(2, "beta")])
+
+
+def test_stream_rejects_mismatched_embedding_count(monkeypatch):
+    monkeypatch.setattr(mod, "ST_AVAILABLE", True)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
+
+    deduper = SemanticDeduplicator(
+        {"mode": "embedding", "similarity_threshold": 0.8}
+    )
+    monkeypatch.setattr(deduper, "_load_model", lambda: None)
+    monkeypatch.setattr(
+        deduper,
+        "_embed",
+        lambda texts: np.ones((1, 2), dtype=np.float32),
+    )
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument \d+ is (?:shorter|longer) than argument \d+"):
+        list(deduper.stream(
+            iter([doc(1, "alpha"), doc(2, "beta")]),
+            buffer_size=2,
+        ))
+
+
+def test_stream_rejects_mismatched_similarity_pairs(monkeypatch):
+    monkeypatch.setattr(mod, "ST_AVAILABLE", True)
+    monkeypatch.setattr(mod, "FAISS_AVAILABLE", True)
+
+    deduper = SemanticDeduplicator(
+        {"mode": "embedding", "similarity_threshold": 0.8}
+    )
+    vectors = {
+        "alpha": np.asarray([1.0, 0.0], dtype=np.float32),
+        "beta": np.asarray([0.0, 1.0], dtype=np.float32),
+    }
+    monkeypatch.setattr(deduper, "_load_model", lambda: None)
+    monkeypatch.setattr(
+        deduper,
+        "_embed",
+        lambda texts: np.asarray([vectors[t] for t in texts], dtype=np.float32),
+    )
+
+    class MismatchedSearchResult:
+        def search(self, query, k):
+            return (
+                np.asarray([[0.1]], dtype=np.float32),
+                np.asarray([[0, 1]], dtype=np.int64),
+            )
+
+    monkeypatch.setattr(
+        deduper,
+        "_build_index",
+        lambda matrix: MismatchedSearchResult(),
+    )
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument \d+ is (?:shorter|longer) than argument \d+"):
+        list(deduper.stream(
+            iter([doc(1, "alpha"), doc(2, "beta")]),
+            buffer_size=2,
+        ))
