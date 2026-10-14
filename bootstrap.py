@@ -92,11 +92,13 @@ class HardwareProfile:
     gpu_vram_gib: float | None = None
     gpu_vendor: str | None = None
     nvidia_smi_available: bool = False
+    nvidia_smi_query_succeeded: bool = False
 
     @property
     def nvidia_gpu_detected(self) -> bool:
-        # nvidia-smi is an NVIDIA-specific probe; adapter marketing names may omit the vendor.
-        return self.nvidia_smi_available or (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
+        # Executable presence is not proof of a GPU. A successful query is, even when
+        # NVIDIA's marketing name (for example, Tesla T4) omits the vendor token.
+        return self.nvidia_smi_query_succeeded or (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
 
     @property
     def gpu_detected(self) -> bool:
@@ -199,10 +201,10 @@ def _windows_cpu() -> tuple[str | None, int | None, int | None]:
         return platform.processor() or None, None, os.cpu_count()
 
 
-def _nvidia_gpu() -> tuple[str | None, float | None, bool]:
+def _nvidia_gpu() -> tuple[str | None, float | None, bool, bool]:
     executable = shutil.which("nvidia-smi")
     if not executable:
-        return None, None, False
+        return None, None, False, False
     output = _run_command(
         [
             executable,
@@ -211,17 +213,17 @@ def _nvidia_gpu() -> tuple[str | None, float | None, bool]:
         ]
     )
     if not output:
-        return None, None, True
+        return None, None, True, False
     first = output.splitlines()[0].strip()
     parts = [part.strip() for part in first.split(",", 1)]
     if not parts or not parts[0]:
-        return None, None, True
+        return None, None, True, False
     vram = None
     if len(parts) == 2:
         match = re.search(r"([0-9]+(?:\.[0-9]+)?)", parts[1])
         if match:
             vram = round(float(match.group(1)) / 1024, 2)
-    return parts[0], vram, True
+    return parts[0], vram, True, True
 
 
 def _generic_gpu() -> str | None:
@@ -268,7 +270,7 @@ def _gpu_vendor(name: str | None) -> str | None:
 def detect_hardware() -> HardwareProfile:
     """Collect host facts without importing optional ML dependencies."""
     cpu_name, cpu_cores, cpu_threads = _windows_cpu()
-    gpu_name, gpu_vram_gib, nvidia_smi_available = _nvidia_gpu()
+    gpu_name, gpu_vram_gib, nvidia_smi_available, nvidia_smi_query_succeeded = _nvidia_gpu()
     if not gpu_name:
         gpu_name = _generic_gpu()
     return HardwareProfile(
@@ -280,6 +282,7 @@ def detect_hardware() -> HardwareProfile:
         gpu_vram_gib=gpu_vram_gib,
         gpu_vendor=_gpu_vendor(gpu_name),
         nvidia_smi_available=nvidia_smi_available,
+        nvidia_smi_query_succeeded=nvidia_smi_query_succeeded,
     )
 
 
@@ -518,7 +521,13 @@ def _print_hardware(profile: HardwareProfile) -> None:
     print(f"  GPU: {profile.gpu_name or 'NONE DETECTED'}")
     print(f"  GPU vendor: {profile.gpu_vendor or 'UNKNOWN'}")
     print(f"  GPU VRAM GiB: {profile.gpu_vram_gib if profile.gpu_vram_gib is not None else 'UNKNOWN'}")
-    print(f"  nvidia-smi: {'OK' if profile.nvidia_smi_available else 'MISSING / NOT APPLICABLE'}")
+    if not profile.nvidia_smi_available:
+        nvidia_smi_state = "MISSING / NOT APPLICABLE"
+    elif profile.nvidia_smi_query_succeeded:
+        nvidia_smi_state = "QUERY OK"
+    else:
+        nvidia_smi_state = "PRESENT, QUERY FAILED"
+    print(f"  nvidia-smi: {nvidia_smi_state}")
 
 
 def _torch_tensor_smoke(runtime: dict[str, Any]) -> tuple[bool, str]:
