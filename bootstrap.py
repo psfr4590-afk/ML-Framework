@@ -700,7 +700,7 @@ def doctor() -> int:
     else:
         print("Torch tensor smoke: SKIPPED (Torch import unavailable; see import diagnostics)")
     recommendation = recommended_torch_channel(profile, runtime)
-    smoke_device_match = re.search(r"\\b(cuda|xpu|mps|cpu) tensor arithmetic PASS", smoke_detail)
+    smoke_device_match = re.search(r"\b(cuda|xpu|mps|cpu) tensor arithmetic PASS", smoke_detail)
     if smoke_ok and smoke_device_match:
         smoke_device = smoke_device_match.group(1)
         if smoke_device == "cpu" and recommendation == "cpu (CUDA unavailable)":
