@@ -106,7 +106,11 @@ class HardwareProfile:
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["gpu_vendor"] = self.gpu_vendor or _gpu_vendor(self.gpu_name)
+        data["gpu_vendor"] = (
+            "nvidia"
+            if self.nvidia_smi_query_succeeded
+            else self.gpu_vendor or _gpu_vendor(self.gpu_name)
+        )
         return data
 
 
@@ -280,7 +284,7 @@ def detect_hardware() -> HardwareProfile:
         cpu_threads=cpu_threads,
         gpu_name=gpu_name,
         gpu_vram_gib=gpu_vram_gib,
-        gpu_vendor=_gpu_vendor(gpu_name),
+        gpu_vendor="nvidia" if nvidia_smi_query_succeeded else _gpu_vendor(gpu_name),
         nvidia_smi_available=nvidia_smi_available,
         nvidia_smi_query_succeeded=nvidia_smi_query_succeeded,
     )
