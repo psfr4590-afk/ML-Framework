@@ -110,10 +110,13 @@ class HardwareProfile:
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        inferred_vendor = _gpu_vendor(self.gpu_name)
         data["gpu_vendor"] = (
             "nvidia"
             if self.nvidia_smi_query_succeeded
-            else self.gpu_vendor or _gpu_vendor(self.gpu_name)
+            else inferred_vendor
+            if inferred_vendor not in (None, "unknown")
+            else self.gpu_vendor or inferred_vendor
         )
         return data
 
