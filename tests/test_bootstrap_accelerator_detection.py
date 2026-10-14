@@ -12,6 +12,15 @@ def test_hardware_profile_recognizes_nvidia_from_adapter_name():
     assert profile.gpu_detected
 
 
+def test_hardware_profile_recognizes_nvidia_from_adapter_name_even_if_vendor_is_unknown():
+    profile = bootstrap.HardwareProfile(
+        gpu_name="NVIDIA GeForce GTX 1650",
+        gpu_vendor="unknown",
+    )
+
+    assert profile.nvidia_gpu_detected
+
+
 def test_hardware_profile_recognizes_nvidia_from_nvidia_smi_when_name_omits_vendor():
     profile = bootstrap.HardwareProfile(
         gpu_name="Tesla T4",
