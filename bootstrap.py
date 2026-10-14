@@ -531,26 +531,47 @@ def _print_hardware(profile: HardwareProfile) -> None:
 
 
 def _torch_tensor_smoke(runtime: dict[str, Any]) -> tuple[bool, str]:
-    """Run a tiny arithmetic operation on the best available Torch device."""
+    """Probe the selected Torch accelerator and verify CPU fallback if it fails."""
     try:
         torch = importlib.import_module("torch")
-        if runtime.get("cuda_available"):
-            device_name = "cuda"  # PyTorch uses this device API for ROCm too.
-        elif runtime.get("xpu_available"):
-            device_name = "xpu"
-        elif runtime.get("mps_available"):
-            device_name = "mps"
-        else:
-            device_name = "cpu"
-
-        device = torch.device(device_name)
-        values = torch.tensor([1.0, 2.0], dtype=torch.float32, device=device)
-        actual = (values * 2).sum().item()
-        if actual != 6.0:
-            return False, f"unexpected arithmetic result {actual!r} on {device}"
-        return True, f"{device} tensor arithmetic PASS"
     except Exception as exc:
-        return False, f"tensor operation failed: {type(exc).__name__}: {exc}"
+        return False, f"Torch import failed: {type(exc).__name__}: {exc}"
+
+    if runtime.get("cuda_available"):
+        device_name = "cuda"  # PyTorch uses this device API for ROCm too.
+    elif runtime.get("xpu_available"):
+        device_name = "xpu"
+    elif runtime.get("mps_available"):
+        device_name = "mps"
+    else:
+        device_name = "cpu"
+
+    def run_smoke(name: str) -> tuple[bool, str]:
+        try:
+            device = torch.device(name)
+            values = torch.tensor([1.0, 2.0], dtype=torch.float32, device=device)
+            actual = (values * 2).sum().item()
+            if actual != 6.0:
+                return False, f"unexpected arithmetic result {actual!r} on {device}"
+            # Force asynchronous accelerator errors to surface before declaring success.
+            if name == "cuda":
+                torch.cuda.synchronize()
+            elif name == "xpu":
+                torch.xpu.synchronize()
+            elif name == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+                torch.mps.synchronize()
+            return True, f"{device} tensor arithmetic PASS"
+        except Exception as exc:
+            return False, f"{name} tensor operation failed: {type(exc).__name__}: {exc}"
+
+    passed, detail = run_smoke(device_name)
+    if passed or device_name == "cpu":
+        return passed, detail
+
+    cpu_passed, cpu_detail = run_smoke("cpu")
+    if cpu_passed:
+        return True, f"{detail}; verified CPU fallback PASS ({cpu_detail})"
+    return False, f"{detail}; CPU fallback also failed ({cpu_detail})"
 
 
 def doctor() -> int:
@@ -646,8 +667,8 @@ def doctor() -> int:
         print(f"  Torch import error: {runtime['error']}")
     for error in runtime.get("probe_errors", []):
         print(f"  Accelerator probe error: {error}")
-    recommendation = recommended_torch_channel(profile, runtime)
-    print(f"Verified runtime recommendation: {recommendation}")
+    smoke_ok = False
+    smoke_detail = "skipped because Torch is not importable"
     if runtime.get("importable"):
         smoke_ok, smoke_detail = _torch_tensor_smoke(runtime)
         print(f"Torch tensor smoke: {'PASS' if smoke_ok else 'FAIL'} ({smoke_detail})")
@@ -655,6 +676,10 @@ def doctor() -> int:
             failures.append(f"Torch tensor smoke failed: {smoke_detail}")
     else:
         print("Torch tensor smoke: SKIPPED (Torch import unavailable; see import diagnostics)")
+    recommendation = recommended_torch_channel(profile, runtime)
+    if "verified CPU fallback PASS" in smoke_detail:
+        recommendation = "cpu (accelerator tensor smoke failed; CPU fallback verified)"
+    print(f"Verified runtime recommendation: {recommendation}")
     if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
         print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
     if profile.gpu_detected and not (
