@@ -35,6 +35,7 @@ _RUNTIME_REQUIREMENTS = {
     "httpx",
     "cryptography",
     "pyopenssl",
+    "psutil",
 }
 
 _VERIFICATION_REQUIREMENTS = {"pytest", "pytest-cov", "ruff"}
