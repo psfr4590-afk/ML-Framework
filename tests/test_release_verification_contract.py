@@ -249,3 +249,95 @@ def test_llama_cpp_tokenizer_overlay_rejects_code_outside_target_function(tmp_pa
     with pytest.raises(RuntimeError, match="outside target function"):
         patch_tokenizer_registry(llama_cpp)
     assert base.read_text(encoding="utf-8") == source
+
+
+def test_llama_cpp_tokenizer_overlay_overrides_later_hash_assignment(tmp_path: Path):
+    llama_cpp = tmp_path / "llama.cpp"
+    conversion = llama_cpp / "conversion"
+    conversion.mkdir(parents=True)
+    base = conversion / "base.py"
+    base.write_text(
+        "# Marker: Start get_vocab_base_pre\n"
+        "def get_vocab_base_pre(self, tokenizer):\n"
+        "    chkhsh = \"collision\"\n"
+        "    res = None\n"
+        "    if chkhsh == \"collision\":\n"
+        "        res = \"conflicting-registry-value\"\n"
+        "    if res is None:\n"
+        "        raise NotImplementedError(\"unknown\")\n"
+        "    return res\n",
+        encoding="utf-8",
+    )
+
+    assert patch_tokenizer_registry(llama_cpp) is True
+    patched = base.read_text(encoding="utf-8")
+
+    class ByteLevel:
+        pass
+
+    class Backend:
+        pre_tokenizer = ByteLevel()
+
+    class Tokenizer:
+        backend_tokenizer = Backend()
+
+    namespace = {}
+    exec(compile(patched, str(base), "exec"), namespace)
+    result = namespace["get_vocab_base_pre"](object(), Tokenizer())
+    assert result == "gpt-2"
+
+    assert patch_tokenizer_registry(llama_cpp) is False
+    assert base.read_text(encoding="utf-8") == patched
+
+
+def test_llama_cpp_tokenizer_overlay_rejects_malformed_marked_block(tmp_path: Path):
+    llama_cpp = tmp_path / "llama.cpp"
+    conversion = llama_cpp / "conversion"
+    conversion.mkdir(parents=True)
+    base = conversion / "base.py"
+    source = (
+        "# Marker: Start get_vocab_base_pre\n"
+        "def get_vocab_base_pre(self, tokenizer):\n"
+        "    res = None\n"
+        "    # Model Lab ByteLevel pre-tokenizer override (authoritative)\n"
+        "    backend_tokenizer = getattr(tokenizer, \"backend_tokenizer\", None)\n"
+        "    pre_tokenizer = getattr(backend_tokenizer, \"pre_tokenizer\", None)\n"
+        "    if pre_tokenizer is not None and pre_tokenizer.__class__.__name__ == \"ByteLevel\":\n"
+        "        # Model Lab uses tokenizers.ByteLevel(add_prefix_space=False).\n"
+        "        # Map the standard ByteLevel behavior to llama.cpp's GPT-2\n"
+        "        # pre-tokenizer implementation without relying on a vocab hash.\n"
+        "        unexpected = True\n"
+        "        res = \"gpt-2\"\n"
+        "    if res is None:\n"
+        "        raise NotImplementedError(\"unknown\")\n"
+        "    return res\n"
+    )
+    base.write_text(source, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Malformed tokenizer overlay"):
+        patch_tokenizer_registry(llama_cpp)
+    assert base.read_text(encoding="utf-8") == source
+
+
+def test_llama_cpp_tokenizer_overlay_rejects_duplicate_overlays(tmp_path: Path):
+    llama_cpp = tmp_path / "llama.cpp"
+    conversion = llama_cpp / "conversion"
+    conversion.mkdir(parents=True)
+    base = conversion / "base.py"
+    source = (
+        "# Marker: Start get_vocab_base_pre\n"
+        "def get_vocab_base_pre(self, tokenizer):\n"
+        "    res = None\n"
+        "    # Model Lab ByteLevel pre-tokenizer override (authoritative)\n"
+        "    # Model Lab uses tokenizers.ByteLevel(add_prefix_space=False).\n"
+        "    # Model Lab ByteLevel pre-tokenizer override (authoritative)\n"
+        "    # Model Lab uses tokenizers.ByteLevel(add_prefix_space=False).\n"
+        "    if res is None:\n"
+        "        raise NotImplementedError(\"unknown\")\n"
+        "    return res\n"
+    )
+    base.write_text(source, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Multiple tokenizer overlays found"):
+        patch_tokenizer_registry(llama_cpp)
+    assert base.read_text(encoding="utf-8") == source
