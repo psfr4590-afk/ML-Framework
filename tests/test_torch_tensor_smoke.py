@@ -20,8 +20,12 @@ class FakeTensor:
 
 
 def _fake_torch(device_calls, result_factory=FakeTensor):
+    backend = SimpleNamespace(synchronize=lambda: None)
     return SimpleNamespace(
         float32="float32",
+        cuda=backend,
+        xpu=backend,
+        mps=backend,
         device=lambda name: device_calls.append(name) or name,
         tensor=lambda values, dtype, device: result_factory(values),
     )
