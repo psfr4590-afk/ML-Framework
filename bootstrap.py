@@ -95,7 +95,8 @@ class HardwareProfile:
 
     @property
     def nvidia_gpu_detected(self) -> bool:
-        return (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
+        # nvidia-smi is an NVIDIA-specific probe; adapter marketing names may omit the vendor.
+        return self.nvidia_smi_available or (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
 
     @property
     def gpu_detected(self) -> bool:
