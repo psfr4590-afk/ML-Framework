@@ -390,22 +390,20 @@ def test_nvidia_smi_executable_without_successful_query_does_not_prove_nvidia_gp
 
 
 def test_nvidia_smi_query_success_identifies_tesla_t4_without_vendor_token(monkeypatch):
+    monkeypatch.setattr(bootstrap, "_windows_cpu", lambda: ("test CPU", 4, 8))
+    monkeypatch.setattr(bootstrap, "_ram_gib", lambda: 8.0)
     monkeypatch.setattr(bootstrap.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
     monkeypatch.setattr(bootstrap, "_run_command", lambda *args, **kwargs: "Tesla T4, 16384")
 
-    name, vram, executable_available, query_succeeded = bootstrap._nvidia_gpu()
-    profile = bootstrap.HardwareProfile(
-        gpu_name=name,
-        gpu_vram_gib=vram,
-        nvidia_smi_available=executable_available,
-        nvidia_smi_query_succeeded=query_succeeded,
-    )
+    profile = bootstrap.detect_hardware()
 
     assert profile.gpu_name == "Tesla T4"
     assert profile.gpu_vram_gib == 16.0
     assert profile.nvidia_smi_available
     assert profile.nvidia_smi_query_succeeded
     assert profile.nvidia_gpu_detected
+    assert profile.gpu_vendor == "nvidia"
+    assert profile.as_dict()["gpu_vendor"] == "nvidia"
 
 
 @pytest.mark.parametrize(
