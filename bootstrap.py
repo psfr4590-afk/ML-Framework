@@ -548,14 +548,15 @@ def _torch_tensor_smoke(runtime: dict[str, Any]) -> tuple[bool, str]:
     except Exception as exc:
         return False, f"Torch import failed: {type(exc).__name__}: {exc}"
 
-    if runtime.get("cuda_available"):
-        device_name = "cuda"  # PyTorch uses this device API for ROCm too.
-    elif runtime.get("xpu_available"):
-        device_name = "xpu"
-    elif runtime.get("mps_available"):
-        device_name = "mps"
-    else:
-        device_name = "cpu"
+    accelerator_candidates = [
+        name
+        for name, available in (
+            ("cuda", runtime.get("cuda_available")),
+            ("xpu", runtime.get("xpu_available")),
+            ("mps", runtime.get("mps_available")),
+        )
+        if available
+    ]
 
     def run_smoke(name: str) -> tuple[bool, str]:
         try:
@@ -575,14 +576,25 @@ def _torch_tensor_smoke(runtime: dict[str, Any]) -> tuple[bool, str]:
         except Exception as exc:
             return False, f"{name} tensor operation failed: {type(exc).__name__}: {exc}"
 
-    passed, detail = run_smoke(device_name)
-    if passed or device_name == "cpu":
-        return passed, detail
+    failed_probes: list[str] = []
+    for device_name in accelerator_candidates:
+        passed, detail = run_smoke(device_name)
+        if passed:
+            if failed_probes:
+                return True, (
+                    f"{'; '.join(failed_probes)}; verified {device_name} fallback PASS "
+                    f"({detail})"
+                )
+            return True, detail
+        failed_probes.append(detail)
+
+    if not failed_probes:
+        return run_smoke("cpu")
 
     cpu_passed, cpu_detail = run_smoke("cpu")
     if cpu_passed:
-        return True, f"{detail}; verified CPU fallback PASS ({cpu_detail})"
-    return False, f"{detail}; CPU fallback also failed ({cpu_detail})"
+        return True, f"{'; '.join(failed_probes)}; verified CPU fallback PASS ({cpu_detail})"
+    return False, f"{'; '.join(failed_probes)}; CPU fallback also failed ({cpu_detail})"
 
 
 def doctor() -> int:
@@ -688,8 +700,13 @@ def doctor() -> int:
     else:
         print("Torch tensor smoke: SKIPPED (Torch import unavailable; see import diagnostics)")
     recommendation = recommended_torch_channel(profile, runtime)
-    if "verified CPU fallback PASS" in smoke_detail:
-        recommendation = "cpu (accelerator tensor smoke failed; CPU fallback verified)"
+    fallback_match = re.search(r"verified (cuda|xpu|mps|CPU) fallback PASS", smoke_detail)
+    if fallback_match:
+        fallback_device = fallback_match.group(1).lower()
+        if fallback_device == "cpu":
+            recommendation = "cpu (accelerator tensor smoke failed; CPU fallback verified)"
+        else:
+            recommendation = f"{fallback_device} (fallback backend tensor smoke verified)"
     print(f"Verified runtime recommendation: {recommendation}")
     if profile.nvidia_gpu_detected and runtime.get("importable") and not runtime["cuda_available"]:
         print("WARNING: NVIDIA GPU detected, but this Torch installation cannot use CUDA.")
