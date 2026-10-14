@@ -10,6 +10,16 @@ def test_hardware_profile_recognizes_nvidia_from_adapter_name():
     assert profile.gpu_detected
 
 
+def test_hardware_profile_recognizes_nvidia_from_nvidia_smi_when_name_omits_vendor():
+    profile = bootstrap.HardwareProfile(
+        gpu_name="Tesla T4",
+        nvidia_smi_available=True,
+    )
+
+    assert profile.nvidia_gpu_detected
+    assert profile.gpu_detected
+
+
 def test_hardware_profile_recognizes_amd_and_intel_adapters():
     amd = bootstrap.HardwareProfile(
         gpu_name="AMD Radeon Graphics",
