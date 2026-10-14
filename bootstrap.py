@@ -98,7 +98,11 @@ class HardwareProfile:
     def nvidia_gpu_detected(self) -> bool:
         # Executable presence is not proof of a GPU. A successful query is, even when
         # NVIDIA's marketing name (for example, Tesla T4) omits the vendor token.
-        return self.nvidia_smi_query_succeeded or (self.gpu_vendor or _gpu_vendor(self.gpu_name)) == "nvidia"
+        return (
+            self.nvidia_smi_query_succeeded
+            or self.gpu_vendor == "nvidia"
+            or _gpu_vendor(self.gpu_name) == "nvidia"
+        )
 
     @property
     def gpu_detected(self) -> bool:
