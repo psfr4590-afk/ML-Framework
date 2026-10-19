@@ -1,9 +1,4 @@
-"""cleaner.py — Pretraining data cleaner stage.
-
-Pipeline: HTML strip → unicode normalize → length gate → exact-hash dedup
-          → refusal/restriction filter → pass/drop/flag/redact
-"""
-
+"""Pretraining data cleaning with deterministic default configuration."""
 from __future__ import annotations
 
 import hashlib
@@ -102,18 +97,22 @@ class CleanResult:
 
 
 class Cleaner:
-    def __init__(self, config_path: str | Path):
+    def __init__(self, config_path: str | Path, *, auto_reload: bool = False):
         self.config_path = Path(config_path)
+        self.auto_reload = auto_reload
         self.cfg = load_config(self.config_path)
         self._seen: set[str] = set()
         self._mtime = self.config_path.stat().st_mtime
         self.stats = {"total": 0, "kept": 0, "dropped_refusal": 0, "dropped_short": 0, "dropped_long": 0, "dropped_dedup": 0, "flagged": 0, "redacted": 0}
 
     def reload(self):
+        """Explicitly replace the loaded policy; normal pipeline runs do not call this."""
         self.cfg = load_config(self.config_path)
         self._mtime = self.config_path.stat().st_mtime
 
     def _maybe_reload(self):
+        if not self.auto_reload:
+            return
         try:
             if self.config_path.stat().st_mtime != self._mtime:
                 self.reload()
@@ -167,11 +166,24 @@ class Cleaner:
         return weighted / tokens, hits
 
     def _redact(self, text: str, hits: list[dict]) -> str:
-        chars = list(text)
-        for h in sorted(hits, key=lambda x: x["span"][0], reverse=True):
-            s, e = h["span"]
-            chars[s:e] = list("[REMOVED]")
-        return "".join(chars)
+        """Replace the union of matched spans without shifting original offsets."""
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted(hit["span"] for hit in hits):
+            if not 0 <= start <= end <= len(text):
+                raise ValueError("Redaction span is outside the document")
+            if start == end:
+                continue
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        chunks = []
+        cursor = 0
+        for start, end in merged:
+            chunks.extend((text[cursor:start], "[REMOVED]"))
+            cursor = end
+        chunks.append(text[cursor:])
+        return "".join(chunks)
 
     def clean(self, text: str, doc_id: str = "") -> CleanResult:
         self._maybe_reload(); self.stats["total"] += 1; cfg = self.cfg
