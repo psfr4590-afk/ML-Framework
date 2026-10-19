@@ -38,6 +38,8 @@ class Document:
     meta: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.clean_action == "flagged":
+            self.flagged = True
         if not self.word_count:
             self.word_count = len(self.text.split())
         if not self.char_count:
@@ -46,6 +48,9 @@ class Document:
     def to_jsonl(self) -> dict:
         d = self.__dict__.copy()
         d.pop("embedding", None)
+        # Cleaning assigns clean_action after construction; preserve it on disk.
+        if self.clean_action == "flagged":
+            d["flagged"] = True
         return d
 
     @classmethod
